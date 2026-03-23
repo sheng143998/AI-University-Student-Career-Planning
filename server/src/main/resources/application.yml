@@ -34,8 +34,8 @@ logging:
 
 fuchuang:
   jwt:
-    # jwt 签名密钥
-    secret: itsheng
+    # jwt 签名密钥（至少32字符，满足HS256的256bits要求）
+    secret: itsheng2024fuchuangaiuniversitysecretkey
     # jwt 过期时间
     ttl: 72000000000000000
     # 令牌名称
