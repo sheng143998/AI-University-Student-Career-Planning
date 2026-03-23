@@ -53,6 +53,7 @@ public class UserController {
                 .username(user.getUsername())
                 .sex(user.getSex())
                 .userimage(user.getUserimage())
+                .createtime(user.getCreatetime())
                 .token(token)
                 .build();
         return Result.success(userLoginVO);
