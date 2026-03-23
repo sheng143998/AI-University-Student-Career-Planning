@@ -1,3 +1,5 @@
+server:
+  port: 8080
 Spring:
     application:
       name: fuchuang
@@ -8,6 +10,20 @@ Spring:
         chat:
           options:
             model: qwen-max-latest
+    datasource:
+      druid:
+        driver-class-name: ${fuchuang.datasource.driver-class-name}
+        url: jdbc:mysql://${fuchuang.datasource.host}:${fuchuang.datasource.port}/${fuchuang.datasource.database}?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf-8&zeroDateTimeBehavior=convertToNull&useSSL=false&allowPublicKeyRetrieval=true
+        username: ${fuchuang.datasource.username}
+        password: ${fuchuang.datasource.password}
+mybatis:
+  #mapper配置文件
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.itsheng.pojo.entity
+  configuration:
+    #开启驼峰命名
+    map-underscore-to-camel-case: true
+
 logging:
   level:
     org.springframework.ai.chat.client.advisor: debug
