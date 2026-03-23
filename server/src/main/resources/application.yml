@@ -40,3 +40,8 @@ fuchuang:
     ttl: 72000000000000000
     # 令牌名称
     tokenName: token
+  alioss:
+    endpoint: ${sky.alioss.access-key-secret}
+    access-key-id: ${sky.alioss.access-key-id}
+    access-key-secret: ${sky.alioss.access-key-secret}
+    bucket-name: ${sky.alioss.bucket-name}

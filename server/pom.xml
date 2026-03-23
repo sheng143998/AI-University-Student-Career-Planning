@@ -16,6 +16,7 @@
     <properties>
         <java.version>17</java.version>
         <mybatis.spring>4.0.1</mybatis.spring>
+        <aliyun.oss.version>3.17.4</aliyun.oss.version>
     </properties>
     <dependencies>
 
@@ -64,6 +65,11 @@
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.aliyun.oss</groupId>
+            <artifactId>aliyun-sdk-oss</artifactId>
+            <version>${aliyun.oss.version}</version>
         </dependency>
         <dependency>
             <groupId>com.itsheng</groupId>
