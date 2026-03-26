@@ -45,8 +45,8 @@ public class CommonConfig {
                 .distanceType(COSINE_DISTANCE)
                 .indexType(HNSW)
                 .initializeSchema(false)
-                .schemaName("heima_springai_study")
-                .vectorTableName("vector_store")
+                .schemaName("ai_career_plan")
+                .vectorTableName("user_vector_store")
                 .build();
     }
 }

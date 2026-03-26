@@ -7,3 +7,6 @@ fuchuang:
     username: postgres
     password: 123456
     schema: ai_career_plan
+  alioss:
+    endpoint: oss-cn-chengdu.aliyuncs.com
+    bucket-name: itxiang-sky-out

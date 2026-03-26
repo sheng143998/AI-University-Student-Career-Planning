@@ -6,6 +6,10 @@ spring:
     active: dev
   application:
     name: fuchuang
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
   datasource:
     driver-class-name: ${fuchuang.datasource.driver-class-name}
     url: jdbc:postgresql://${fuchuang.datasource.host}:${fuchuang.datasource.port}/${fuchuang.datasource.database}?currentSchema=${fuchuang.datasource.schema}
@@ -52,7 +56,7 @@ fuchuang:
     # 令牌名称
     tokenName: token
   alioss:
-    endpoint: ${sky.alioss.access-key-secret}
-    access-key-id: ${sky.alioss.access-key-id}
-    access-key-secret: ${sky.alioss.access-key-secret}
-    bucket-name: ${sky.alioss.bucket-name}
+    endpoint: ${fuchuang.alioss.access-key-secret}
+    access-key-id: ${fuchuang.alioss.access-key-id}
+    access-key-secret: ${fuchuang.alioss.access-key-secret}
+    bucket-name: ${fuchuang.alioss.bucket-name}

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.itsheng.service.mapper.UserVectorStoreMapper">
+
+    <!-- 结果映射 -->
+    <resultMap id="UserVectorStoreResult" type="com.itsheng.pojo.entity.UserVectorStore">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="content" property="resumeContent"/>
+        <result column="resume_file_path" property="resumeFilePath"/>
+        <result column="vector_type" property="vectorType"/>
+        <result column="embedding" property="embeddingVector"/>
+        <result column="metadata" property="metadata"/>
+        <result column="create_time" property="createTime" javaType="java.time.LocalDateTime"/>
+        <result column="update_time" property="updateTime" javaType="java.time.LocalDateTime"/>
+    </resultMap>
+
+
+    <!-- 动态更新 user_vector_store 表记录（只更新非 null 字段） -->
+    <update id="update" parameterType="com.itsheng.pojo.entity.UserVectorStore">
+        UPDATE ai_career_plan.user_vector_store
+        <set>
+            <if test="userId != null">user_id = #{userId},</if>
+            <if test="resumeContent != null">content = #{resumeContent},</if>
+            <if test="resumeFilePath != null">resume_file_path = #{resumeFilePath},</if>
+            <if test="vectorType != null">vector_type = #{vectorType},</if>
+            <if test="embeddingVector != null">embedding = #{embeddingVector},</if>
+            <if test="metadata != null">metadata = #{metadata},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+</mapper>
