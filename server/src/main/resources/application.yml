@@ -18,6 +18,17 @@ spring:
       chat:
         options:
           model: qwen-max-latest
+#     嵌入模型配置
+      embedding:
+        options:
+          model: text-embedding-v4
+          dimensions: 1024
+#   pgvector配置
+    vectorstore:
+      pgvector:
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE
+        dimensions: 1024
 
 mybatis:
   # mapper 配置文件
