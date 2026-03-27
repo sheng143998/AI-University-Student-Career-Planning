@@ -1,4 +1,4 @@
-# 职引AI - Resume 模块接口文档
+# 职引 AI - Resume 模块接口文档
 
 ---
 
@@ -47,7 +47,7 @@
 | original_file_name | VARCHAR(500) | 原始文件名 |
 | parsed_data | JSONB | 解析后的结构化数据 |
 | scores | JSONB | 各维度评分 |
-| highlights | TEXT[] | 亮点列表 |
+| highlights | JSONB | 亮点列表（JSON 数组） |
 | suggestions | JSONB | 优化建议 |
 | create_time | TIMESTAMP | 创建时间 |
 | update_time | TIMESTAMP | 更新时间 |
@@ -62,7 +62,7 @@
   "experience_years": 3,
   "education": [
     {
-      "school": "XX大学",
+      "school": "XX 大学",
       "major": "计算机科学",
       "degree": "学士",
       "period": "2018-2022"
@@ -70,7 +70,7 @@
   ],
   "experience": [
     {
-      "company": "YY科技",
+      "company": "YY 科技",
       "position": "前端开发工程师",
       "period": "2022-2026",
       "description": "负责组件库维护..."
@@ -157,8 +157,6 @@ file: [二进制文件内容]
 | &#124;- id | string | 非必须 | 向量存储记录 ID（UUID），对应 user_vector_store.id |
 | &#124;- user_id | number | 非必须 | 用户 ID，对应 user_vector_store.user_id |
 | &#124;- resume_file_path | string | 非必须 | OSS 文件访问 URL，对应 user_vector_store.resume_file_path |
-| &#124;- vector_type | string | 非必须 | 向量类型，默认 'resume' |
-| &#124;- status | string | 非必须 | 处理状态：PROCESSING / COMPLETED / FAILED |
 | &#124;- created_at | string | 非必须 | 创建时间 |
 
 响应数据样例：
@@ -170,12 +168,26 @@ file: [二进制文件内容]
     "id": "37a77bb4-08e0-47c2-b504-5137b1e4ebc9",
     "user_id": 1001,
     "resume_file_path": "https://itxiang-sky-out.oss-cn-chengdu.aliyuncs.com/8c0ec69d-1e43-4541-bbb4-eb7f0624c95c.pdf",
-    "vector_type": "resume",
-    "status": "PROCESSING",
     "created_at": "2026-03-26T09:10:00+08:00"
   }
 }
 ```
+
+---
+
+### 5.1.4 前端处理建议
+
+**重要：上传成功后的用户提示**
+
+前端在调用上传接口成功后，**必须**在界面上展示以下提示信息：
+
+> **请稍等，简历分析过程大约会耗时一分钟**
+
+同时，前端应：
+1. 显示 loading 状态或进度提示
+2. 使用返回的 `id` 字段，每隔 2s 轮询一次 `GET /api/resume/analysis/{id}` 接口
+3. 最多轮询 60s（30 次），如果超时后仍未返回完整数据，提示用户"分析超时，请稍后重试"
+4. 当轮询获取到包含 `parsed_data` 的完整响应时，停止轮询并展示分析结果
 
 ---
 
@@ -187,7 +199,7 @@ file: [二进制文件内容]
 
 请求方式：GET
 
-接口描述：该接口用于根据向量存储记录 ID 查询简历分析结果。解析为异步过程，前端可每隔 2s 轮询一次，最多等待 60s；当 status 为 COMPLETED 时停止轮询并展示结果，为 FAILED 时提示用户重新提交。
+接口描述：该接口用于根据向量存储记录 ID 查询简历分析结果。解析为异步过程，前端可每隔 2s 轮询一次，最多等待 60s；当查询到完整数据时展示结果。
 
 ---
 
@@ -240,11 +252,10 @@ file: [二进制文件内容]
 | &#124;- suggestions | object[] | 非必须 | 优化建议，对应 resume_analysis_result.suggestions |
 | &#124;- &#124;- type | string | 非必须 | 建议类型：CONTENT / SKILL / LAYOUT |
 | &#124;- &#124;- content | string | 非必须 | 建议内容 |
-| &#124;- status | string | 非必须 | 处理状态：PROCESSING / COMPLETED / FAILED |
 | &#124;- created_at | string | 非必须 | 创建时间 |
 | &#124;- updated_at | string | 非必须 | 更新时间 |
 
-响应数据样例（处理中）：
+响应数据样例（解析中，暂无分析结果）：
 ```json
 {
   "code": 1,
@@ -253,14 +264,13 @@ file: [二进制文件内容]
     "vector_store_id": "37a77bb4-08e0-47c2-b504-5137b1e4ebc9",
     "user_id": 1001,
     "resume_file_path": "https://itxiang-sky-out.oss-cn-chengdu.aliyuncs.com/8c0ec69d-1e43-4541-bbb4-eb7f0624c95c.pdf",
-    "status": "PROCESSING",
     "created_at": "2026-03-26T09:10:00+08:00",
     "updated_at": "2026-03-26T09:10:00+08:00"
   }
 }
 ```
 
-响应数据样例（处理完成）：
+响应数据样例（解析完成）：
 ```json
 {
   "code": 1,
@@ -280,7 +290,7 @@ file: [二进制文件内容]
       "experience_years": 3,
       "education": [
         {
-          "school": "XX大学",
+          "school": "XX 大学",
           "major": "计算机科学",
           "degree": "学士",
           "period": "2018-2022"
@@ -288,7 +298,7 @@ file: [二进制文件内容]
       ],
       "experience": [
         {
-          "company": "YY科技",
+          "company": "YY 科技",
           "position": "前端开发工程师",
           "period": "2022-2026",
           "description": "负责组件库维护..."
@@ -320,7 +330,6 @@ file: [二进制文件内容]
         "content": "建议调整简历排版，突出核心经历"
       }
     ],
-    "status": "COMPLETED",
     "created_at": "2026-03-26T09:10:00+08:00",
     "updated_at": "2026-03-26T09:12:00+08:00"
   }
@@ -375,7 +384,6 @@ file: [二进制文件内容]
 | &#124;- &#124;- file_type | string | 非必须 | 文件类型：pdf / docx / pptx / html / txt |
 | &#124;- &#124;- original_file_name | string | 非必须 | 原始文件名 |
 | &#124;- &#124;- resume_file_path | string | 非必须 | OSS 文件访问 URL |
-| &#124;- &#124;- status | string | 非必须 | 处理状态：PROCESSING / COMPLETED / FAILED |
 | &#124;- &#124;- created_at | string | 非必须 | 创建时间 |
 | &#124;- &#124;- updated_at | string | 非必须 | 更新时间 |
 | &#124;- next_cursor | string | 非必须 | 下一页游标，为 null 时表示已是最后一页 |
@@ -393,7 +401,6 @@ file: [二进制文件内容]
         "file_type": "pdf",
         "original_file_name": "张三_前端工程师简历.pdf",
         "resume_file_path": "https://itxiang-sky-out.oss-cn-chengdu.aliyuncs.com/8c0ec69d-1e43-4541-bbb4-eb7f0624c95c.pdf",
-        "status": "COMPLETED",
         "created_at": "2026-03-26T09:10:00+08:00",
         "updated_at": "2026-03-26T09:12:00+08:00"
       },
@@ -403,7 +410,6 @@ file: [二进制文件内容]
         "file_type": "docx",
         "original_file_name": "张三_简历_v2.docx",
         "resume_file_path": "https://itxiang-sky-out.oss-cn-chengdu.aliyuncs.com/9d1fd70e-2f54-5652-cccc-fc8g0735d96d.docx",
-        "status": "COMPLETED",
         "created_at": "2026-03-25T09:10:00+08:00",
         "updated_at": "2026-03-25T09:12:00+08:00"
       }
@@ -412,16 +418,6 @@ file: [二进制文件内容]
   }
 }
 ```
-
----
-
-## 处理状态说明
-
-| 状态 | 说明 | 前端建议处理 |
-|------|------|-------------|
-| PROCESSING | 后端正在解析简历并生成向量 | 每隔 2s 轮询一次，最多 60s |
-| COMPLETED | 解析完成，可获取完整分析结果 | 停止轮询，展示分析结果 |
-| FAILED | 解析失败（文件损坏/格式异常等） | 提示用户重新上传 |
 
 ---
 
@@ -438,7 +434,7 @@ POST /api/resume/upload
     ↓
 前端轮询 GET /api/resume/analysis/{id}
     ↓
-status = COMPLETED 时获取完整分析结果
+查询到 parsed_data 等完整数据时展示结果
 ```
 
 ---

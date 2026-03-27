@@ -21,7 +21,7 @@ spring:
       api-key: ${OPENAI_API_KEY}
       chat:
         options:
-          model: qwen-max-latest
+          model: qwen3-max
 #     嵌入模型配置
       embedding:
         options:

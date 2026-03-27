@@ -31,4 +31,12 @@
         </set>
         WHERE id = #{id}
     </update>
+
+    <!-- 根据 ID 查询向量存储记录 -->
+    <select id="selectByVectorStoreId" resultMap="UserVectorStoreResult">
+        SELECT *
+        FROM ai_career_plan.user_vector_store
+        WHERE id = #{id}
+    </select>
+
 </mapper>

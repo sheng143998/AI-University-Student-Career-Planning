@@ -17,4 +17,11 @@ public interface UserVectorStoreMapper {
      * @return 影响的行数
      */
     int update(UserVectorStore userVectorStore);
+
+    /**
+     * 根据 ID 查询向量存储记录
+     * @param id 向量存储 ID
+     * @return 向量存储对象
+     */
+    UserVectorStore selectByVectorStoreId(@Param("id") String id);
 }

@@ -1,11 +1,13 @@
 package com.itsheng.service.service.Impl;
 
 import com.itsheng.common.context.BaseContext;
+import com.itsheng.common.constant.ResumeConstant;
 import com.itsheng.common.result.Result;
 import com.itsheng.pojo.entity.UserVectorStore;
 import com.itsheng.pojo.vo.ResumeUploadVO;
 import com.itsheng.service.controller.CommonController;
 import com.itsheng.service.mapper.UserVectorStoreMapper;
+import com.itsheng.service.service.ResumeAnalysisService;
 import com.itsheng.service.service.ResumeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,13 +20,16 @@ import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.core.io.ByteArrayResource;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 @Service
@@ -36,11 +41,10 @@ public class ResumeServiceImpl implements ResumeService {
     private final OpenAiEmbeddingModel embeddingModel;
     private final CommonController commonController;
     private final UserVectorStoreMapper userVectorStoreMapper;
-
-    private static final Set<String> ALLOWED_FILE_TYPES = new HashSet<>(Arrays.asList("pdf", "docx", "pptx", "html", "txt"));
-    private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+    private final ResumeAnalysisService resumeAnalysisService;
 
     @Override
+    @Transactional
     public ResumeUploadVO upload(MultipartFile file) {
         try {
             // 获取当前用户 ID
@@ -89,13 +93,23 @@ public class ResumeServiceImpl implements ResumeService {
             // 生成主键 ID（UUID 字符串）
             String id = documents.get(0).getId();
 
+            // 异步调用 AI 进行简历解析
+            String finalOriginalFilename = originalFilename;
+            CompletableFuture.runAsync(() -> {
+                try {
+                    resumeAnalysisService.analyzeAndSave(id, userId, resumeContent, fileType, finalOriginalFilename, fileUrl);
+                } catch (Exception e) {
+                    log.error("异步简历 AI 解析失败，vectorStoreId: {}", id, e);
+                }
+            });
+
             // 返回 UploadVO
             String now = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
             return ResumeUploadVO.builder()
                     .id(id)
                     .userId(String.valueOf(userId))
                     .resumeFilePath(fileUrl)
-                    .parsingStatus("PROCESSING")
+                    .parsingStatus(ResumeConstant.PARSING_STATUS_PROCESSING)
                     .createdAt(now)
                     .build();
 
@@ -115,8 +129,8 @@ public class ResumeServiceImpl implements ResumeService {
         }
 
         // 检查文件大小（最大 10MB）
-        if (file.getSize() > MAX_FILE_SIZE) {
-            throw new IllegalArgumentException("文件大小超过限制，最大支持 10MB");
+        if (file.getSize() > ResumeConstant.MAX_FILE_SIZE) {
+            throw new IllegalArgumentException("文件大小超过限制，最大支持 " + (ResumeConstant.MAX_FILE_SIZE / 1024 / 1024) + "MB");
         }
 
         // 获取文件扩展名
@@ -126,7 +140,7 @@ public class ResumeServiceImpl implements ResumeService {
         }
 
         String fileType = getFileExtension(originalFilename);
-        if (!ALLOWED_FILE_TYPES.contains(fileType.toLowerCase())) {
+        if (!ResumeConstant.ALLOWED_FILE_TYPES.contains(fileType.toLowerCase())) {
             throw new IllegalArgumentException("UNSUPPORTED_FILE_TYPE: 不支持的文件类型：" + fileType + "，请上传 PDF、DOCX、PPTX、HTML 或 TXT 格式文件");
         }
     }
@@ -155,10 +169,10 @@ public class ResumeServiceImpl implements ResumeService {
 
         // 构建基础 metadata
         Map<String, Object> baseMetadata = new HashMap<>();
-        baseMetadata.put("user_id", userId);
-        baseMetadata.put("file_path", fileUrl);
-        baseMetadata.put("file_type", fileType);
-        baseMetadata.put("document_id", baseDocId);
+        baseMetadata.put(ResumeConstant.METADATA_KEY_USER_ID, userId);
+        baseMetadata.put(ResumeConstant.METADATA_KEY_FILE_PATH, fileUrl);
+        baseMetadata.put(ResumeConstant.METADATA_KEY_FILE_TYPE, fileType);
+        baseMetadata.put(ResumeConstant.METADATA_KEY_DOCUMENT_ID, baseDocId);
 
         if ("pdf".equals(fileType)) {
             // PDF 文件解析 - 每页作为一个 Document
@@ -166,7 +180,7 @@ public class ResumeServiceImpl implements ResumeService {
                     resource,
                     PdfDocumentReaderConfig.builder()
                             .withPageExtractedTextFormatter(ExtractedTextFormatter.defaults())
-                            .withPagesPerDocument(1) // 每 1 页 PDF 作为一个 Document
+                            .withPagesPerDocument(ResumeConstant.PDF_PAGES_PER_DOCUMENT)
                             .build()
             );
             List<Document> documents = reader.read();
@@ -175,7 +189,7 @@ public class ResumeServiceImpl implements ResumeService {
             // 为每个 document 添加基础 metadata
             for (int i = 0; i < documents.size(); i++) {
                 documents.get(i).getMetadata().putAll(baseMetadata);
-                documents.get(i).getMetadata().put("page_number", i + 1);
+                documents.get(i).getMetadata().put(ResumeConstant.METADATA_KEY_PAGE_NUMBER, i + 1);
             }
             return documents;
         } else {
@@ -186,10 +200,10 @@ public class ResumeServiceImpl implements ResumeService {
 
             // 对于非 PDF 格式，使用文本分割器进行分割以适配向量模型
             TokenTextSplitter splitter = TokenTextSplitter.builder()
-                    .withChunkSize(800)
-                    .withMinChunkSizeChars(350)
-                    .withMinChunkLengthToEmbed(10)
-                    .withMaxNumChunks(5000)
+                    .withChunkSize(ResumeConstant.TEXT_SPLITTER_CHUNK_SIZE)
+                    .withMinChunkSizeChars(ResumeConstant.TEXT_SPLITTER_MIN_CHUNK_SIZE_CHARS)
+                    .withMinChunkLengthToEmbed(ResumeConstant.TEXT_SPLITTER_MIN_CHUNK_LENGTH_TO_EMBED)
+                    .withMaxNumChunks(ResumeConstant.TEXT_SPLITTER_MAX_NUM_CHUNKS)
                     .build();
 
             List<Document> splitDocuments = splitter.apply(documents);
@@ -198,7 +212,7 @@ public class ResumeServiceImpl implements ResumeService {
             // 为每个 document 添加基础 metadata
             for (int i = 0; i < splitDocuments.size(); i++) {
                 splitDocuments.get(i).getMetadata().putAll(baseMetadata);
-                splitDocuments.get(i).getMetadata().put("chunk_number", i);
+                splitDocuments.get(i).getMetadata().put(ResumeConstant.METADATA_KEY_CHUNK_NUMBER, i);
             }
             return splitDocuments;
         }

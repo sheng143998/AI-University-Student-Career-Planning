@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.itsheng.service.mapper.ResumeAnalysisResultMapper">
+
+    <!-- 结果映射 -->
+    <resultMap id="ResumeAnalysisResultMap" type="com.itsheng.pojo.entity.ResumeAnalysisResult">
+        <id column="id" property="id"/>
+        <result column="vector_store_id" property="vectorStoreId"/>
+        <result column="user_id" property="userId"/>
+        <result column="file_type" property="fileType"/>
+        <result column="original_file_name" property="originalFileName"/>
+        <result column="parsed_data" property="parsedData"/>
+        <result column="scores" property="scores"/>
+        <result column="highlights" property="highlights"/>
+        <result column="suggestions" property="suggestions"/>
+        <result column="create_time" property="createTime" javaType="java.time.LocalDateTime"/>
+        <result column="update_time" property="updateTime" javaType="java.time.LocalDateTime"/>
+    </resultMap>
+
+    <!-- 插入简历分析结果 -->
+    <insert id="insert" parameterType="com.itsheng.pojo.entity.ResumeAnalysisResult" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ai_career_plan.resume_analysis_result (
+            vector_store_id,
+            user_id,
+            file_type,
+            original_file_name,
+            parsed_data,
+            scores,
+            highlights,
+            suggestions,
+            create_time,
+            update_time
+        ) VALUES (
+            #{vectorStoreId},
+            #{userId},
+            #{fileType},
+            #{originalFileName},
+            #{parsedData}::jsonb,
+            #{scores}::jsonb,
+            #{highlights}::jsonb,
+            #{suggestions}::jsonb,
+            #{createTime},
+            #{updateTime}
+        )
+    </insert>
+
+    <!-- 根据 vectorStoreId 查询分析结果 -->
+    <select id="selectByVectorStoreId" resultMap="ResumeAnalysisResultMap">
+        SELECT *
+        FROM ai_career_plan.resume_analysis_result
+        WHERE vector_store_id = #{vectorStoreId}
+    </select>
+
+    <!-- 根据 userId 查询分析结果列表（游标分页） -->
+    <select id="selectByUserId" resultMap="ResumeAnalysisResultMap">
+        SELECT *
+        FROM ai_career_plan.resume_analysis_result
+        WHERE user_id = #{userId}
+        <if test="cursor != null and cursor != 0">
+            AND id &lt; #{cursor}
+        </if>
+        ORDER BY id DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 动态更新分析结果 -->
+    <update id="update" parameterType="com.itsheng.pojo.entity.ResumeAnalysisResult">
+        UPDATE ai_career_plan.resume_analysis_result
+        <set>
+            <if test="parsedData != null">parsed_data = #{parsedData}::jsonb,</if>
+            <if test="scores != null">scores = #{scores}::jsonb,</if>
+            <if test="highlights != null">highlights = #{highlights}::jsonb,</if>
+            <if test="suggestions != null">suggestions = #{suggestions}::jsonb,</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+        </set>
+        WHERE vector_store_id = #{vectorStoreId}
+    </update>
+
+</mapper>
