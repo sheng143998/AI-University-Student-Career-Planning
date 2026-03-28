@@ -680,22 +680,41 @@ public class ResumeServiceImpl implements ResumeService {
         private volatile boolean running = true;
         private String vectorStoreId;
         private Thread trackThread;
+        private final Random random = new Random();
 
         public void startTracking(String vectorStoreId) {
             this.vectorStoreId = vectorStoreId;
             trackThread = new Thread(() -> {
                 int progress = 0;
+                int updateCount = 0;
                 while (running && progress < 100) {
                     try {
-                        Thread.sleep(5000); // 每 5 秒更新一次
-                        progress = Math.min(progress + 10, 90); // 进度每次增加 10%，最高到 90%
+                        // 随机休眠 2-4 秒
+                        Thread.sleep(2000 + random.nextInt(2000));
+                        updateCount++;
+                        // 动态增量：10 次轮询 (约 20s) 达到 65%，之后逐步增长到 90%+
+                        // 前 10 次：平均 6.5%/次，累计约 65%
+                        // 11-15 次：平均 5%/次，累计约 90%
+                        // 之后：缓慢增长
+                        int increment;
+                        if (updateCount <= 10) {
+                            // 前 10 次：8-11%，平均 9.5%，10 次累计约 95%，实际受随机值影响
+                            increment = 8 + random.nextInt(4);
+                        } else if (updateCount <= 15) {
+                            // 第 11-15 次：6-9%，平均 7.5%
+                            increment = 6 + random.nextInt(4);
+                        } else {
+                            // 之后：每次 4-6%，缓慢逼近上限
+                            increment = 4 + random.nextInt(3);
+                        }
+                        progress = Math.min(progress + increment, 95);
                         ResumeAnalysisResult progressRecord = ResumeAnalysisResult.builder()
                                 .vectorStoreId(vectorStoreId)
                                 .status("processing")
                                 .progress(progress)
                                 .build();
                         resumeMapper.update(progressRecord);
-                        log.debug("更新分析进度：vectorStoreId={}, progress={}", vectorStoreId, progress);
+                        log.debug("更新分析进度：vectorStoreId={}, progress={}, updateCount={}", vectorStoreId, progress, updateCount);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         break;
