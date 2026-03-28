@@ -29,6 +29,18 @@ public class ResumeParsedData {
     private String targetRole;
 
     /**
+     * 期望工作地点
+     */
+    @JsonProperty("location")
+    private String location;
+
+    /**
+     * 当前职位/最近职位
+     */
+    @JsonProperty("current_role")
+    private String currentRole;
+
+    /**
      * 技能列表
      */
     @JsonProperty("skills")
@@ -39,6 +51,12 @@ public class ResumeParsedData {
      */
     @JsonProperty("experience_years")
     private Integer experienceYears;
+
+    /**
+     * 人岗匹配度（0-100）
+     */
+    @JsonProperty("match_score")
+    private Integer matchScore;
 
     /**
      * 教育经历

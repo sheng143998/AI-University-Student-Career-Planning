@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.itsheng.service.mapper.UserProfileMapper">
+
+    <!-- 结果映射 -->
+    <resultMap id="UserMap" type="com.itsheng.pojo.entity.User">
+        <id column="id" property="id"/>
+        <result column="username" property="username"/>
+        <result column="password" property="password"/>
+        <result column="sex" property="sex"/>
+        <result column="userimage" property="userimage"/>
+        <result column="createtime" property="createtime" javaType="java.time.LocalDateTime"/>
+    </resultMap>
+
+    <!-- 根据用户 ID 查询用户信息 -->
+    <select id="selectById" resultMap="UserMap">
+        SELECT id, user_name as username, user_password as password, sex, user_image as userimage, create_time as createtime
+        FROM ai_career_plan.users
+        WHERE id = #{userId}
+    </select>
+
+    <!-- 根据用户 ID 查询最新的简历分析结果中的 parsed_data -->
+    <select id="selectLatestParsedDataByUserId" resultType="java.lang.String">
+        SELECT parsed_data
+        FROM ai_career_plan.resume_analysis_result
+        WHERE user_id = #{userId}
+        ORDER BY update_time DESC
+        LIMIT 1
+    </select>
+
+    <!-- 根据用户 ID 查询最新的简历分析结果中的 scores -->
+    <select id="selectLatestScoresByUserId" resultType="java.lang.String">
+        SELECT scores
+        FROM ai_career_plan.resume_analysis_result
+        WHERE user_id = #{userId}
+        ORDER BY update_time DESC
+        LIMIT 1
+    </select>
+
+    <!-- 根据用户 ID 查询最新的简历分析记录 ID -->
+    <select id="selectLatestAnalysisIdByUserId" resultType="java.lang.Long">
+        SELECT id
+        FROM ai_career_plan.resume_analysis_result
+        WHERE user_id = #{userId}
+        ORDER BY update_time DESC
+        LIMIT 1
+    </select>
+
+    <!-- 更新用户基本信息 -->
+    <update id="updateUserBaseInfo">
+        UPDATE ai_career_plan.users
+        SET user_name = #{userName},
+            user_image = #{userImage}
+        WHERE id = #{userId}
+    </update>
+
+</mapper>
