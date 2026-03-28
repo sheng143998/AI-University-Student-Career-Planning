@@ -10,4 +10,8 @@ public class AccountNotFoundException extends BaseException {
         super(msg);
     }
 
+    public AccountNotFoundException(String msg, Throwable cause) {
+        super(msg, cause);
+    }
+
 }

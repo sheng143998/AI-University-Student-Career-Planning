@@ -10,4 +10,8 @@ public class PasswordErrorException extends BaseException {
         super(msg);
     }
 
+    public PasswordErrorException(String msg, Throwable cause) {
+        super(msg, cause);
+    }
+
 }

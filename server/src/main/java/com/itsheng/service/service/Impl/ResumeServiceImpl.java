@@ -5,6 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.itsheng.common.context.BaseContext;
 import com.itsheng.common.constant.ResumeConstant;
 import com.itsheng.common.constant.SystemConstants;
+import com.itsheng.common.exception.FileUploadException;
+import com.itsheng.common.exception.FileNotFoundException;
+import com.itsheng.common.exception.ResumeAnalysisException;
 import com.itsheng.common.result.Result;
 import com.itsheng.pojo.dto.ResumeParsedData;
 import com.itsheng.pojo.dto.ResumeScores;
@@ -98,7 +101,7 @@ public class ResumeServiceImpl implements ResumeService {
             // 调用 CommonController 上传文件到 OSS
             Result<String> uploadResult = commonController.upload(file);
             if (uploadResult == null || uploadResult.getData() == null) {
-                throw new RuntimeException("文件上传到 OSS 失败");
+                throw new FileUploadException("文件上传到 OSS 失败");
             }
             String fileUrl = uploadResult.getData();
             log.info("文件已上传到 OSS: {}", fileUrl);
@@ -152,7 +155,7 @@ public class ResumeServiceImpl implements ResumeService {
 
         } catch (Exception e) {
             log.error("简历上传解析失败：{}", e.getMessage(), e);
-            throw new RuntimeException("简历上传解析失败：" + e.getMessage(), e);
+            throw new FileUploadException("简历上传解析失败：" + e.getMessage(), e);
         }
     }
 
@@ -238,7 +241,7 @@ public class ResumeServiceImpl implements ResumeService {
             } catch (Exception ex) {
                 log.error("更新失败状态失败：{}", ex.getMessage());
             }
-            throw new RuntimeException("简历 AI 解析失败：" + e.getMessage(), e);
+            throw new ResumeAnalysisException("简历 AI 解析失败：" + e.getMessage(), e);
         }
     }
 
@@ -312,7 +315,7 @@ public class ResumeServiceImpl implements ResumeService {
             UserVectorStore store = userVectorStoreMapper.selectByVectorStoreId(vectorStoreId);
             if (store == null || store.getResumeFilePath() == null) {
                 log.warn("简历文件不存在或已删除，vectorStoreId: {}", vectorStoreId);
-                throw new RuntimeException("简历文件不存在或已删除");
+                throw new FileNotFoundException("简历文件不存在或已删除");
             }
             fileUrl = store.getResumeFilePath();
         } else {

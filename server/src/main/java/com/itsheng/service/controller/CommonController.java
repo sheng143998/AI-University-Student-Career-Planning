@@ -1,6 +1,7 @@
 package com.itsheng.service.controller;
 
 
+import com.itsheng.common.exception.FileUploadException;
 import com.itsheng.common.result.Result;
 import com.itsheng.common.utils.AliOssUtil;
 import io.swagger.v3.oas.annotations.Operation;
@@ -41,8 +42,8 @@ public class CommonController {
             return Result.success(filePath);
         } catch (IOException e) {
             log.error("文件上传失败{}",e);
+            throw new FileUploadException("文件上传失败：" + e.getMessage());
         }
-        return null;
     }
 
 
