@@ -5,16 +5,14 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
-
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class UserLoginVO {
-    private String token;
+public class UserVO {
+    private Long id;
     private String username;
-    private LocalDateTime createtime;
-    private Integer sex;
+    private String name;
     private String userImage;
+    private Integer sex;
 }

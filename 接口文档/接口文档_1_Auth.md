@@ -2,7 +2,7 @@
 
 ## 模块概述
 
-用户认证相关接口，包括登录、注册、退出登录，以及用户信息编辑（修改昵称、密码、上传头像）。
+用户认证相关接口，包括登录、注册、退出登录，以及用户信息编辑（修改昵称、密码、头像、性别）。
 
 ---
 
@@ -11,10 +11,11 @@
 | 接口编号 | 接口名 | 方法 | 路径 | 说明 | 鉴权 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | 1.1 | 用户登录 | POST | `/api/user/login` | 登录获取 Token | 不需要 |
-| 1.2 | 用户注册 | POST | `/api/user/register` | 用户注册 | 不需要 |
+| 1.2 | 用户注册 | POST | `/api/user/register` | 用户注册（支持上传头像） | 不需要 |
 | 1.3 | 退出登录 | POST | `/api/auth/logout` | 使 token 失效 | 需要 |
 | 1.4 | 获取用户信息 | GET | `/api/user/info` | 获取用户当前信息（用于编辑回显） | 需要 |
-| 1.5 | 编辑用户信息 | PUT | `/api/user/edit` | 统一编辑接口（昵称、密码、头像） | 需要 |
+| 1.5 | 编辑用户信息 | PUT | `/api/user/edit` | 统一编辑接口（昵称、密码、头像、性别） | 需要 |
+| 公共 | 文件上传 | POST | `/api/common/upload` | 上传头像/文件，返回访问 URL | 需要 |
 
 ---
 
@@ -67,6 +68,8 @@
 | &#124;- user | object | 非必须 | 用户基本信息 |
 | &#124;&#124;- id | number | 非必须 | 用户 ID |
 | &#124;&#124;- name | string | 非必须 | 用户名 |
+| &#124;&#124;- userImage | string | 非必须 | 头像 URL |
+| &#124;&#124;- sex | number | 非必须 | 性别（0：女，1：男） |
 
 响应数据样例：
 ```json
@@ -78,7 +81,9 @@
     "expires_in": 86400,
     "user": {
       "id": 1001,
-      "name": "张三"
+      "name": "张三",
+      "userImage": "https://example.com/avatars/1001/avatar.jpg",
+      "sex": 1
     }
   }
 }
@@ -103,7 +108,7 @@
 
 请求方式：`POST`
 
-接口描述：该接口用于新用户注册，创建用户账号。
+接口描述：该接口用于新用户注册，创建用户账号。支持在注册时直接上传头像（先调用 `/api/common/upload` 获取 URL，再将 URL 传入本接口）。
 
 ---
 
@@ -118,13 +123,27 @@
 | username | string | 必须 | 用户名（邮箱） |
 | password | string | 必须 | 登录密码 |
 | name | string | 非必须 | 昵称/姓名 |
+| sex | number | 非必须 | 性别（0：女，1：男） |
+| userImage | string | 非必须 | 头像 URL（先调用 /api/common/upload 获取） |
 
-请求参数样例：
+请求参数样例（基础注册）：
 ```json
 {
   "username": "user@example.com",
   "password": "your_password",
-  "name": "张三"
+  "name": "张三",
+  "sex": 1
+}
+```
+
+请求参数样例（带头像注册）：
+```json
+{
+  "username": "user@example.com",
+  "password": "your_password",
+  "name": "张三",
+  "sex": 1,
+  "userImage": "https://example.com/avatars/1001/avatar.jpg"
 }
 ```
 
@@ -141,7 +160,11 @@
 | code | number | 必须 | 响应码，1 代表成功，0 代表失败 |
 | msg | string | 非必须 | 提示信息 |
 | data | object | 非必须 | 返回的数据 |
-| &#124;- registered | boolean | 非必须 | 是否注册成功 |
+| &#124;- id | number | 非必须 | 用户 ID |
+| &#124;- username | string | 非必须 | 用户名 |
+| &#124;- name | string | 非必须 | 昵称 |
+| &#124;- userImage | string | 非必须 | 头像 URL |
+| &#124;- sex | number | 非必须 | 性别 |
 
 响应数据样例：
 ```json
@@ -149,7 +172,11 @@
   "code": 1,
   "msg": "success",
   "data": {
-    "registered": true
+    "id": 1001,
+    "username": "user@example.com",
+    "name": "张三",
+    "userImage": "https://example.com/avatars/1001/avatar.jpg",
+    "sex": 1
   }
 }
 ```
@@ -227,7 +254,7 @@
 
 请求方式：`GET`
 
-接口描述：该接口用于获取当前登录用户的详细信息，包括昵称、头像等。前端调用此接口后回显到编辑表单，用户在此基础上进行修改。
+接口描述：该接口用于获取当前登录用户的详细信息，包括昵称、头像、性别等。前端调用此接口后回显到编辑表单，用户在此基础上进行修改。
 
 ---
 
@@ -253,7 +280,8 @@
 | &#124;- id | number | 非必须 | 用户 ID |
 | &#124;- username | string | 非必须 | 用户名（邮箱） |
 | &#124;- name | string | 非必须 | 昵称/姓名 |
-| &#124;- avatar | string | 非必须 | 头像 URL |
+| &#124;- userImage | string | 非必须 | 头像 URL |
+| &#124;- sex | number | 非必须 | 性别（0：女，1：男） |
 
 响应数据样例：
 ```json
@@ -264,7 +292,8 @@
     "id": 1001,
     "username": "user@example.com",
     "name": "张三",
-    "avatar": "https://example.com/avatars/1001/avatar.jpg"
+    "userImage": "https://example.com/avatars/1001/avatar.jpg",
+    "sex": 1
   }
 }
 ```
@@ -287,13 +316,15 @@
 
 请求方式：`PUT`
 
-接口描述：该接口用于统一修改当前登录用户的信息，支持修改昵称、密码、头像。所有字段均为可选，仅传递需要修改的字段。
+接口描述：该接口用于统一修改当前登录用户的信息，支持修改昵称、密码、头像、性别。所有字段均为可选，仅传递需要修改的字段。
+
+**注意**：头像上传需先调用 `/api/common/upload` 接口上传文件，获取 URL 后再调用本接口。
 
 ---
 
 ### 1.5.2 请求参数
 
-参数格式：`application/json` 或 `multipart/form-data`
+参数格式：`application/json`
 
 参数说明：
 
@@ -302,16 +333,17 @@
 | name | string | 非必须 | 新的昵称/姓名 |
 | oldPassword | string | 非必须 | 旧密码（修改密码时必填） |
 | newPassword | string | 非必须 | 新密码（修改密码时必填） |
-| avatar | file | 非必须 | 头像图片文件（仅 multipart/form-data 支持） |
+| userImage | string | 非必须 | 头像 URL（先调用 /api/common/upload 获取） |
+| sex | number | 非必须 | 性别（0：女，1：男） |
 
-请求参数样例（JSON - 修改昵称）：
+请求参数样例（修改昵称）：
 ```json
 {
   "name": "李四"
 }
 ```
 
-请求参数样例（JSON - 修改密码）：
+请求参数样例（修改密码）：
 ```json
 {
   "oldPassword": "old_password",
@@ -319,16 +351,27 @@
 }
 ```
 
-请求参数样例（Multipart - 上传头像）：
+请求参数样例（修改头像）：
+```json
+{
+  "userImage": "https://example.com/avatars/1001/new-avatar.jpg"
+}
 ```
-Content-Type: multipart/form-data; boundary=----WebKitFormBoundary
 
-------WebKitFormBoundary
-Content-Disposition: form-data; name="avatar"; filename="avatar.jpg"
-Content-Type: image/jpeg
+请求参数样例（修改性别）：
+```json
+{
+  "sex": 0
+}
+```
 
-(binary data)
-------WebKitFormBoundary--
+请求参数样例（组合修改）：
+```json
+{
+  "name": "李四",
+  "userImage": "https://example.com/avatars/1001/new-avatar.jpg",
+  "sex": 0
+}
 ```
 
 ---
@@ -346,6 +389,11 @@ Content-Type: image/jpeg
 | data | object | 非必须 | 返回的数据 |
 | &#124;- updated | boolean | 非必须 | 是否修改成功 |
 | &#124;- user | object | 非必须 | 更新后的用户信息 |
+| &#124;&#124;- id | number | 非必须 | 用户 ID |
+| &#124;&#124;- username | string | 非必须 | 用户名 |
+| &#124;&#124;- name | string | 非必须 | 昵称 |
+| &#124;&#124;- userImage | string | 非必须 | 头像 URL |
+| &#124;&#124;- sex | number | 非必须 | 性别 |
 
 响应数据样例：
 ```json
@@ -358,7 +406,8 @@ Content-Type: image/jpeg
       "id": 1001,
       "username": "user@example.com",
       "name": "李四",
-      "avatar": "https://example.com/avatars/1001/avatar.jpg"
+      "userImage": "https://example.com/avatars/1001/new-avatar.jpg",
+      "sex": 0
     }
   }
 }
@@ -376,6 +425,77 @@ Content-Type: image/jpeg
 
 ---
 
+## 公共接口 - 文件上传
+
+### 基本信息
+
+请求路径：`/api/common/upload`
+
+请求方式：`POST`
+
+接口描述：该接口用于上传头像或其他文件，上传成功后返回文件访问 URL。
+
+---
+
+### 请求参数
+
+参数格式：`multipart/form-data`
+
+参数说明：
+
+| 参数名 | 类型 | 是否必须 | 备注 |
+| :--- | :--- | :--- | :--- |
+| file | file | 必须 | 文件对象 |
+
+---
+
+### 响应数据
+
+参数格式：`application/json`
+
+参数说明：
+
+| 参数名 | 类型 | 是否必须 | 备注 |
+| :--- | :--- | :--- | :--- |
+| code | number | 必须 | 响应码，1 代表成功，0 代表失败 |
+| msg | string | 非必须 | 提示信息 |
+| data | string | 非必须 | 文件访问 URL |
+
+响应数据样例：
+```json
+{
+  "code": 1,
+  "msg": "success",
+  "data": "https://example.com/avatars/1001/avatar.jpg"
+}
+```
+
+---
+
+## 前端注册流程说明
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        用户填写注册信息                          │
+│  用户名、密码、昵称、性别，可选上传头像                          │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  如果上传了头像：                                                │
+│  POST /api/common/upload                                        │
+│  上传头像文件，获取 URL                                          │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│  POST /api/user/register                                        │
+│  提交注册数据                                                    │
+│  { "username": "...", "password": "...", "name": "...",         │
+│    "sex": 1, "userImage": "https://..." }                       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## 前端查询 - 编辑流程说明
 
 ```
@@ -385,13 +505,14 @@ Content-Type: image/jpeg
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │  GET /api/user/info                                             │
-│  获取用户当前信息（昵称、头像等）                                 │
+│  获取用户当前信息（昵称、头像、性别等）                           │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
 │  前端回显到编辑表单                                              │
 │  - 昵称输入框：显示当前 name                                     │
-│  - 头像预览：显示当前 avatar                                     │
+│  - 头像预览：显示当前 userImage                                  │
+│  - 性别选择：显示当前 sex                                        │
 │  - 密码修改：空（需用户主动填写）                                 │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
@@ -400,12 +521,19 @@ Content-Type: image/jpeg
 └─────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────┐
+│  如果修改了头像：                                                │
+│  POST /api/common/upload                                        │
+│  上传头像文件，获取 URL                                          │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
 │  PUT /api/user/edit                                             │
 │  提交修改数据（仅传递需要修改的字段）                             │
 │                                                                 │
 │  - 仅修改昵称：{ "name": "新昵称" }                              │
 │  - 仅修改密码：{ "oldPassword": "xxx", "newPassword": "yyy" }   │
-│  - 仅上传头像：multipart/form-data with avatar file             │
+│  - 仅修改头像：{ "userImage": "https://..." }                   │
+│  - 仅修改性别：{ "sex": 0 }                                     │
 │  - 组合修改：支持上述任意组合                                    │
 └─────────────────────────────────────────────────────────────────┘
                               ↓
@@ -422,10 +550,11 @@ Content-Type: image/jpeg
 | 接口编号 | 接口名 | 方法 | 路径 | 说明 | 鉴权 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | 1.1 | 用户登录 | POST | `/api/user/login` | 登录获取 Token | 不需要 |
-| 1.2 | 用户注册 | POST | `/api/user/register` | 用户注册 | 不需要 |
+| 1.2 | 用户注册 | POST | `/api/user/register` | 用户注册（支持上传头像） | 不需要 |
 | 1.3 | 退出登录 | POST | `/api/auth/logout` | 使 token 失效 | 需要 |
 | 1.4 | 获取用户信息 | GET | `/api/user/info` | 获取用户当前信息（用于编辑回显） | 需要 |
-| 1.5 | 编辑用户信息 | PUT | `/api/user/edit` | 统一编辑接口（昵称、密码、头像） | 需要 |
+| 1.5 | 编辑用户信息 | PUT | `/api/user/edit` | 统一编辑接口（昵称、密码、头像、性别） | 需要 |
+| 公共 | 文件上传 | POST | `/api/common/upload` | 上传头像/文件，返回访问 URL | 需要 |
 
 ---
 
@@ -434,3 +563,5 @@ Content-Type: image/jpeg
 | 版本 | 日期 | 修订内容 |
 | :--- | :--- | :--- |
 | 1.0 | 2026-03-29 | 初始版本，规范格式，去掉验证码功能，添加统一编辑接口 |
+| 1.1 | 2026-03-29 | 将 avatar 字段统一改为 userImage，头像上传改为先调用 /api/common/upload |
+| 1.2 | 2026-03-29 | 添加性别修改功能，注册接口支持上传头像（userImage 字段） |

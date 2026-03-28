@@ -9,7 +9,7 @@
         <result column="username" property="username"/>
         <result column="password" property="password"/>
         <result column="sex" property="sex"/>
-        <result column="userimage" property="userimage"/>
+        <result column="userimage" property="userImage"/>
         <result column="createtime" property="createtime" javaType="java.time.LocalDateTime"/>
     </resultMap>
 

@@ -15,6 +15,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 用户档案 Service 实现类
@@ -47,7 +48,7 @@ public class UserProfileServiceImpl implements UserProfileService {
         UserProfileVO.UserProfileVOBuilder builder = UserProfileVO.builder()
                 .id(user.getId())
                 .name(user.getUsername())
-                .avatar(user.getUserimage());
+                .avatar(user.getUserImage());
 
         // 如果存在简历分析数据，从中提取字段
         if (parsedDataJson != null && !parsedDataJson.isEmpty() && !parsedDataJson.equals("{}")) {
@@ -105,7 +106,7 @@ public class UserProfileServiceImpl implements UserProfileService {
             ResumeParsedData parsedData = objectMapper.readValue(parsedDataJson, ResumeParsedData.class);
 
             // 将 parsed_data 中的 education 转换为 UserProfileDetailVO.EducationItem
-            var educationItems = parsedData.getEducation() != null ?
+            List<UserProfileDetailVO.EducationItem> educationItems = parsedData.getEducation() != null ?
                     parsedData.getEducation().stream()
                             .map(e -> UserProfileDetailVO.EducationItem.builder()
                                     .school(e.getSchool())
@@ -116,7 +117,7 @@ public class UserProfileServiceImpl implements UserProfileService {
                             .toList() : null;
 
             // 将 parsed_data 中的 experience 转换为 UserProfileDetailVO.ExperienceItem
-            var experienceItems = parsedData.getExperience() != null ?
+            List<UserProfileDetailVO.ExperienceItem> experienceItems = parsedData.getExperience() != null ?
                     parsedData.getExperience().stream()
                             .map(e -> UserProfileDetailVO.ExperienceItem.builder()
                                     .company(e.getCompany())

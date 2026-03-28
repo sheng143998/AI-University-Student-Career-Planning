@@ -2,7 +2,7 @@
   <div class="space-y-8">
     <header>
       <h1 class="text-4xl font-extrabold font-headline tracking-tight text-on-surface mb-2">简历上传与 AI 分析</h1>
-      <p class="text-on-surface-variant font-body">上传后将按任务状态轮询：pending / processing 继续；completed / failed / stopped 时结束并提示。</p>
+      <p class="text-on-surface-variant font-body">根据状态实时分析简历进度。</p>
     </header>
 
     <div

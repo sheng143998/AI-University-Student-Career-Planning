@@ -14,5 +14,12 @@ public class UserDTO {
     private String username;
     private String password;
     private Integer sex;
-    private String userimage;
+    private String userImage;
+
+    // 用于修改密码
+    private String oldPassword;
+    private String newPassword;
+
+    // 用于修改昵称
+    private String name;
 }

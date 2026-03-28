@@ -1,14 +1,24 @@
 <template>
   <div class="space-y-10">
     <!-- Header Section -->
-    <header class="flex flex-col md:flex-row md:items-end justify-between gap-6">
-      <div>
-        <h1 class="text-4xl font-extrabold headline-font tracking-tight text-on-surface mb-2">
-          欢迎回来，{{ profileOverview?.name || '同学' }}。
-        </h1>
-        <p class="text-on-surface-variant body-md max-w-xl leading-relaxed">
-          {{ headlineText }}
-        </p>
+    <header class="flex flex-col md:flex-row md:items-center justify-between gap-6">
+      <div class="flex items-center gap-6">
+        <!-- 用户头像展示 -->
+        <div class="flex-shrink-0">
+          <img 
+            :src="profileOverview?.avatar || '/default-avatar.png'" 
+            class="w-20 h-20 rounded-2xl object-cover border-4 border-surface-container-high shadow-md"
+            alt="User Avatar"
+          />
+        </div>
+        <div>
+          <h1 class="text-4xl font-extrabold headline-font tracking-tight text-on-surface mb-2">
+            欢迎回来，{{ profileOverview?.name || '同学' }}。
+          </h1>
+          <p class="text-on-surface-variant body-md max-w-xl leading-relaxed">
+            {{ headlineText }}
+          </p>
+        </div>
       </div>
       <div class="flex items-center gap-3">
         <button
@@ -38,10 +48,41 @@
       <div class="md:col-span-8 bg-surface-container-lowest rounded-xl p-8 shadow-[0_20px_40px_rgba(25,28,30,0.04)] relative overflow-hidden group">
         <div class="absolute top-0 right-0 w-64 h-64 bg-primary-fixed/20 rounded-full -mr-20 -mt-20 blur-3xl group-hover:bg-primary-fixed/30 transition-colors"></div>
         <div class="flex flex-col md:flex-row gap-10 items-center relative z-10">
-          <div class="flex-shrink-0 text-center">
-            <div class="w-32 h-32 rounded-full border-8 border-primary-fixed flex items-center justify-center bg-white shadow-inner">
-              <span class="text-4xl font-extrabold headline-font text-primary">{{ matchScoreText }}</span>
-              <span class="text-sm font-bold text-on-surface-variant self-end mb-4 ml-1">/100</span>
+          <div class="flex-shrink-0 text-center relative group/score">
+            <!-- 动态圆环 SVG -->
+            <div class="w-32 h-32 relative flex items-center justify-center">
+              <svg class="w-full h-full transform -rotate-90">
+                <!-- 背景圆环 -->
+                <circle
+                  cx="64"
+                  cy="64"
+                  r="56"
+                  stroke="currentColor"
+                  stroke-width="8"
+                  fill="transparent"
+                  class="text-surface-container-high"
+                />
+                <!-- 进度圆环 -->
+                <circle
+                  cx="64"
+                  cy="64"
+                  r="56"
+                  stroke="currentColor"
+                  stroke-width="8"
+                  fill="transparent"
+                  stroke-linecap="round"
+                  class="text-primary transition-all duration-1000 ease-out"
+                  :style="{
+                    strokeDasharray: '351.85',
+                    strokeDashoffset: 351.85 - (351.85 * (profileOverview?.match_score || 0)) / 100
+                  }"
+                />
+              </svg>
+              <!-- 中间文字 -->
+              <div class="absolute inset-0 flex items-center justify-center bg-white rounded-full m-2 shadow-inner">
+                <span class="text-4xl font-extrabold headline-font text-primary">{{ matchScoreText }}</span>
+                <span class="text-sm font-bold text-on-surface-variant self-end mb-4 ml-1">/100</span>
+              </div>
             </div>
             <p class="mt-4 text-xs font-bold uppercase tracking-widest text-primary">匹配得分</p>
           </div>
@@ -265,6 +306,43 @@
         </div>
 
         <div class="space-y-5">
+          <!-- 头像拖拽上传 -->
+          <div>
+            <label class="block text-sm font-semibold mb-2">个人头像</label>
+            <div 
+              class="relative group cursor-pointer border-2 border-dashed border-outline-variant rounded-2xl p-4 transition-all hover:border-primary hover:bg-primary/5"
+              @click="triggerFileUpload"
+              @dragover.prevent="isDragging = true"
+              @dragleave.prevent="isDragging = false"
+              @drop.prevent="handleDrop"
+              :class="{ 'border-primary bg-primary/10': isDragging }"
+            >
+              <div class="flex flex-col items-center gap-2">
+                <div class="relative">
+                  <img 
+                    :src="editAvatar || '/default-avatar.png'" 
+                    class="w-20 h-20 rounded-full object-cover border-2 border-surface-container-high shadow-sm"
+                    alt="Avatar Preview"
+                  />
+                  <div v-if="uploading" class="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center">
+                    <div class="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  </div>
+                </div>
+                <div class="text-center">
+                  <p class="text-sm font-medium text-on-surface">点击或拖拽图片上传</p>
+                  <p class="text-[10px] text-on-surface-variant">支持 JPG, PNG，最大 2MB</p>
+                </div>
+              </div>
+              <input 
+                type="file" 
+                ref="fileInput" 
+                class="hidden" 
+                accept="image/*" 
+                @change="handleFileChange"
+              />
+            </div>
+          </div>
+
           <div>
             <label class="block text-sm font-semibold mb-2">昵称</label>
             <input
@@ -274,14 +352,19 @@
               placeholder="请输入昵称"
             />
           </div>
+
           <div>
-            <label class="block text-sm font-semibold mb-2">头像 URL</label>
-            <input
-              v-model="editAvatar"
-              type="text"
-              class="w-full rounded-xl border border-surface-container-highest bg-surface px-4 py-3 outline-none focus:ring-2 focus:ring-primary"
-              placeholder="https://..."
-            />
+            <label class="block text-sm font-semibold mb-2">性别</label>
+            <div class="flex gap-6 p-1">
+              <label class="flex items-center gap-2 cursor-pointer group">
+                <input type="radio" v-model="editSex" :value="1" class="w-4 h-4 text-primary focus:ring-primary" />
+                <span class="text-sm font-medium group-hover:text-primary transition-colors">男</span>
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer group">
+                <input type="radio" v-model="editSex" :value="0" class="w-4 h-4 text-primary focus:ring-primary" />
+                <span class="text-sm font-medium group-hover:text-primary transition-colors">女</span>
+              </label>
+            </div>
           </div>
 
           <div v-if="saveError" class="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4">
@@ -311,6 +394,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { isApiSuccess } from '@/api/client'
 import * as profileApi from '@/api/userProfile'
+import { updateUserInfo, uploadFile, type UserEditBody } from '@/api/auth'
 
 const loadingOverview = ref(false)
 const loadingDetail = ref(false)
@@ -323,9 +407,13 @@ const profileDetail = ref<profileApi.UserProfileDetail | null>(null)
 const editOpen = ref(false)
 const editName = ref('')
 const editAvatar = ref('')
+const editSex = ref(1)
 const saving = ref(false)
+const uploading = ref(false)
+const isDragging = ref(false)
 const saveError = ref<string | null>(null)
 const saveOk = ref(false)
+const fileInput = ref<HTMLInputElement | null>(null)
 
 const matchScoreText = computed(() => {
   const s = profileOverview.value?.match_score
@@ -402,7 +490,52 @@ function openEdit() {
   saveOk.value = false
   editName.value = profileOverview.value?.name || ''
   editAvatar.value = profileOverview.value?.avatar || ''
+  // 假设 profileOverview 暂时没有直接透出 sex，但可以从后端 Auth 相关信息获取，或默认为 1
+  // 如果 profileOverview 已经包含 sex 字段，直接回显
+  editSex.value = (profileOverview.value as any)?.sex ?? 1
   editOpen.value = true
+}
+
+function triggerFileUpload() {
+  fileInput.value?.click()
+}
+
+async function processFile(file: File) {
+  if (!file.type.startsWith('image/')) {
+    saveError.value = '请上传图片文件'
+    return
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    saveError.value = '图片大小不能超过 2MB'
+    return
+  }
+
+  uploading.value = true
+  saveError.value = null
+  try {
+    const res = await uploadFile(file)
+    if (isApiSuccess(res.code) && res.data) {
+      editAvatar.value = res.data
+    } else {
+      saveError.value = res.msg || '上传失败'
+    }
+  } catch (error) {
+    saveError.value = '上传过程中出现错误'
+  } finally {
+    uploading.value = false
+  }
+}
+
+function handleFileChange(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (file) processFile(file)
+}
+
+function handleDrop(event: DragEvent) {
+  isDragging.value = false
+  const file = event.dataTransfer?.files[0]
+  if (file) processFile(file)
 }
 
 function closeEdit() {
@@ -410,26 +543,27 @@ function closeEdit() {
 }
 
 async function onSave() {
-  if (saving.value) return
+  if (saving.value || uploading.value) return
   saving.value = true
   saveError.value = null
   saveOk.value = false
   try {
-    const body: profileApi.UpdateUserProfileBody = {
-      ...(editName.value.trim() !== '' ? { name: editName.value.trim() } : {}),
-      ...(editAvatar.value.trim() !== '' ? { avatar: editAvatar.value.trim() } : {}),
+    const body: UserEditBody = {
+      name: editName.value.trim(),
+      userImage: editAvatar.value,
+      sex: editSex.value
     }
-    if (Object.keys(body).length === 0) {
-      saveError.value = '请至少修改一项再保存'
-      return
-    }
-    const r = await profileApi.updateUserProfile(body)
+    const r = await updateUserInfo(body)
     if (!isApiSuccess(r.code)) {
       saveError.value = r.msg || '保存失败'
       return
     }
     saveOk.value = true
     await loadOverview()
+    // 延迟关闭窗口
+    setTimeout(() => {
+      if (saveOk.value) closeEdit()
+    }, 1000)
   } catch (e) {
     saveError.value = e instanceof Error ? e.message : '保存失败'
   } finally {
