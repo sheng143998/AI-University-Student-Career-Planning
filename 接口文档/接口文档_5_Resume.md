@@ -421,6 +421,150 @@ file: [二进制文件内容]
 
 ---
 
+## 5.4 简历预览（新增）
+
+### 5.4.1 基本信息
+
+请求路径：/api/resume/analysis/{vector_store_id}/preview
+
+请求方式：GET
+
+接口描述：该接口用于在浏览器内嵌预览简历原件，由后端从 OSS 读取文件并返回适合浏览器内嵌展示的响应头。解决了 OSS 直链触发下载、无法内嵌预览的问题。
+
+---
+
+### 5.4.2 请求参数
+
+参数说明：
+
+| 参数名 | 类型 | 是否必须 | 备注 |
+| :--- | :--- | :--- | :--- |
+| vector_store_id | string | 必须 | 向量存储记录 ID（UUID）（Path 参数） |
+| disposition | string | 非必须 | 响应头设置：`inline`（默认，内联预览）/ `attachment`（强制下载） |
+
+请求参数样例：
+```
+GET /api/resume/analysis/37a77bb4-08e0-47c2-b504-5137b1e4ebc9/preview
+GET /api/resume/analysis/37a77bb4-08e0-47c2-b504-5137b1e4ebc9/preview?disposition=attachment
+```
+
+---
+
+### 5.4.3 响应数据
+
+响应头：
+
+| Header | 要求 |
+| :--- | :--- |
+| `Content-Type` | 与文件一致，例如 PDF：`application/pdf` |
+| `Content-Disposition` | `inline` 时：`inline; filename*=UTF-8''<编码后的文件名>` |
+| `Cache-Control` | 建议：`private, max-age=300`（5 分钟），避免公共缓存 |
+| `X-Content-Type-Options` | 建议：`nosniff` |
+
+响应体：文件二进制流
+
+---
+
+### 5.4.4 错误响应
+
+| HTTP 状态码 | 场景 | JSON 响应样例 |
+| :--- | :--- | :--- |
+| `401` | 未登录或 token 失效 | `{"code": 401, "msg": "未登录"}` |
+| `403` | 无权限访问该记录 | `{"code": 403, "msg": "无权访问该简历"}` |
+| `404` | 记录不存在或文件已删除 | `{"code": 404, "msg": "简历文件不存在或已过期"}` |
+| `415` | 不支持预览该文件类型 | `{"code": 415, "msg": "暂不支持预览该文件类型，请下载后查看"}` |
+
+---
+
+### 5.4.5 前端使用示例
+
+```html
+<!-- 在历史简历列表中，使用 iframe 内嵌预览 -->
+<iframe
+  src="/api/resume/analysis/37a77bb4-08e0-47c2-b504-5137b1e4ebc9/preview"
+  width="100%"
+  height="600px"
+  style="border: none;">
+</iframe>
+
+<!-- 下载按钮 -->
+<button onclick="downloadResume('37a77bb4-08e0-47c2-b504-5137b1e4ebc9')">下载简历</button>
+
+<script>
+  function downloadResume(vectorStoreId) {
+    window.location.href = `/api/resume/analysis/${vectorStoreId}/preview?disposition=attachment`;
+  }
+</script>
+```
+
+---
+
+### 5.4.6 支持预览的文件类型
+
+| 类型 | Content-Type | 策略 |
+| :--- | :--- | :--- |
+| PDF | `application/pdf` | 直接流式返回 `inline` |
+| DOCX | — | 返回 `415` + 提示「请下载后查看」 |
+| PPTX | — | 返回 `415` + 提示「请下载后查看」 |
+| HTML | `text/html` | 直接流式返回 `inline` |
+| TXT | `text/plain` | 直接流式返回 `inline` |
+
+首版可仅支持 PDF 内嵌预览，与现有前端 `historyRemotePdfUrl` 逻辑对齐。
+
+---
+
+## 5.5 获取简历预览 URL（可选）
+
+### 5.5.1 基本信息
+
+请求路径：/api/resume/analysis/{vector_store_id}/preview-url
+
+请求方式：GET
+
+接口描述：该接口返回一个短期有效的 OSS 签名 URL，用于不经过应用服务器中转的直接预览。若 OSS 禁止被第三方页面 iframe，此方案可能失败。
+
+---
+
+### 5.5.2 请求参数
+
+参数说明：
+
+| 参数名 | 类型 | 是否必须 | 备注 |
+| :--- | :--- | :--- | :--- |
+| vector_store_id | string | 必须 | 向量存储记录 ID（UUID）（Path 参数） |
+
+---
+
+### 5.5.3 响应数据
+
+参数格式：application/json
+
+参数说明：
+
+| 参数名 | 类型 | 是否必须 | 备注 |
+| :--- | :--- | :--- | :--- |
+| code | number | 必须 | 响应码，1 代表成功，0 代表失败 |
+| msg | string | 非必须 | 提示信息 |
+| data | object | 非必须 | 返回的数据 |
+| &#124;- url | string | 非必须 | 短期有效 HTTPS 地址，`Content-Disposition` 应为 `inline` |
+| &#124;- expires_at | string | 非必须 | 过期时间（ISO8601） |
+| &#124;- mime_type | string | 非必须 | 文件 MIME 类型 |
+
+响应数据样例：
+```json
+{
+  "code": 1,
+  "msg": "success",
+  "data": {
+    "url": "https://bucket.oss.aliyuncs.com/...?Expires=...&Signature=...",
+    "expires_at": "2026-03-28T12:10:00+08:00",
+    "mime_type": "application/pdf"
+  }
+}
+```
+
+---
+
 ## 数据流转说明
 
 ```

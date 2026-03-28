@@ -79,6 +79,11 @@ public class ResumeAnalysisResultVO {
     private String status;
 
     /**
+     * 处理进度：0-100
+     */
+    private Integer progress;
+
+    /**
      * 创建时间
      */
     private String createdAt;

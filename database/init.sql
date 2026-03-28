@@ -51,6 +51,9 @@ CREATE TABLE ai_career_plan.resume_analysis_result (
                                                        user_id BIGINT NOT NULL,
                                                        file_type VARCHAR(20) NOT NULL,
                                                        original_file_name VARCHAR(500),
+                                                       resume_file_path VARCHAR(500),          -- OSS 文件路径
+                                                       status VARCHAR(50) DEFAULT 'pending',   -- 处理状态：pending/processing/completed/failed/stopped
+                                                       progress INTEGER DEFAULT 0,             -- 处理进度：0-100
                                                        parsed_data JSONB DEFAULT '{}',
                                                        scores JSONB DEFAULT '{}',
                                                        highlights JSONB DEFAULT '{}',
@@ -97,6 +100,9 @@ COMMENT ON COLUMN ai_career_plan.resume_analysis_result.vector_store_id IS '关�
 COMMENT ON COLUMN ai_career_plan.resume_analysis_result.user_id IS '用户 ID';
 COMMENT ON COLUMN ai_career_plan.resume_analysis_result.file_type IS '文件类型：pdf / docx / pptx / html / txt';
 COMMENT ON COLUMN ai_career_plan.resume_analysis_result.original_file_name IS '原始文件名';
+COMMENT ON COLUMN ai_career_plan.resume_analysis_result.resume_file_path IS 'OSS 文件路径';
+COMMENT ON COLUMN ai_career_plan.resume_analysis_result.status IS '处理状态：pending/processing/completed/failed/stopped';
+COMMENT ON COLUMN ai_career_plan.resume_analysis_result.progress IS '处理进度：0-100';
 COMMENT ON COLUMN ai_career_plan.resume_analysis_result.parsed_data IS '解析后的结构化数据';
 COMMENT ON COLUMN ai_career_plan.resume_analysis_result.scores IS '各维度评分';
 COMMENT ON COLUMN ai_career_plan.resume_analysis_result.highlights IS '亮点列表';

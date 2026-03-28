@@ -4,13 +4,13 @@ import com.itsheng.common.context.BaseContext;
 import com.itsheng.common.result.Result;
 import com.itsheng.pojo.vo.ResumeAnalysisResultVO;
 import com.itsheng.pojo.vo.ResumeUploadVO;
-import com.itsheng.service.service.ResumeAnalysisService;
 import com.itsheng.service.service.ResumeService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -24,7 +24,6 @@ import java.util.List;
 public class ResumeController {
 
     private final ResumeService resumeService;
-    private final ResumeAnalysisService resumeAnalysisService;
 
     /**
      * 上传简历
@@ -55,7 +54,7 @@ public class ResumeController {
         Long userId = BaseContext.getUserId();
         log.info("用户 ID:{}, 查询简历分析结果：{}", userId, id);
 
-        ResumeAnalysisResultVO result = resumeAnalysisService.getAnalysisResult(id);
+        ResumeAnalysisResultVO result = resumeService.getAnalysisResult(id);
         return Result.success(result);
     }
 
@@ -73,7 +72,38 @@ public class ResumeController {
         Long userId = BaseContext.getUserId();
         log.info("用户 ID:{}, 查询简历分析列表，cursor: {}, limit: {}", userId, cursor, limit);
 
-        List<ResumeAnalysisResultVO> result = resumeAnalysisService.getAnalysisList(userId, cursor, limit);
+        List<ResumeAnalysisResultVO> result = resumeService.getAnalysisList(userId, cursor, limit);
         return Result.success(result);
+    }
+
+    /**
+     * 简历预览（直接流式返回）
+     * @param vectorStoreId 向量存储记录 ID
+     * @param disposition 响应头设置：inline（默认）/ attachment
+     * @return 文件流
+     */
+    @GetMapping("/analysis/{id}/preview")
+    @Operation(summary = "简历预览", description = "在浏览器内嵌预览简历原件，由后端从 OSS 读取文件并返回适合浏览器内嵌展示的响应头")
+    public ResponseEntity<byte[]> preview(@PathVariable("id") String vectorStoreId,
+                                          @RequestParam(value = "disposition", required = false, defaultValue = "inline") String disposition) {
+        Long userId = BaseContext.getUserId();
+        log.info("用户 ID:{}, 预览简历，vectorStoreId: {}, disposition: {}", userId, vectorStoreId, disposition);
+
+        return resumeService.preview(vectorStoreId, disposition);
+    }
+
+    /**
+     * 获取简历预览 URL（签名 URL）
+     * @param vectorStoreId 向量存储记录 ID
+     * @return 签名后的预览 URL
+     */
+    @GetMapping("/analysis/{id}/preview-url")
+    @Operation(summary = "获取简历预览 URL", description = "返回一个短期有效的 OSS 签名 URL，用于不经过应用服务器中转的直接预览")
+    public Result<String> getPreviewUrl(@PathVariable("id") String vectorStoreId) {
+        Long userId = BaseContext.getUserId();
+        log.info("用户 ID:{}, 获取简历预览 URL，vectorStoreId: {}", userId, vectorStoreId);
+
+        String url = resumeService.getPreviewUrl(vectorStoreId);
+        return Result.success(url);
     }
 }

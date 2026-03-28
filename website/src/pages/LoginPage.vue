@@ -1,74 +1,63 @@
 <script setup lang="ts">
-import { reactive, ref } from "vue";
-import { RouterLink } from "vue-router";
-import { authContent } from "@/config/authContent";
-import { loginRequest } from "@/services/authService";
-import StarfieldBackground from "@/components/StarfieldBackground.vue";
+import { reactive, ref } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { authContent } from '@/config/authContent'
+import { useAuthStore } from '@/stores/auth'
+import { isApiSuccess } from '@/api/client'
 
-const content = authContent.login;
+const content = authContent.login
+const route = useRoute()
+const router = useRouter()
+const auth = useAuthStore()
 
 const form = reactive({
-  account: "",
-  password: "",
-});
+  account: '',
+  password: '',
+})
 
-const loading = ref(false);
-const errorMessage = ref("");
-const successMessage = ref("");
+const loading = ref(false)
+const errorMessage = ref('')
 
 function validateLoginForm() {
   if (!form.account.trim()) {
-    errorMessage.value = "请输入账号（邮箱或用户名）。";
-    return false;
+    errorMessage.value = '请输入账号（邮箱或用户名）。'
+    return false
   }
 
   if (!form.password.trim()) {
-    errorMessage.value = "请输入密码。";
-    return false;
+    errorMessage.value = '请输入密码。'
+    return false
   }
 
-  errorMessage.value = "";
-  return true;
+  errorMessage.value = ''
+  return true
 }
 
 async function handleLoginSubmit() {
-  successMessage.value = "";
-
   if (!validateLoginForm()) {
-    return;
+    return
   }
 
-  loading.value = true;
+  loading.value = true
   try {
-    const result = await loginRequest({
-      account: form.account,
-      password: form.password,
-    });
-
-    if (!result.ok) {
-      errorMessage.value = result.message;
-      return;
+    const r = await auth.login(form.account.trim(), form.password)
+    if (!isApiSuccess(r.code)) {
+      errorMessage.value = r.msg || '登录失败'
+      return
     }
-
-    successMessage.value = result.message;
-
-    // TODO: 登录成功后可以执行以下逻辑
-    // 1) 持久化 token (localStorage/cookie/pinia)
-    // 2) 拉取用户信息
-    // 3) router.push('/dashboard')
-  } catch (error) {
-    errorMessage.value = "登录失败，请稍后重试。";
-    console.error(error);
+    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
+    await router.replace(redirect || '/')
+  } catch (e) {
+    errorMessage.value = '登录失败，请稍后重试。'
+    console.error(e)
   } finally {
-    loading.value = false;
+    loading.value = false
   }
 }
 </script>
 
 <template>
   <main class="auth-page">
-    <StarfieldBackground />
-
     <section class="auth-shell">
       <article class="hero-card">
         <p class="tagline">{{ content.heroTagline }}</p>
@@ -83,28 +72,28 @@ async function handleLoginSubmit() {
       <article class="form-card">
         <h2>登录</h2>
 
-        <form @submit.prevent="handleLoginSubmit" class="auth-form">
+        <form class="auth-form" @submit.prevent="handleLoginSubmit">
           <label>
             账号
-            <input v-model="form.account" type="text" placeholder="邮箱或用户名" />
+            <input v-model="form.account" type="text" autocomplete="username" placeholder="邮箱或用户名" />
           </label>
 
           <label>
             密码
-            <input v-model="form.password" type="password" placeholder="请输入密码" />
+            <input v-model="form.password" type="password" autocomplete="current-password" placeholder="请输入密码" />
           </label>
 
           <p v-if="errorMessage" class="message error">{{ errorMessage }}</p>
-          <p v-if="successMessage" class="message success">{{ successMessage }}</p>
 
           <button type="submit" :disabled="loading" class="primary-btn">
-            {{ loading ? "连接中..." : content.primaryActionText }}
+            {{ loading ? '连接中...' : content.primaryActionText }}
           </button>
         </form>
 
-        <RouterLink to="/register" class="switch-link">{{
-          content.secondaryActionText
-        }}</RouterLink>
+        <RouterLink to="/register" class="switch-link">{{ content.secondaryActionText }}</RouterLink>
+        <div class="auth-footer-links">
+          <RouterLink to="/">返回首页</RouterLink>
+        </div>
       </article>
     </section>
   </main>

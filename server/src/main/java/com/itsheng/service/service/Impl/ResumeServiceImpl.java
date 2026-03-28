@@ -1,16 +1,27 @@
 package com.itsheng.service.service.Impl;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.itsheng.common.context.BaseContext;
 import com.itsheng.common.constant.ResumeConstant;
+import com.itsheng.common.constant.SystemConstants;
 import com.itsheng.common.result.Result;
+import com.itsheng.pojo.dto.ResumeParsedData;
+import com.itsheng.pojo.dto.ResumeScores;
+import com.itsheng.pojo.dto.ResumeSuggestion;
+import com.itsheng.pojo.entity.ResumeAnalysisResult;
 import com.itsheng.pojo.entity.UserVectorStore;
+import com.itsheng.pojo.vo.ResumeAnalysisResultVO;
 import com.itsheng.pojo.vo.ResumeUploadVO;
 import com.itsheng.service.controller.CommonController;
+import com.itsheng.service.mapper.ResumeMapper;
 import com.itsheng.service.mapper.UserVectorStoreMapper;
-import com.itsheng.service.service.ResumeAnalysisService;
 import com.itsheng.service.service.ResumeService;
+import com.itsheng.common.utils.AliOssUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.ExtractedTextFormatter;
 import org.springframework.ai.reader.pdf.PagePdfDocumentReader;
@@ -20,12 +31,18 @@ import org.springframework.ai.transformer.splitter.TokenTextSplitter;
 import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -41,7 +58,27 @@ public class ResumeServiceImpl implements ResumeService {
     private final OpenAiEmbeddingModel embeddingModel;
     private final CommonController commonController;
     private final UserVectorStoreMapper userVectorStoreMapper;
-    private final ResumeAnalysisService resumeAnalysisService;
+    private final ResumeMapper resumeMapper;
+    private final AliOssUtil aliOssUtil;
+    private final ChatClient resumeAnalysisChatClient;
+    private final ObjectMapper objectMapper;
+
+    // 文件类型与 MIME 类型的映射
+    private static final Map<String, String> MIME_TYPE_MAP = new HashMap<>();
+
+    static {
+        MIME_TYPE_MAP.put("pdf", "application/pdf");
+        MIME_TYPE_MAP.put("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+        MIME_TYPE_MAP.put("doc", "application/msword");
+        MIME_TYPE_MAP.put("pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+        MIME_TYPE_MAP.put("ppt", "application/vnd.ms-powerpoint");
+        MIME_TYPE_MAP.put("html", "text/html");
+        MIME_TYPE_MAP.put("htm", "text/html");
+        MIME_TYPE_MAP.put("txt", "text/plain");
+    }
+
+    // 支持内联预览的文件类型
+    private static final Set<String> INLINE_PREVIEW_TYPES = Set.of("pdf", "html", "htm", "txt");
 
     @Override
     @Transactional
@@ -97,7 +134,7 @@ public class ResumeServiceImpl implements ResumeService {
             String finalOriginalFilename = originalFilename;
             CompletableFuture.runAsync(() -> {
                 try {
-                    resumeAnalysisService.analyzeAndSave(id, userId, resumeContent, fileType, finalOriginalFilename, fileUrl);
+                    analyzeAndSave(id, userId, resumeContent, fileType, finalOriginalFilename, fileUrl);
                 } catch (Exception e) {
                     log.error("异步简历 AI 解析失败，vectorStoreId: {}", id, e);
                 }
@@ -117,6 +154,173 @@ public class ResumeServiceImpl implements ResumeService {
             log.error("简历上传解析失败：{}", e.getMessage(), e);
             throw new RuntimeException("简历上传解析失败：" + e.getMessage(), e);
         }
+    }
+
+    @Override
+    @Transactional
+    public void analyzeAndSave(String vectorStoreId, Long userId, String resumeContent,
+                               String fileType, String originalFileName, String resumeFilePath) {
+        try {
+            log.info("开始 AI 解析简历，vectorStoreId: {}, userId: {}", vectorStoreId, userId);
+
+            // 1. 先插入一条初始记录，状态为 processing，进度为 0
+            ResumeAnalysisResult initialRecord = ResumeAnalysisResult.builder()
+                    .vectorStoreId(vectorStoreId)
+                    .userId(userId)
+                    .fileType(fileType)
+                    .originalFileName(originalFileName)
+                    .resumeFilePath(resumeFilePath)
+                    .status("processing")
+                    .progress(0)
+                    .parsedData("{}")
+                    .scores("{\"keyword_match\":0,\"layout\":0,\"skill_depth\":0,\"experience\":0}")
+                    .highlights("[]")
+                    .suggestions("[]")
+                    .createTime(LocalDateTime.now())
+                    .updateTime(LocalDateTime.now())
+                    .build();
+            resumeMapper.insert(initialRecord);
+            log.info("已插入初始分析记录，analysisId: {}, resumeFilePath: {}", initialRecord.getId(), resumeFilePath);
+
+            // 2. 启动异步进度更新任务（每 5 秒更新一次进度）
+            ProgressTracker tracker = new ProgressTracker();
+            tracker.startTracking(vectorStoreId);
+
+            // 3. 调用 AI 进行简历解析
+            String analysisJson = callAiForAnalysis(resumeContent);
+            log.info("AI 返回的解析结果：{}", analysisJson);
+
+            // 4. 停止进度更新
+            tracker.stopTracking();
+
+            // 5. 解析 JSON 并提取各字段
+            JsonAnalysisResult analysisResult = parseAnalysisJson(analysisJson);
+
+            // 6. 更新分析结果记录为完成状态
+            ResumeAnalysisResult analysisRecord = ResumeAnalysisResult.builder()
+                    .id(initialRecord.getId())
+                    .vectorStoreId(vectorStoreId)
+                    .userId(userId)
+                    .fileType(fileType)
+                    .originalFileName(originalFileName)
+                    .status("completed")
+                    .progress(100)
+                    .parsedData(analysisResult.parsedDataJson)
+                    .scores(analysisResult.scoresJson)
+                    .highlights(analysisResult.highlightsJson)
+                    .suggestions(analysisResult.suggestionsJson)
+                    .createTime(LocalDateTime.now())
+                    .updateTime(LocalDateTime.now())
+                    .build();
+
+            // 7. 更新数据库
+            resumeMapper.update(analysisRecord);
+            log.info("简历分析结果已更新，analysisId: {}", analysisRecord.getId());
+
+            // 8. 更新 user_vector_store 表的状态为 COMPLETED
+            UserVectorStore userVectorStore = UserVectorStore.builder()
+                    .id(vectorStoreId)
+                    .resumeContent(resumeContent)
+                    .build();
+            userVectorStoreMapper.update(userVectorStore);
+            log.info("简历解析完成，vectorStoreId: {}", vectorStoreId);
+
+        } catch (Exception e) {
+            log.error("简历 AI 解析失败：{}", e.getMessage(), e);
+            // 更新状态为 failed
+            try {
+                ResumeAnalysisResult failedRecord = ResumeAnalysisResult.builder()
+                        .vectorStoreId(vectorStoreId)
+                        .status("failed")
+                        .progress(0)
+                        .build();
+                resumeMapper.update(failedRecord);
+            } catch (Exception ex) {
+                log.error("更新失败状态失败：{}", ex.getMessage());
+            }
+            throw new RuntimeException("简历 AI 解析失败：" + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public ResumeAnalysisResultVO getAnalysisResult(String vectorStoreId) {
+        // 1. 查询分析结果
+        ResumeAnalysisResult result = resumeMapper.selectByVectorStoreId(vectorStoreId);
+
+        // 2. 如果尚未分析完成，返回 PROCESSING 状态
+        if (result == null) {
+            // 尝试从 user_vector_store 获取基本信息
+            UserVectorStore store = userVectorStoreMapper.selectByVectorStoreId(vectorStoreId);
+            if (store != null) {
+                return ResumeAnalysisResultVO.builder()
+                        .vectorStoreId(vectorStoreId)
+                        .userId(store.getUserId())
+                        .resumeFilePath(store.getResumeFilePath())
+                        .status(ResumeConstant.PARSING_STATUS_PROCESSING)
+                        .createdAt(store.getCreateTime() != null ? store.getCreateTime().toString() : null)
+                        .build();
+            }
+            return ResumeAnalysisResultVO.builder()
+                    .vectorStoreId(vectorStoreId)
+                    .status(ResumeConstant.PARSING_STATUS_PROCESSING)
+                    .build();
+        }
+
+        // 3. 构建并返回 VO
+        return buildAnalysisResultVO(result, vectorStoreId);
+    }
+
+    @Override
+    public List<ResumeAnalysisResultVO> getAnalysisList(Long userId, Long cursor, Integer limit) {
+        List<ResumeAnalysisResult> results = resumeMapper.selectByUserId(userId, cursor, limit);
+        if (results == null || results.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return results.stream()
+                .map(r -> buildAnalysisResultVO(r, r.getVectorStoreId()))
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public ResponseEntity<byte[]> preview(String vectorStoreId, String disposition) {
+        log.info("开始预览简历，vectorStoreId: {}, disposition: {}", vectorStoreId, disposition);
+
+        // 1. 查询分析结果获取文件路径
+        ResumeAnalysisResult result = resumeMapper.selectByVectorStoreId(vectorStoreId);
+        if (result == null || result.getResumeFilePath() == null) {
+            // 尝试从 user_vector_store 获取
+            UserVectorStore store = userVectorStoreMapper.selectByVectorStoreId(vectorStoreId);
+            if (store == null || store.getResumeFilePath() == null) {
+                log.warn("简历文件不存在或已删除，vectorStoreId: {}", vectorStoreId);
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new byte[0]);
+            }
+            return buildPreviewResponse(store.getResumeFilePath(), disposition, null);
+        }
+
+        return buildPreviewResponse(result.getResumeFilePath(), disposition, result.getOriginalFileName());
+    }
+
+    @Override
+    public String getPreviewUrl(String vectorStoreId) {
+        log.info("获取简历预览 URL，vectorStoreId: {}", vectorStoreId);
+
+        // 1. 查询分析结果获取文件路径
+        ResumeAnalysisResult result = resumeMapper.selectByVectorStoreId(vectorStoreId);
+        String fileUrl;
+        if (result == null || result.getResumeFilePath() == null) {
+            // 尝试从 user_vector_store 获取
+            UserVectorStore store = userVectorStoreMapper.selectByVectorStoreId(vectorStoreId);
+            if (store == null || store.getResumeFilePath() == null) {
+                log.warn("简历文件不存在或已删除，vectorStoreId: {}", vectorStoreId);
+                throw new RuntimeException("简历文件不存在或已删除");
+            }
+            fileUrl = store.getResumeFilePath();
+        } else {
+            fileUrl = result.getResumeFilePath();
+        }
+
+        // 2. 生成签名 URL（1 小时有效期）
+        return aliOssUtil.generatePresignedUrl(fileUrl, 60);
     }
 
     /**
@@ -175,7 +379,7 @@ public class ResumeServiceImpl implements ResumeService {
         baseMetadata.put(ResumeConstant.METADATA_KEY_DOCUMENT_ID, baseDocId);
 
         if ("pdf".equals(fileType)) {
-            // PDF 文件解析 - 每页作为一个 Document
+            // PDF 文件解析 - 先按页读取，然后使用 TokenTextSplitter 进行带重叠的分割
             PagePdfDocumentReader reader = new PagePdfDocumentReader(
                     resource,
                     PdfDocumentReaderConfig.builder()
@@ -186,12 +390,23 @@ public class ResumeServiceImpl implements ResumeService {
             List<Document> documents = reader.read();
             log.info("PDF 简历解析成功，共{}页", documents.size());
 
+            // 使用 TokenTextSplitter 进行带重叠的分割，避免跨页内容丢失
+            TokenTextSplitter splitter = TokenTextSplitter.builder()
+                    .withChunkSize(ResumeConstant.TEXT_SPLITTER_CHUNK_SIZE)
+                    .withMinChunkSizeChars(ResumeConstant.TEXT_SPLITTER_MIN_CHUNK_SIZE_CHARS)
+                    .withMinChunkLengthToEmbed(ResumeConstant.TEXT_SPLITTER_MIN_CHUNK_LENGTH_TO_EMBED)
+                    .withMaxNumChunks(ResumeConstant.TEXT_SPLITTER_MAX_NUM_CHUNKS)
+                    .build();
+
+            List<Document> splitDocuments = splitter.apply(documents);
+            log.info("PDF 文本分割完成（带重叠），共{}个片段", splitDocuments.size());
+
             // 为每个 document 添加基础 metadata
-            for (int i = 0; i < documents.size(); i++) {
-                documents.get(i).getMetadata().putAll(baseMetadata);
-                documents.get(i).getMetadata().put(ResumeConstant.METADATA_KEY_PAGE_NUMBER, i + 1);
+            for (int i = 0; i < splitDocuments.size(); i++) {
+                splitDocuments.get(i).getMetadata().putAll(baseMetadata);
+                splitDocuments.get(i).getMetadata().put(ResumeConstant.METADATA_KEY_PAGE_NUMBER, i + 1);
             }
-            return documents;
+            return splitDocuments;
         } else {
             // 使用 Tika 处理 DOCX、PPTX、HTML、TXT 等格式
             TikaDocumentReader reader = new TikaDocumentReader(resource);
@@ -215,6 +430,284 @@ public class ResumeServiceImpl implements ResumeService {
                 splitDocuments.get(i).getMetadata().put(ResumeConstant.METADATA_KEY_CHUNK_NUMBER, i);
             }
             return splitDocuments;
+        }
+    }
+
+    /**
+     * 调用 AI 进行简历解析
+     */
+    private String callAiForAnalysis(String resumeContent) {
+        String userPrompt = """
+            请分析以下简历内容：
+
+            ===== 简历开始 =====
+            %s
+            ===== 简历结束 =====
+
+            请按照要求的 JSON 格式返回分析结果，直接返回 JSON 对象，不要包含任何 markdown 标记或额外说明。
+            """.formatted(resumeContent);
+
+        ChatResponse response = resumeAnalysisChatClient.prompt()
+                .system(SystemConstants.RESUME_ANALYSIS_PROMPT)
+                .user(userPrompt)
+                .call()
+                .chatResponse();
+
+        return response.getResult().getOutput().getText();
+    }
+
+    /**
+     * 解析 AI 返回的 JSON 结果
+     * 处理可能的 markdown 代码块包装和字段缺失情况
+     */
+    private JsonAnalysisResult parseAnalysisJson(String json) throws JsonProcessingException {
+        JsonAnalysisResult result = new JsonAnalysisResult();
+
+        // 清理可能存在的 markdown 代码块标记
+        String cleanedJson = cleanJsonResponse(json);
+        log.debug("清理后的 JSON: {}", cleanedJson);
+
+        // 使用 ObjectMapper 解析 JSON
+        var rootNode = objectMapper.readTree(cleanedJson);
+
+        // 提取 parsed_data 并转为 JSON 字符串（缺失时返回空对象）
+        var parsedDataNode = rootNode.get("parsed_data");
+        result.parsedDataJson = parsedDataNode != null && !parsedDataNode.isMissingNode()
+                ? objectMapper.writeValueAsString(parsedDataNode)
+                : "{}";
+
+        // 提取 scores 并转为 JSON 字符串（缺失时返回默认评分）
+        var scoresNode = rootNode.get("scores");
+        if (scoresNode != null && !scoresNode.isMissingNode()) {
+            result.scoresJson = objectMapper.writeValueAsString(scoresNode);
+        } else {
+            // 返回默认评分
+            result.scoresJson = "{\"keyword_match\":0,\"layout\":0,\"skill_depth\":0,\"experience\":0}";
+        }
+
+        // 提取 highlights 并转为 JSON 字符串（缺失时返回空数组）
+        var highlightsNode = rootNode.get("highlights");
+        result.highlightsJson = highlightsNode != null && !highlightsNode.isMissingNode()
+                ? objectMapper.writeValueAsString(highlightsNode)
+                : "[]";
+
+        // 提取 suggestions 并转为 JSON 字符串（缺失时返回空数组）
+        var suggestionsNode = rootNode.get("suggestions");
+        result.suggestionsJson = suggestionsNode != null && !suggestionsNode.isMissingNode()
+                ? objectMapper.writeValueAsString(suggestionsNode)
+                : "[]";
+
+        return result;
+    }
+
+    /**
+     * 清理 AI 返回的 JSON 响应，移除 markdown 代码块标记
+     */
+    private String cleanJsonResponse(String response) {
+        if (response == null || response.trim().isEmpty()) {
+            return "{}";
+        }
+
+        String cleaned = response.trim();
+
+        // 移除开头的 ```json 或 ``` 标记
+        if (cleaned.startsWith("```json")) {
+            cleaned = cleaned.substring(7);
+        } else if (cleaned.startsWith("```")) {
+            cleaned = cleaned.substring(3);
+        }
+
+        // 移除结尾的 ``` 标记
+        if (cleaned.endsWith("```")) {
+            cleaned = cleaned.substring(0, cleaned.length() - 3);
+        }
+
+        // 找到第一个 { 和最后一个 } 之间的内容
+        int startIndex = cleaned.indexOf('{');
+        int endIndex = cleaned.lastIndexOf('}');
+
+        if (startIndex >= 0 && endIndex > startIndex) {
+            cleaned = cleaned.substring(startIndex, endIndex + 1);
+        }
+
+        return cleaned.trim();
+    }
+
+    /**
+     * 构建分析结果 VO
+     */
+    private ResumeAnalysisResultVO buildAnalysisResultVO(ResumeAnalysisResult result, String vectorStoreId) {
+        try {
+            ResumeAnalysisResultVO.ResumeAnalysisResultVOBuilder builder = ResumeAnalysisResultVO.builder()
+                    .vectorStoreId(vectorStoreId)
+                    .analysisId(result.getId())
+                    .userId(result.getUserId())
+                    .fileType(result.getFileType())
+                    .originalFileName(result.getOriginalFileName())
+                    .resumeFilePath(result.getResumeFilePath())
+                    .status(result.getStatus())
+                    .progress(result.getProgress())
+                    .createdAt(result.getCreateTime() != null ? result.getCreateTime().toString() : null)
+                    .updatedAt(result.getUpdateTime() != null ? result.getUpdateTime().toString() : null);
+
+            // 解析 parsed_data
+            if (result.getParsedData() != null && !result.getParsedData().isEmpty()
+                    && !"{}".equals(result.getParsedData())) {
+                builder.parsedData(objectMapper.readValue(result.getParsedData(), ResumeParsedData.class));
+            }
+
+            // 解析 scores
+            if (result.getScores() != null && !result.getScores().isEmpty()
+                    && !"{\"keyword_match\":0,\"layout\":0,\"skill_depth\":0,\"experience\":0}".equals(result.getScores())) {
+                builder.scores(objectMapper.readValue(result.getScores(), ResumeScores.class));
+            }
+
+            // 解析 highlights
+            if (result.getHighlights() != null && !result.getHighlights().isEmpty()
+                    && !"[]".equals(result.getHighlights())) {
+                builder.highlights(objectMapper.readValue(result.getHighlights(), List.class));
+            }
+
+            // 解析 suggestions
+            if (result.getSuggestions() != null && !result.getSuggestions().isEmpty()
+                    && !"[]".equals(result.getSuggestions())) {
+                var suggestions = objectMapper.readValue(
+                        result.getSuggestions(),
+                        objectMapper.getTypeFactory().constructCollectionType(List.class, ResumeSuggestion.class)
+                );
+                builder.suggestions((List<ResumeSuggestion>) suggestions);
+            }
+
+            return builder.build();
+
+        } catch (JsonProcessingException e) {
+            log.error("解析分析结果 JSON 失败：{}", e.getMessage());
+            return ResumeAnalysisResultVO.builder()
+                    .vectorStoreId(vectorStoreId)
+                    .analysisId(result.getId())
+                    .status(result.getStatus())
+                    .build();
+        }
+    }
+
+    /**
+     * 构建预览响应
+     */
+    private ResponseEntity<byte[]> buildPreviewResponse(String fileUrl, String disposition, String originalFileName) {
+        try {
+            // 1. 从 URL 中提取文件扩展名
+            String fileType = extractFileType(fileUrl);
+            String mimeType = MIME_TYPE_MAP.getOrDefault(fileType, "application/octet-stream");
+
+            // 2. 检查是否支持内联预览
+            if (!"attachment".equals(disposition) && !INLINE_PREVIEW_TYPES.contains(fileType.toLowerCase())) {
+                log.warn("不支持预览该文件类型：{}", fileType);
+                return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).body(new byte[0]);
+            }
+
+            // 3. 从 OSS 下载文件
+            byte[] fileBytes = aliOssUtil.download(fileUrl);
+            log.info("文件下载成功，大小：{} bytes", fileBytes.length);
+
+            // 4. 构建响应头
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.parseMediaType(mimeType));
+            headers.setCacheControl("private, max-age=300"); // 5 分钟缓存
+            headers.set("X-Content-Type-Options", "nosniff");
+
+            // 5. 设置 Content-Disposition
+            String disValue = "attachment".equals(disposition) ? "attachment" : "inline";
+            String fileName = originalFileName != null ? originalFileName : extractFileName(fileUrl);
+            String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8.toString())
+                    .replace("+", "%20");
+            headers.setContentDispositionFormData(disValue, encodedFileName);
+
+            return ResponseEntity.ok()
+                    .headers(headers)
+                    .body(fileBytes);
+
+        } catch (Exception e) {
+            log.error("简历预览失败，fileUrl: {}", fileUrl, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(null);
+        }
+    }
+
+    /**
+     * 从 URL 中提取文件扩展名
+     */
+    private String extractFileType(String fileUrl) {
+        if (fileUrl == null || fileUrl.isEmpty()) {
+            return "pdf";
+        }
+        int lastDot = fileUrl.lastIndexOf(".");
+        if (lastDot > 0 && lastDot < fileUrl.length() - 1) {
+            return fileUrl.substring(lastDot + 1).toLowerCase();
+        }
+        return "pdf";
+    }
+
+    /**
+     * 从 URL 中提取文件名
+     */
+    private String extractFileName(String fileUrl) {
+        if (fileUrl == null || fileUrl.isEmpty()) {
+            return "resume.pdf";
+        }
+        int lastSlash = fileUrl.lastIndexOf("/");
+        if (lastSlash > 0 && lastSlash < fileUrl.length() - 1) {
+            return fileUrl.substring(lastSlash + 1);
+        }
+        return "resume.pdf";
+    }
+
+    /**
+     * 内部类：用于临时存储解析后的 JSON 字符串
+     */
+    private static class JsonAnalysisResult {
+        String parsedDataJson;
+        String scoresJson;
+        String highlightsJson;
+        String suggestionsJson;
+    }
+
+    /**
+     * 内部类：进度追踪器，每 5 秒更新一次进度
+     */
+    private class ProgressTracker {
+        private volatile boolean running = true;
+        private String vectorStoreId;
+        private Thread trackThread;
+
+        public void startTracking(String vectorStoreId) {
+            this.vectorStoreId = vectorStoreId;
+            trackThread = new Thread(() -> {
+                int progress = 0;
+                while (running && progress < 100) {
+                    try {
+                        Thread.sleep(5000); // 每 5 秒更新一次
+                        progress = Math.min(progress + 10, 90); // 进度每次增加 10%，最高到 90%
+                        ResumeAnalysisResult progressRecord = ResumeAnalysisResult.builder()
+                                .vectorStoreId(vectorStoreId)
+                                .status("processing")
+                                .progress(progress)
+                                .build();
+                        resumeMapper.update(progressRecord);
+                        log.debug("更新分析进度：vectorStoreId={}, progress={}", vectorStoreId, progress);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            });
+            trackThread.setDaemon(true);
+            trackThread.start();
+        }
+
+        public void stopTracking() {
+            running = false;
+            if (trackThread != null) {
+                trackThread.interrupt();
+            }
         }
     }
 }

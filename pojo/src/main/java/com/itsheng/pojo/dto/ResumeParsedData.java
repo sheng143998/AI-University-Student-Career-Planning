@@ -1,5 +1,6 @@
 package com.itsheng.pojo.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -18,31 +19,37 @@ public class ResumeParsedData {
     /**
      * 姓名
      */
+    @JsonProperty("name")
     private String name;
 
     /**
      * 求职意向/目标岗位
      */
+    @JsonProperty("target_role")
     private String targetRole;
 
     /**
      * 技能列表
      */
+    @JsonProperty("skills")
     private List<String> skills;
 
     /**
      * 工作年限
      */
+    @JsonProperty("experience_years")
     private Integer experienceYears;
 
     /**
      * 教育经历
      */
+    @JsonProperty("education")
     private List<Education> education;
 
     /**
      * 工作/项目经历
      */
+    @JsonProperty("experience")
     private List<Experience> experience;
 
     /**
@@ -56,21 +63,25 @@ public class ResumeParsedData {
         /**
          * 学校名称
          */
+        @JsonProperty("school")
         private String school;
 
         /**
          * 专业
          */
+        @JsonProperty("major")
         private String major;
 
         /**
          * 学历：学士/硕士/博士
          */
+        @JsonProperty("degree")
         private String degree;
 
         /**
          * 时间：2018-2022
          */
+        @JsonProperty("period")
         private String period;
     }
 
@@ -85,21 +96,25 @@ public class ResumeParsedData {
         /**
          * 公司/项目名称
          */
+        @JsonProperty("company")
         private String company;
 
         /**
          * 职位
          */
+        @JsonProperty("position")
         private String position;
 
         /**
          * 时间
          */
+        @JsonProperty("period")
         private String period;
 
         /**
          * 描述
          */
+        @JsonProperty("description")
         private String description;
     }
 }

@@ -27,9 +27,15 @@ public class ResumeConstant {
     public static final String PARSING_STATUS_PROCESSING = "PROCESSING";
 
     /**
-     * PDF 解析配置 - 每页作为一个 Document
+     * PDF 解析配置 - 每 2 页作为一个 Document，避免工作经历跨页被切断
+     * 如果简历内容较长，可增加此值至 3
      */
-    public static final int PDF_PAGES_PER_DOCUMENT = 1;
+    public static final int PDF_PAGES_PER_DOCUMENT = 2;
+
+    /**
+     * PDF 页面重叠数 - 相邻 Document 之间重叠 1 页，确保跨页内容不丢失
+     */
+    public static final int PDF_PAGE_OVERLAP = 1;
 
     /**
      * 文本分割配置

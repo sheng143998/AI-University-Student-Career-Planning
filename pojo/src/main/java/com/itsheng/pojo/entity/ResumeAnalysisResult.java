@@ -62,6 +62,21 @@ public class ResumeAnalysisResult {
     private String suggestions;
 
     /**
+     * 处理状态：pending/processing/completed/failed/stopped
+     */
+    private String status;
+
+    /**
+     * 处理进度：0-100
+     */
+    private Integer progress;
+
+    /**
+     * 简历文件存储路径（OSS 路径）
+     */
+    private String resumeFilePath;
+
+    /**
      * 创建时间
      */
     private LocalDateTime createTime;

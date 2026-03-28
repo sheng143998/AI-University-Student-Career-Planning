@@ -4,3 +4,9 @@
 *.class
 *Test.java
 **/test/
+
+# Website
+website/node_modules/
+website/dist/
+website/.env*
+website/*.log
