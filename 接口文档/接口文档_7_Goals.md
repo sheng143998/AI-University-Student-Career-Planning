@@ -9,7 +9,7 @@
 
 | 接口名 | 方法 | 路径 | 说明 |
 | :--- | :--- | :--- | :--- |
-| 获取目标列表 | GET | `/api/goals` | 含主目标/并行目标 |
+| 获取目标总览 | GET | `/api/goals/overview` | 含主目标/里程碑/成功准则/并行目标 |
 | 创建目标 | POST | `/api/goals` | 新增目标 |
 | 获取目标详情 | GET | `/api/goals/{id}` | 含里程碑/成功准则/AI 建议 |
 | 更新目标 | PUT | `/api/goals/{id}` | 更新字段 |
@@ -21,18 +21,45 @@
 
 ## 详细接口定义
 
-### 获取目标列表
+### 获取目标总览
 - **请求方法**: `GET`
-- **请求路径**: `/api/goals`
-- **鉴权**: 需要
+- **请求路径**: `/api/goals/overview`
+- **鉴权**: 需要（JWT Token）
 - **响应示例**:
 ```json
 {
-  "code": 200,
+  "code": 1,
+  "msg": null,
   "data": {
-    "primary": { "id": "g_001", "title": "成为高级前端工程师", "progress": 65, "status": "IN_PROGRESS" },
-    "others": [
-      { "id": "g_002", "title": "补齐算法基础", "progress": 20, "status": "IN_PROGRESS" }
+    "primaryGoal": {
+      "id": "1",
+      "title": "成为高级前端工程师",
+      "desc": "通过工程化与性能体系建设拿到更高级别岗位",
+      "status": "IN_PROGRESS",
+      "progress": 65,
+      "eta": "2025年12月",
+      "isPrimary": true
+    },
+    "milestones": [
+      { "id": "1", "goalId": "1", "title": "完善项目作品集", "desc": "整理3个代表性项目", "status": "DONE", "progress": 100, "order": 1 },
+      { "id": "2", "goalId": "1", "title": "系统学习性能优化", "desc": "完成性能优化课程", "status": "IN_PROGRESS", "progress": 50, "order": 2 }
+    ],
+    "milestonesCompleted": 1,
+    "milestonesTotal": 2,
+    "successCriteria": {
+      "salary": "¥30k - ¥45k / 月",
+      "companies": ["腾讯", "字节跳动", "阿里巴巴"],
+      "cities": ["北京", "上海", "深圳"]
+    },
+    "longTermAspirations": [
+      { "title": "技术专家", "desc": "成为某领域技术专家" },
+      { "title": "团队管理", "desc": "带领10人以上团队" }
+    ],
+    "aiAdvice": {
+      "content": "建议将目标拆成 4 周冲刺：工程化、性能、项目表达、面试题体系。"
+    },
+    "parallelGoals": [
+      { "id": "2", "title": "补齐算法基础", "desc": "系统学习算法", "status": "IN_PROGRESS", "progress": 20, "eta": "2025年6月", "isPrimary": false }
     ]
   }
 }
@@ -46,11 +73,18 @@
 - **鉴权**: 需要
 - **请求体**:
 ```json
-{ "title": "完成 React 认证", "desc": "通过官方认证", "status": "TODO" }
+{
+  "title": "完成 React 认证",
+  "desc": "通过官方认证",
+  "status": "TODO",
+  "progress": 0,
+  "eta": "2025年8月",
+  "isPrimary": false
+}
 ```
 - **响应示例**:
 ```json
-{ "code": 200, "data": { "id": "g_003" } }
+{ "code": 1, "msg": null, "data": { "id": "3" } }
 ```
 
 ---
@@ -62,24 +96,31 @@
 - **响应示例**:
 ```json
 {
-  "code": 200,
+  "code": 1,
+  "msg": null,
   "data": {
-    "id": "g_001",
-    "title": "成为高级前端工程师",
-    "desc": "通过工程化与性能体系建设拿到更高级别岗位",
-    "status": "IN_PROGRESS",
-    "progress": 65,
-    "success_criteria": [
-      "能独立完成中大型项目架构设计",
-      "拥有可量化的性能优化与工程化案例"
-    ],
+    "goal": {
+      "id": "1",
+      "title": "成为高级前端工程师",
+      "desc": "通过工程化与性能体系建设拿到更高级别岗位",
+      "status": "IN_PROGRESS",
+      "progress": 65,
+      "eta": "2025年12月",
+      "isPrimary": true
+    },
     "milestones": [
-      { "id": "ms_001", "title": "完善项目作品集", "status": "DONE" },
-      { "id": "ms_002", "title": "系统学习性能优化", "status": "IN_PROGRESS" }
+      { "id": "1", "goalId": "1", "title": "完善项目作品集", "desc": "整理3个代表性项目", "status": "DONE", "progress": 100, "order": 1 }
     ],
-    "ai_advice": {
-      "title": "AI 建议",
-      "content": "建议将目标拆成 4 周冲刺：工程化、性能、项目表达、面试题体系。"
+    "successCriteria": {
+      "salary": "¥30k - ¥45k / 月",
+      "companies": ["腾讯", "字节跳动"],
+      "cities": ["北京", "上海"]
+    },
+    "longTermAspirations": [
+      { "title": "技术专家", "desc": "成为某领域技术专家" }
+    ],
+    "aiAdvice": {
+      "content": "建议将目标拆成 4 周冲刺..."
     }
   }
 }
@@ -97,12 +138,26 @@
   "title": "成为高级前端工程师",
   "desc": "通过工程化与性能体系建设拿到更高级别岗位",
   "status": "IN_PROGRESS",
-  "progress": 70
+  "progress": 70,
+  "eta": "2025年11月",
+  "isPrimary": true,
+  "successCriteria": {
+    "salary": "¥35k - ¥50k / 月",
+    "companies": ["腾讯", "字节跳动", "阿里巴巴", "美团"],
+    "cities": ["北京", "上海", "深圳", "杭州"]
+  },
+  "longTermAspirations": [
+    { "title": "技术专家", "desc": "成为某领域技术专家" },
+    { "title": "创业", "desc": "创办自己的公司" }
+  ],
+  "aiAdvice": {
+    "content": "更新后的AI建议..."
+  }
 }
 ```
 - **响应示例**:
 ```json
-{ "code": 200, "data": { "updated": true } }
+{ "code": 1, "msg": null, "data": { "updated": true } }
 ```
 
 ---
@@ -113,7 +168,7 @@
 - **鉴权**: 需要
 - **响应示例**:
 ```json
-{ "code": 200, "data": { "deleted": true } }
+{ "code": 1, "msg": null, "data": { "deleted": true } }
 ```
 
 ---
@@ -124,11 +179,17 @@
 - **鉴权**: 需要
 - **请求体**:
 ```json
-{ "title": "完成 1 次性能优化复盘", "status": "TODO" }
+{
+  "title": "完成 1 次性能优化复盘",
+  "desc": "包含数据对比和优化方案",
+  "status": "TODO",
+  "progress": 0,
+  "order": 3
+}
 ```
 - **响应示例**:
 ```json
-{ "code": 200, "data": { "id": "ms_010" } }
+{ "code": 1, "msg": null, "data": { "id": "10" } }
 ```
 
 ---
@@ -141,11 +202,57 @@
 ```json
 {
   "title": "完成 1 次性能优化复盘（含数据对比）",
+  "desc": "已完成",
   "status": "DONE",
+  "progress": 100,
   "order": 2
 }
 ```
 - **响应示例**:
 ```json
-{ "code": 200, "data": { "updated": true } }
+{ "code": 1, "msg": null, "data": { "updated": true } }
 ```
+
+---
+
+## 数据结构定义
+
+### GoalSummary
+| 字段 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| id | string | 目标ID |
+| title | string | 目标标题 |
+| desc | string | 目标描述 |
+| status | string | 状态：TODO/IN_PROGRESS/DONE |
+| progress | number | 进度 0-100 |
+| eta | string | 预计达成时间 |
+| isPrimary | boolean | 是否为主目标 |
+
+### Milestone
+| 字段 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| id | string | 里程碑ID |
+| goalId | string | 所属目标ID |
+| title | string | 里程碑标题 |
+| desc | string | 里程碑描述 |
+| status | string | 状态：TODO/IN_PROGRESS/DONE |
+| progress | number | 进度 0-100 |
+| order | number | 排序顺序 |
+
+### SuccessCriteria
+| 字段 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| salary | string | 薪资预期 |
+| companies | string[] | 目标公司列表 |
+| cities | string[] | 目标城市列表 |
+
+### LongTermAspiration
+| 字段 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| title | string | 愿景标题 |
+| desc | string | 愿景描述 |
+
+### AiAdvice
+| 字段 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| content | string | AI建议内容 |
