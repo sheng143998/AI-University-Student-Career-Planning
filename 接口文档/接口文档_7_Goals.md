@@ -256,3 +256,77 @@
 | 字段 | 类型 | 说明 |
 | :--- | :--- | :--- |
 | content | string | AI建议内容 |
+
+## 建表语句
+
+```sql
+DROP TABLE IF EXISTS ai_career_plan.goal_milestone CASCADE;
+DROP TABLE IF EXISTS ai_career_plan.goal CASCADE;
+-- =============================================
+-- goal 表（目标表）
+-- =============================================
+CREATE TABLE ai_career_plan.goal (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    goal_desc TEXT,
+    status VARCHAR(50) DEFAULT 'TODO',              -- TODO / IN_PROGRESS / DONE
+    progress INTEGER DEFAULT 0,                      -- 0-100
+    eta VARCHAR(100),                                -- 预计达成时间
+    is_primary BOOLEAN DEFAULT FALSE,                -- 是否为主目标
+    success_salary VARCHAR(100),                     -- 成功准则-薪资
+    success_companies TEXT,                          -- 成功准则-目标公司(JSON数组)
+    success_cities TEXT,                             -- 成功准则-目标城市(JSON数组)
+    long_term_aspirations TEXT,                      -- 长期愿景(JSON数组)
+    ai_advice TEXT,                                  -- AI建议
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- goal_milestone 表（里程碑表）
+-- =============================================
+CREATE TABLE ai_career_plan.goal_milestone (
+    id BIGSERIAL PRIMARY KEY,
+    goal_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    milestone_desc TEXT,
+    status VARCHAR(50) DEFAULT 'TODO',              -- TODO / IN_PROGRESS / DONE
+    progress INTEGER DEFAULT 0,                      -- 0-100
+    sort_order INTEGER DEFAULT 1,                    -- 排序顺序
+    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_goal_user_id ON ai_career_plan.goal(user_id);
+CREATE INDEX idx_goal_is_primary ON ai_career_plan.goal(is_primary);
+CREATE INDEX idx_goal_milestone_goal_id ON ai_career_plan.goal_milestone(goal_id);
+CREATE INDEX idx_goal_milestone_user_id ON ai_career_plan.goal_milestone(user_id);
+-- goal 表注释
+COMMENT ON TABLE ai_career_plan.goal IS '目标表';
+COMMENT ON COLUMN ai_career_plan.goal.id IS '主键';
+COMMENT ON COLUMN ai_career_plan.goal.user_id IS '用户ID';
+COMMENT ON COLUMN ai_career_plan.goal.title IS '目标标题';
+COMMENT ON COLUMN ai_career_plan.goal.goal_desc IS '目标描述';
+COMMENT ON COLUMN ai_career_plan.goal.status IS '状态：TODO/IN_PROGRESS/DONE';
+COMMENT ON COLUMN ai_career_plan.goal.progress IS '进度：0-100';
+COMMENT ON COLUMN ai_career_plan.goal.eta IS '预计达成时间';
+COMMENT ON COLUMN ai_career_plan.goal.is_primary IS '是否为主目标';
+COMMENT ON COLUMN ai_career_plan.goal.success_salary IS '成功准则-薪资预期';
+COMMENT ON COLUMN ai_career_plan.goal.success_companies IS '成功准则-目标公司(JSON数组)';
+COMMENT ON COLUMN ai_career_plan.goal.success_cities IS '成功准则-目标城市(JSON数组)';
+COMMENT ON COLUMN ai_career_plan.goal.long_term_aspirations IS '长期愿景(JSON数组)';
+COMMENT ON COLUMN ai_career_plan.goal.ai_advice IS 'AI建议';
+
+-- goal_milestone 表注释
+COMMENT ON TABLE ai_career_plan.goal_milestone IS '里程碑表';
+COMMENT ON COLUMN ai_career_plan.goal_milestone.id IS '主键';
+COMMENT ON COLUMN ai_career_plan.goal_milestone.goal_id IS '关联目标ID';
+COMMENT ON COLUMN ai_career_plan.goal_milestone.user_id IS '用户ID';
+COMMENT ON COLUMN ai_career_plan.goal_milestone.title IS '里程碑标题';
+COMMENT ON COLUMN ai_career_plan.goal_milestone.milestone_desc IS '里程碑描述';
+COMMENT ON COLUMN ai_career_plan.goal_milestone.status IS '状态：TODO/IN_PROGRESS/DONE';
+COMMENT ON COLUMN ai_career_plan.goal_milestone.progress IS '进度：0-100';
+COMMENT ON COLUMN ai_career_plan.goal_milestone.sort_order IS '排序顺序';
+```
+
