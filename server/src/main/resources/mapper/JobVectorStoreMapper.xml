@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.itsheng.service.mapper.JobVectorStoreMapper">
+
+    <!-- 结果映射 -->
+    <resultMap id="JobVectorStoreResult" type="com.itsheng.pojo.entity.JobVectorStore">
+        <id column="id" property="id"/>
+        <result column="job_id" property="jobId"/>
+        <result column="content" property="content"/>
+        <result column="embedding" property="embeddingVector"/>
+        <result column="metadata" property="metadata"/>
+        <result column="content_hash" property="contentHash"/>
+        <result column="created_at" property="createdAt" javaType="java.time.LocalDateTime"/>
+        <result column="updated_at" property="updatedAt" javaType="java.time.LocalDateTime"/>
+    </resultMap>
+
+    <!-- 插入岗位向量数据 -->
+    <insert id="insert" parameterType="com.itsheng.pojo.entity.JobVectorStore">
+        INSERT INTO ai_career_plan.job_vector_store (
+            id,
+            job_id,
+            content,
+            embedding,
+            metadata,
+            content_hash,
+            created_at,
+            updated_at
+        ) VALUES (
+            #{id},
+            #{jobId},
+            #{content},
+            #{embeddingVector},
+            #{metadata},
+            #{contentHash},
+            #{createdAt},
+            #{updatedAt}
+        )
+    </insert>
+
+    <!-- 批量插入岗位向量数据 -->
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO ai_career_plan.job_vector_store (
+            id,
+            job_id,
+            content,
+            embedding,
+            metadata,
+            content_hash,
+            created_at,
+            updated_at
+        ) VALUES
+        <foreach collection="stores" item="store" separator=",">
+            (
+                #{store.id},
+                #{store.jobId},
+                #{store.content},
+                #{store.embeddingVector},
+                #{store.metadata},
+                #{store.contentHash},
+                #{store.createdAt},
+                #{store.updatedAt}
+            )
+        </foreach>
+    </insert>
+
+    <!-- 根据岗位 ID 查询向量数据 -->
+    <select id="selectByJobId" resultMap="JobVectorStoreResult">
+        SELECT *
+        FROM ai_career_plan.job_vector_store
+        WHERE job_id = #{jobId}
+    </select>
+
+    <!-- 根据向量存储 ID 查询向量数据 -->
+    <select id="selectByVectorStoreId" resultMap="JobVectorStoreResult">
+        SELECT *
+        FROM ai_career_plan.job_vector_store
+        WHERE id = #{id}
+    </select>
+
+    <!-- 动态更新岗位向量数据 -->
+    <update id="update" parameterType="com.itsheng.pojo.entity.JobVectorStore">
+        UPDATE ai_career_plan.job_vector_store
+        <set>
+            <if test="jobId != null">job_id = #{jobId},</if>
+            <if test="content != null">content = #{content},</if>
+            <if test="embeddingVector != null">embedding = #{embeddingVector},</if>
+            <if test="metadata != null">metadata = #{metadata},</if>
+            <if test="contentHash != null">content_hash = #{contentHash},</if>
+            <if test="updatedAt != null">updated_at = #{updatedAt},</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <!-- 根据向量搜索相似岗位 (余弦相似度) -->
+    <select id="searchByVector" resultMap="JobVectorStoreResult">
+        SELECT *
+        FROM ai_career_plan.job_vector_store
+        ORDER BY embedding &lt;#&gt; #{vector}
+        LIMIT #{limit}
+    </select>
+
+    <!-- 批量更新岗位向量数据的 job_id 和 content_hash 字段 -->
+    <update id="updateBatch" parameterType="java.util.List">
+        <foreach collection="stores" item="store" open="" close="" separator=";">
+            UPDATE ai_career_plan.job_vector_store
+            SET job_id = #{store.jobId},
+                content_hash = #{store.contentHash},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = #{store.id}
+        </foreach>
+    </update>
+
+</mapper>
