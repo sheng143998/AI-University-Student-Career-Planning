@@ -7,7 +7,7 @@ import org.apache.ibatis.annotations.Param;
 import java.util.List;
 
 /**
- * 岗位 Mapper 接口
+ * 岗位数据 Mapper 接口
  */
 @Mapper
 public interface JobMapper {
@@ -21,7 +21,7 @@ public interface JobMapper {
 
     /**
      * 批量插入岗位数据
-     * @param jobs 岗位实体列表
+     * @param jobs 岗位列表
      * @return 影响行数
      */
     int insertBatch(@Param("jobs") List<JobEntity> jobs);
@@ -35,7 +35,7 @@ public interface JobMapper {
 
     /**
      * 查询所有岗位数据
-     * @return 岗位实体列表
+     * @return 岗位列表
      */
     List<JobEntity> selectAll();
 
