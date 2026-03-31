@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.itsheng.service.mapper.GoalMilestoneMapper">
+
+    <resultMap id="MilestoneResultMap" type="com.itsheng.pojo.entity.GoalMilestone">
+        <id property="id" column="id"/>
+        <result property="goalId" column="goal_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="title" column="title"/>
+        <result property="milestoneDesc" column="milestone_desc"/>
+        <result property="status" column="status"/>
+        <result property="progress" column="progress"/>
+        <result property="sortOrder" column="sort_order"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <select id="findByGoalId" resultMap="MilestoneResultMap">
+        SELECT * FROM ai_career_plan.goal_milestone 
+        WHERE goal_id = #{goalId} 
+        ORDER BY sort_order ASC
+    </select>
+
+    <select id="findByIdAndUserId" resultMap="MilestoneResultMap">
+        SELECT * FROM ai_career_plan.goal_milestone 
+        WHERE id = #{id} AND user_id = #{userId}
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ai_career_plan.goal_milestone (
+            goal_id, user_id, title, milestone_desc, status, progress, sort_order
+        ) VALUES (
+            #{goalId}, #{userId}, #{title}, #{milestoneDesc}, #{status}, #{progress}, #{sortOrder}
+        )
+    </insert>
+
+    <update id="update">
+        UPDATE ai_career_plan.goal_milestone SET
+            title = #{title},
+            milestone_desc = #{milestoneDesc},
+            status = #{status},
+            progress = #{progress},
+            sort_order = #{sortOrder},
+            update_time = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteByGoalId">
+        DELETE FROM ai_career_plan.goal_milestone 
+        WHERE goal_id = #{goalId}
+    </delete>
+
+</mapper>
