@@ -20,18 +20,6 @@
 | create_time | TIMESTAMP | 创建时间 |
 | update_time | TIMESTAMP | 更新时间 |
 
-#### metadata 字段示例
-
-```json
-{
-  "user_id": 1,
-  "file_path": "https://itxiang-sky-out.oss-cn-chengdu.aliyuncs.com/8c0ec69d-1e43-4541-bbb4-eb7f0624c95c.pdf",
-  "file_type": "pdf",
-  "document_id": "d2e6be76-a7b9-4543-b08b-2ec69db34103",
-  "page_number": 3
-}
-```
-
 ---
 
 ### resume_analysis_result 表（分析结果表）
@@ -52,61 +40,91 @@
 | create_time | TIMESTAMP | 创建时间 |
 | update_time | TIMESTAMP | 更新时间 |
 
-#### parsed_data 字段示例
+---
+
+### student_capability_profile 表（学生就业能力画像表）
+
+**新增表**，存储通过大模型技术从简历拆解的学生就业能力画像数据。
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| id | BIGSERIAL | 主键 |
+| user_id | BIGINT | 用户 ID |
+| resume_analysis_id | BIGINT | 关联 resume_analysis_result.id |
+| overall_score | INT | 综合能力评分 (0-100) |
+| completeness_score | INT | 简历完整度评分 (0-100) |
+| competitiveness_score | INT | 竞争力评分 (0-100) |
+| capability_scores | JSONB | 各维度能力得分 |
+| professional_skills | JSONB | 专业技能列表 |
+| certificates | JSONB | 证书列表 |
+| soft_skills | JSONB | 软技能评估 |
+| ai_evaluation | TEXT | AI 综合评价 |
+| generated_at | DATETIME | 生成时间 |
+| updated_at | DATETIME | 更新时间 |
+
+#### capability_scores 字段结构示例
 
 ```json
 {
-  "name": "张三",
-  "target_role": "前端工程师",
-  "skills": ["Vue", "React", "TypeScript"],
-  "experience_years": 3,
-  "education": [
-    {
-      "school": "XX 大学",
-      "major": "计算机科学",
-      "degree": "学士",
-      "period": "2018-2022"
-    }
-  ],
-  "experience": [
-    {
-      "company": "YY 科技",
-      "position": "前端开发工程师",
-      "period": "2022-2026",
-      "description": "负责组件库维护..."
-    }
-  ]
+  "professional_skill": 85,    // 专业技能 (0-100)
+  "certificate": 70,           // 证书 (0-100)
+  "innovation": 80,            // 创新能力 (0-100)
+  "learning": 88,              // 学习能力 (0-100)
+  "resilience": 75,            // 抗压能力 (0-100)
+  "communication": 82,         // 沟通能力 (0-100)
+  "internship": 78             // 实习能力 (0-100)
 }
 ```
 
-#### scores 字段示例
-
-```json
-{
-  "keyword_match": 82,
-  "layout": 95,
-  "skill_depth": 78,
-  "experience": 88
-}
-```
-
-#### suggestions 字段示例
+#### professional_skills 字段结构示例
 
 ```json
 [
   {
-    "type": "CONTENT",
-    "content": "增加更多量化的项目成果"
+    "name": "Vue.js",
+    "proficiency": 4,          // 熟练度 (1-5)
+    "years": 2,                // 使用年限
+    "evidence": "完成 3 个中大型项目"
   },
   {
-    "type": "SKILL",
-    "content": "建议补充 Node.js 后端经验"
-  },
-  {
-    "type": "LAYOUT",
-    "content": "建议调整简历排版，突出核心经历"
+    "name": "React",
+    "proficiency": 3,
+    "years": 1,
+    "evidence": "个人项目实践"
   }
 ]
+```
+
+#### soft_skills 字段结构示例
+
+```json
+{
+  "innovation": {
+    "score": 80,
+    "evidence": ["主导创新项目 2 项", "获省级竞赛奖项"],
+    "description": "具备较强的创新意识和实践能力"
+  },
+  "learning": {
+    "score": 88,
+    "evidence": ["自学完成 3 门技术栈", "技术博客 50+ 篇"],
+    "description": "学习能力强，能快速掌握新技术"
+  },
+  "resilience": {
+    "score": 75,
+    "evidence": ["实习期间承担高压项目"],
+    "description": "能在压力下保持工作效率"
+  },
+  "communication": {
+    "score": 82,
+    "evidence": ["担任学生会干部", "技术分享 10+ 场"],
+    "description": "沟通表达能力良好"
+  },
+  "internship": {
+    "score": 78,
+    "evidence": ["2 段相关企业实习经历", "参与核心模块开发"],
+    "description": "具备一定的实战经验"
+  }
+}
 ```
 
 ---
@@ -255,98 +273,19 @@ file: [二进制文件内容]
 | &#124;- created_at | string | 非必须 | 创建时间 |
 | &#124;- updated_at | string | 非必须 | 更新时间 |
 
-响应数据样例（解析中，暂无分析结果）：
-```json
-{
-  "code": 1,
-  "msg": "success",
-  "data": {
-    "vector_store_id": "37a77bb4-08e0-47c2-b504-5137b1e4ebc9",
-    "user_id": 1001,
-    "resume_file_path": "https://itxiang-sky-out.oss-cn-chengdu.aliyuncs.com/8c0ec69d-1e43-4541-bbb4-eb7f0624c95c.pdf",
-    "created_at": "2026-03-26T09:10:00+08:00",
-    "updated_at": "2026-03-26T09:10:00+08:00"
-  }
-}
-```
-
-响应数据样例（解析完成）：
-```json
-{
-  "code": 1,
-  "msg": "success",
-  "data": {
-    "vector_store_id": "37a77bb4-08e0-47c2-b504-5137b1e4ebc9",
-    "analysis_id": 1,
-    "user_id": 1001,
-    "file_type": "pdf",
-    "original_file_name": "张三_前端工程师简历.pdf",
-    "resume_content": "张三\n求职意向：前端工程师\n工作经历：...",
-    "resume_file_path": "https://itxiang-sky-out.oss-cn-chengdu.aliyuncs.com/8c0ec69d-1e43-4541-bbb4-eb7f0624c95c.pdf",
-    "parsed_data": {
-      "name": "张三",
-      "target_role": "前端工程师",
-      "skills": ["Vue", "React", "TypeScript"],
-      "experience_years": 3,
-      "education": [
-        {
-          "school": "XX 大学",
-          "major": "计算机科学",
-          "degree": "学士",
-          "period": "2018-2022"
-        }
-      ],
-      "experience": [
-        {
-          "company": "YY 科技",
-          "position": "前端开发工程师",
-          "period": "2022-2026",
-          "description": "负责组件库维护..."
-        }
-      ]
-    },
-    "scores": {
-      "keyword_match": 82,
-      "layout": 95,
-      "skill_depth": 78,
-      "experience": 88
-    },
-    "highlights": [
-      "项目描述清晰",
-      "技能栈匹配度高",
-      "工作经历完整"
-    ],
-    "suggestions": [
-      {
-        "type": "CONTENT",
-        "content": "增加更多量化的项目成果"
-      },
-      {
-        "type": "SKILL",
-        "content": "建议补充 Node.js 后端经验"
-      },
-      {
-        "type": "LAYOUT",
-        "content": "建议调整简历排版，突出核心经历"
-      }
-    ],
-    "created_at": "2026-03-26T09:10:00+08:00",
-    "updated_at": "2026-03-26T09:12:00+08:00"
-  }
-}
-```
-
 ---
 
-## 5.3 获取简历分析列表
+## 5.3 获取学生能力画像
 
 ### 5.3.1 基本信息
 
-请求路径：/api/resume/analysis
+请求路径：/api/resume/capability-profile
 
 请求方式：GET
 
-接口描述：该接口用于查询当前用户的历史简历分析记录列表，支持游标分页。
+接口描述：该接口用于获取当前用户的学生就业能力画像。通过大模型技术将用户简历数据拆解成能力画像，包含完整度评分、竞争力评分及各维度能力评估。
+
+**数据来源**：基于简历解析结果，由 AI 服务分析生成。
 
 ---
 
@@ -354,16 +293,7 @@ file: [二进制文件内容]
 
 参数说明：
 
-| 参数名 | 类型 | 是否必须 | 备注 |
-| :--- | :--- | :--- | :--- |
-| cursor | string | 非必须 | 游标，用于分页，首次请求不传 |
-| limit | number | 非必须 | 每页数量，默认 20，最大 100 |
-
-请求参数样例：
-```
-/api/resume/analysis?limit=20
-/api/resume/analysis?cursor=xxx&limit=20
-```
+本接口无需请求参数。
 
 ---
 
@@ -378,15 +308,28 @@ file: [二进制文件内容]
 | code | number | 必须 | 响应码，1 代表成功，0 代表失败 |
 | msg | string | 非必须 | 提示信息 |
 | data | object | 非必须 | 返回的数据 |
-| &#124;- items | object[] | 非必须 | 分析记录列表 |
-| &#124;- &#124;- vector_store_id | string | 非必须 | 向量存储记录 ID（UUID） |
-| &#124;- &#124;- analysis_id | number | 非必须 | 分析结果记录 ID |
-| &#124;- &#124;- file_type | string | 非必须 | 文件类型：pdf / docx / pptx / html / txt |
-| &#124;- &#124;- original_file_name | string | 非必须 | 原始文件名 |
-| &#124;- &#124;- resume_file_path | string | 非必须 | OSS 文件访问 URL |
-| &#124;- &#124;- created_at | string | 非必须 | 创建时间 |
-| &#124;- &#124;- updated_at | string | 非必须 | 更新时间 |
-| &#124;- next_cursor | string | 非必须 | 下一页游标，为 null 时表示已是最后一页 |
+| &#124;- id | number | 非必须 | 画像记录 ID |
+| &#124;- user_id | number | 非必须 | 用户 ID |
+| &#124;- overall_score | number | 非必须 | 综合能力评分 (0-100) |
+| &#124;- completeness_score | number | 非必须 | 简历完整度评分 (0-100) |
+| &#124;- competitiveness_score | number | 非必须 | 竞争力评分 (0-100) |
+| &#124;- capability_scores | object | 非必须 | 各维度能力得分 |
+| &#124;- &#124;- professional_skill | number | 非必须 | 专业技能 (0-100) |
+| &#124;- &#124;- certificate | number | 非必须 | 证书 (0-100) |
+| &#124;- &#124;- innovation | number | 非必须 | 创新能力 (0-100) |
+| &#124;- &#124;- learning | number | 非必须 | 学习能力 (0-100) |
+| &#124;- &#124;- resilience | number | 非必须 | 抗压能力 (0-100) |
+| &#124;- &#124;- communication | number | 非必须 | 沟通能力 (0-100) |
+| &#124;- &#124;- internship | number | 非必须 | 实习能力 (0-100) |
+| &#124;- professional_skills | object[] | 非必须 | 专业技能列表 |
+| &#124;- &#124;- name | string | 非必须 | 技能名称 |
+| &#124;- &#124;- proficiency | number | 非必须 | 熟练度 (1-5) |
+| &#124;- &#124;- years | number | 非必须 | 使用年限 |
+| &#124;- &#124;- evidence | string | 非必须 | 能力证明 |
+| &#124;- certificates | string[] | 非必须 | 证书列表 |
+| &#124;- soft_skills | object | 非必须 | 软技能评估详情 |
+| &#124;- ai_evaluation | string | 非必须 | AI 综合评价文字 |
+| &#124;- generated_at | string | 非必须 | 生成时间 |
 
 响应数据样例：
 ```json
@@ -394,34 +337,71 @@ file: [二进制文件内容]
   "code": 1,
   "msg": "success",
   "data": {
-    "items": [
+    "id": 1,
+    "user_id": 1001,
+    "overall_score": 82,
+    "completeness_score": 88,
+    "competitiveness_score": 78,
+    "capability_scores": {
+      "professional_skill": 85,
+      "certificate": 70,
+      "innovation": 80,
+      "learning": 88,
+      "resilience": 75,
+      "communication": 82,
+      "internship": 78
+    },
+    "professional_skills": [
       {
-        "vector_store_id": "37a77bb4-08e0-47c2-b504-5137b1e4ebc9",
-        "analysis_id": 1,
-        "file_type": "pdf",
-        "original_file_name": "张三_前端工程师简历.pdf",
-        "resume_file_path": "https://itxiang-sky-out.oss-cn-chengdu.aliyuncs.com/8c0ec69d-1e43-4541-bbb4-eb7f0624c95c.pdf",
-        "created_at": "2026-03-26T09:10:00+08:00",
-        "updated_at": "2026-03-26T09:12:00+08:00"
+        "name": "Vue.js",
+        "proficiency": 4,
+        "years": 2,
+        "evidence": "完成 3 个中大型项目"
       },
       {
-        "vector_store_id": "48b88cc5-19f1-58d3-c615-6248c2f5fd0a",
-        "analysis_id": 2,
-        "file_type": "docx",
-        "original_file_name": "张三_简历_v2.docx",
-        "resume_file_path": "https://itxiang-sky-out.oss-cn-chengdu.aliyuncs.com/9d1fd70e-2f54-5652-cccc-fc8g0735d96d.docx",
-        "created_at": "2026-03-25T09:10:00+08:00",
-        "updated_at": "2026-03-25T09:12:00+08:00"
+        "name": "React",
+        "proficiency": 3,
+        "years": 1,
+        "evidence": "个人项目实践"
       }
     ],
-    "next_cursor": null
+    "certificates": ["大学英语六级", "软件设计师（中级）"],
+    "soft_skills": {
+      "innovation": {
+        "score": 80,
+        "evidence": ["主导创新项目 2 项", "获省级竞赛奖项"],
+        "description": "具备较强的创新意识和实践能力"
+      },
+      "learning": {
+        "score": 88,
+        "evidence": ["自学完成 3 门技术栈", "技术博客 50+ 篇"],
+        "description": "学习能力强，能快速掌握新技术"
+      },
+      "resilience": {
+        "score": 75,
+        "evidence": ["实习期间承担高压项目"],
+        "description": "能在压力下保持工作效率"
+      },
+      "communication": {
+        "score": 82,
+        "evidence": ["担任学生会干部", "技术分享 10+ 场"],
+        "description": "沟通表达能力良好"
+      },
+      "internship": {
+        "score": 78,
+        "evidence": ["2 段相关企业实习经历", "参与核心模块开发"],
+        "description": "具备一定的实战经验"
+      }
+    },
+    "ai_evaluation": "该同学专业技能扎实，学习能力突出，具备较好的创新意识和团队协作能力。建议进一步加强企业级项目实战经验，补充相关权威证书以提升竞争力。",
+    "generated_at": "2026-03-30T10:00:00+08:00"
   }
 }
 ```
 
 ---
 
-## 5.4 简历预览（新增）
+## 5.4 简历预览
 
 ### 5.4.1 基本信息
 
@@ -565,6 +545,51 @@ GET /api/resume/analysis/37a77bb4-08e0-47c2-b504-5137b1e4ebc9/preview?dispositio
 
 ---
 
+## AI 服务模块
+
+### Resume-AI 服务职责
+
+由专门的 **Resume-AI** 服务负责以下分析任务：
+
+1. **简历解析与结构化**：
+   - 从简历中提取基本信息、教育经历、工作经历、项目经历、技能列表等
+   - 支持 PDF、DOCX、PPTX、HTML、TXT 多种格式
+
+2. **学生就业能力画像生成**：
+   - 通过大模型技术将简历数据拆解成能力画像
+   - 评估维度：专业技能、证书、创新能力、学习能力、抗压能力、沟通能力、实习能力
+   - 生成完整度评分和竞争力评分
+   - 提供 AI 综合评价文字
+
+3. **简历评分与建议**：
+   - 关键词匹配度评分
+   - 布局评分
+   - 技能深度评分
+   - 经历评分
+   - 生成优化建议
+
+### Dashboard-AI 服务职责
+
+由专门的 **Dashboard-AI** 服务负责以下任务（在 Resume-AI 完成后自动触发）：
+
+1. **人岗匹配计算**：
+   - 从 `student_capability_profile.capability_scores` 获取用户能力评分
+   - 与岗位画像库中的岗位进行匹配计算
+   - 生成 `user_career_data.match_summary`（匹配分数、描述、标签、各维度得分）
+
+2. **能力雷达数据填充**：
+   - 将 `student_capability_profile.capability_scores` 映射为 `user_career_data.skill_radar`
+
+3. **行动建议转换**：
+   - 将 `resume_analysis_result.suggestions` 转换为可执行的行动项
+   - 填充到 `user_career_data.actions`
+
+4. **职业路径生成**：
+   - 根据用户能力画像和岗位画像生成职业发展路径
+   - 填充到 `user_roadmap_steps.steps`
+
+---
+
 ## 数据流转说明
 
 ```
@@ -574,12 +599,27 @@ POST /api/resume/upload
     ↓
 后端存储至 OSS，创建 user_vector_store 记录
     ↓
-异步任务：解析简历、生成向量、创建 resume_analysis_result 记录
+异步任务（Resume-AI 服务）：
+  1. 解析简历、生成向量
+  2. 创建 resume_analysis_result 记录（parsed_data、scores、highlights、suggestions）
+  3. 生成 student_capability_profile（学生能力画像，capability_scores 等）
+    ↓
+异步任务（Dashboard-AI 服务，在 Resume-AI 完成后自动触发）：
+  4. 读取 student_capability_profile.capability_scores → 填充 user_career_data.skill_radar
+  5. 读取 resume_analysis_result.highlights → 转换为 user_career_data.match_summary.tags
+  6. 读取 resume_analysis_result.suggestions → 转换为 user_career_data.actions
+  7. 结合岗位画像库计算 → user_career_data.match_summary.score、dimension_scores
+  8. 生成职业发展路径 → user_roadmap_steps.steps
     ↓
 前端轮询 GET /api/resume/analysis/{id}
     ↓
-查询到 parsed_data 等完整数据时展示结果
+查询到 parsed_data 等完整数据时展示结果（此时 Dashboard 数据也已准备就绪）
 ```
+
+**说明**：
+- Dashboard 模块的两张表（`user_career_data`、`user_roadmap_steps`）在简历分析完成后**自动填充**，用户无需额外操作
+- 前端在简历上传成功后，可直接跳转 Dashboard 页面，无需等待
+- 如果岗位画像库尚未构建完成，match_summary 相关字段可先使用 AI 生成的默认值
 
 ---
 
@@ -589,10 +629,27 @@ POST /api/resume/upload
 user_vector_store (向量存储表)
     ↓ (1:1 关系)
 resume_analysis_result (分析结果表)
-    ↓ (通过 vector_store_id 关联)
+    ↓ (1:1 关系)
+student_capability_profile (学生能力画像表)
+    ↓ (AI 聚合计算，自动填充)
+user_career_data (Dashboard 职业数据表)
+user_roadmap_steps (职业发展路径表)
 ```
 
 - **user_vector_store**：存储简历的向量化数据，用于 Spring AI 向量搜索
 - **resume_analysis_result**：存储详细的分析结果，包括解析数据、评分、建议等
+- **student_capability_profile**：存储学生就业能力画像，包括各维度能力评估、证书、软技能等
+- **user_career_data**：Dashboard 模块使用，存储岗位匹配、市场趋势、能力雷达、行动建议（数据来源：student_capability_profile、resume_analysis_result）
+- **user_roadmap_steps**：Dashboard/Roadmap 模块共用，存储职业发展阶段路径（数据来源：AI 根据用户能力画像生成）
 
-两表通过 `vector_store_id` 关联，一条向量记录对应一条分析结果记录。
+---
+
+## 接口列表汇总
+
+| 接口编号 | 接口名 | 方法 | 路径 | 说明 |
+| :--- | :--- | :--- | :--- | :--- |
+| 5.1 | 上传简历 | POST | /api/resume/upload | 上传简历文件 |
+| 5.2 | 获取简历分析结果 | GET | /api/resume/analysis/{id} | 查询简历解析结果 |
+| 5.3 | 获取学生能力画像 | GET | /api/resume/capability-profile | 获取能力画像（完整度/竞争力/各维度评分） |
+| 5.4 | 简历预览 | GET | /api/resume/analysis/{id}/preview | 内嵌预览简历 |
+| 5.5 | 获取预览 URL | GET | /api/resume/analysis/{id}/preview-url | 获取 OSS 签名 URL |

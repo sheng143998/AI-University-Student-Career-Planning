@@ -102,6 +102,22 @@ public class CommonConfig implements AsyncConfigurer {
     }
 
     /**
+     * 岗位向量存储专用 VectorStore
+     * 操作 job_vector_store 表
+     */
+    @Bean
+    public VectorStore jobVectorStore(JdbcTemplate jdbcTemplate, OpenAiEmbeddingModel embeddingModel){
+        return PgVectorStore.builder(jdbcTemplate, embeddingModel)
+                .dimensions(1024)
+                .distanceType(COSINE_DISTANCE)
+                .indexType(HNSW)
+                .initializeSchema(false)
+                .schemaName("ai_career_plan")
+                .vectorTableName("job_vector_store")
+                .build();
+    }
+
+    /**
      * 异步执行器配置
      */
     @Override

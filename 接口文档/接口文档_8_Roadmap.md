@@ -8,18 +8,48 @@
 
 ## 数据模型
 
-### 3.1 岗位关联图谱表（job_graph_nodes）
+本模块采用四张表设计：
+- **行业分段表（job_segments）**：存储行业/领域分类
+- **岗位关联图谱节点表（job_graph_nodes）**：存储岗位图谱节点信息
+- **岗位关联关系表（job_graph_edges）**：存储岗位间的晋升/换岗关系
+- **岗位换岗路径表（job_transition_paths）**：存储 AI 推荐的换岗路径
+
+**说明**：`user_roadmap_steps` 表（用户职业发展路径表）在接口文档 3（Dashboard 模块）和本接口文档 8 中均有使用，存储用户个人的职业发展阶段路径。
+
+### 3.1 行业分段表（job_segments）
 
 | 字段名 | 类型 | 说明 |
 |--------|------|------|
 | id | BIGINT | 主键 |
-| job_profile_id | BIGINT | 关联 job_profiles.id |
+| segment_code | VARCHAR(50) | 分段编码（唯一） |
+| segment_name | VARCHAR(100) | 分段名称 |
+| sort_order | INT | 排序 |
+| create_time | DATETIME | 创建时间 |
+
+### 3.2 岗位关联图谱节点表（job_graph_nodes）
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| id | BIGINT | 主键 |
+| job_profile_id | BIGINT | 关联岗位 ID |
+| segment_id | BIGINT | 所属分段 ID |
 | node_type | VARCHAR(20) | 节点类型 (core/secondary/transition) |
 | level | INT | 职级等级 (1-10) |
+| title | VARCHAR(255) | 岗位标题 |
+| subtitle | VARCHAR(100) | 副标题（年限等） |
+| label | VARCHAR(255) | 显示标签 |
+| sub_label | VARCHAR(100) | 显示副标签 |
+| kind | VARCHAR(20) | 种类 (core/secondary/transition) |
+| variant | VARCHAR(20) | 变体 (primary/neutral) |
+| tags | JSON | 标签列表 |
 | x_coord | INT | 图谱 X 坐标 |
 | y_coord | INT | 图谱 Y 坐标 |
+| summary | TEXT | 岗位描述 |
+| requirements | JSON | 技能要求列表 |
+| recommended_skills | JSON | 推荐技能列表 |
+| create_time | DATETIME | 创建时间 |
 
-### 3.2 岗位关联关系表（job_graph_edges）
+### 3.3 岗位关联关系表（job_graph_edges）
 
 | 字段名 | 类型 | 说明 |
 |--------|------|------|
@@ -32,8 +62,9 @@
 | success_rate | DECIMAL(5,4) | 转换成功率 (0-1) |
 | required_skills_gap | JSON | 需要补充的技能差距 |
 | description | TEXT | 路径描述 |
+| create_time | DATETIME | 创建时间 |
 
-### 3.3 岗位换岗路径表（job_transition_paths）
+### 3.4 岗位换岗路径表（job_transition_paths）
 
 | 字段名 | 类型 | 说明 |
 |--------|------|------|
@@ -41,9 +72,24 @@
 | from_job_profile_id | BIGINT | 起始岗位 ID |
 | to_job_profile_id | BIGINT | 目标岗位 ID |
 | path_type | VARCHAR(20) | 路径类型 (direct/stepping_stone) |
-| intermediate_nodes | JSON | 中间节点 ID 列表（如有） |
+| intermediate_nodes | JSON | 中间节点 ID 列表 |
 | recommended_actions | JSON | AI 推荐的换岗行动 |
-| confidence_score | DECIMAL(5,4) | AI 推荐置信度 |
+| confidence_score | DECIMAL(5,4) | AI 推荐置信度 (0-1) |
+| create_time | DATETIME | 创建时间 |
+
+### 3.5 用户职业发展路径表（user_roadmap_steps）
+
+**说明**：此表在接口文档 3 中已定义，此处为引用说明。
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| id | BIGINT | 主键 |
+| user_id | BIGINT | 用户 ID（逻辑外键） |
+| job_profile_id | BIGINT | 关联岗位 ID |
+| current_step_index | INTEGER | 当前所在阶段索引 |
+| steps | JSON | 职业发展阶段列表 |
+| create_time | DATETIME | 创建时间 |
+| update_time | DATETIME | 更新时间 |
 
 ---
 
