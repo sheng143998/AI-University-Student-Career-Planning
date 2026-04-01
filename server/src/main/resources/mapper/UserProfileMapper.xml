@@ -47,6 +47,13 @@
         LIMIT 1
     </select>
 
+    <!-- 根据简历分析记录 ID 查询 parsed_data -->
+    <select id="selectParsedDataByResumeId" resultType="java.lang.String">
+        SELECT parsed_data
+        FROM ai_career_plan.resume_analysis_result
+        WHERE id = #{resumeId} AND user_id = #{userId}
+    </select>
+
     <!-- 更新用户基本信息 -->
     <update id="updateUserBaseInfo">
         UPDATE ai_career_plan.users

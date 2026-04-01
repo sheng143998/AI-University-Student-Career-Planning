@@ -42,6 +42,14 @@ public interface UserProfileMapper {
     Long selectLatestAnalysisIdByUserId(@Param("userId") Long userId);
 
     /**
+     * 根据简历分析记录 ID 查询 parsed_data
+     * @param resumeId 简历分析记录 ID
+     * @param userId 用户 ID（用于权限校验）
+     * @return 简历分析结果中的 parsed_data(JSON 字符串)
+     */
+    String selectParsedDataByResumeId(@Param("resumeId") Long resumeId, @Param("userId") Long userId);
+
+    /**
      * 更新用户基本信息
      * @param userId 用户 ID
      * @param userName 用户名
