@@ -48,6 +48,11 @@ public class JobEntity {
     private String industry;
 
     /**
+     * 工作城市
+     */
+    private String city;
+
+    /**
      * 公司规模
      */
     private String companySize;
@@ -56,6 +61,11 @@ public class JobEntity {
      * 公司类型
      */
     private String companyType;
+
+    /**
+     * 公司性质
+     */
+    private String companyNature;
 
     /**
      * 岗位编码
@@ -68,9 +78,14 @@ public class JobEntity {
     private String jobDetail;
 
     /**
-     * 更新日期
+     * 岗位职责描述
      */
-    private String updateDate;
+    private String jobDescription;
+
+    /**
+     * 任职要求
+     */
+    private String jobRequirements;
 
     /**
      * 公司详情
@@ -78,9 +93,24 @@ public class JobEntity {
     private String companyDetail;
 
     /**
+     * 公司描述
+     */
+    private String companyDescription;
+
+    /**
+     * 更新日期
+     */
+    private String updateDate;
+
+    /**
      * 岗位来源地址
      */
     private String sourceUrl;
+
+    /**
+     * 发布日期
+     */
+    private String publishDate;
 
     /**
      * 创建时间

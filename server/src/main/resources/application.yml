@@ -2,6 +2,12 @@ server:
   port: 8081
 
 spring:
+  data:
+    redis:
+      port: ${fuchuang.redis.port}
+      host: ${fuchuang.redis.host}
+      database: ${fuchuang.redis.database}
+      timeout: 5000
   profiles:
     active: dev
   application:

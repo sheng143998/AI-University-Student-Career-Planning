@@ -34,10 +34,25 @@ public interface JobMapper {
     JobEntity selectById(@Param("id") Long id);
 
     /**
+     * 按岗位名称分组，每组随机抽取指定数量的数据
+     * @param sampleSize 每组抽样数量
+     * @return 抽样后的岗位列表
+     */
+    List<JobEntity> selectSampledByPositionName(@Param("sampleSize") int sampleSize);
+
+    /**
      * 查询所有岗位数据
      * @return 岗位列表
      */
     List<JobEntity> selectAll();
+
+    /**
+     * 按 ID 范围查询岗位数据
+     * @param startId 起始 ID
+     * @param endId 结束 ID
+     * @return 岗位列表
+     */
+    List<JobEntity> selectByIdRange(@Param("startId") Long startId, @Param("endId") Long endId);
 
     /**
      * 动态更新岗位数据

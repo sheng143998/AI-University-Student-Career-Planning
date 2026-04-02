@@ -7,17 +7,23 @@
     <resultMap id="JobResultMap" type="com.itsheng.pojo.entity.JobEntity">
         <id column="id" property="id"/>
         <result column="job_name" property="jobName"/>
+        <result column="city" property="city"/>
         <result column="address" property="address"/>
         <result column="salary_range" property="salaryRange"/>
         <result column="company_name" property="companyName"/>
         <result column="industry" property="industry"/>
         <result column="company_size" property="companySize"/>
+        <result column="company_nature" property="companyNature"/>
         <result column="company_type" property="companyType"/>
         <result column="job_code" property="jobCode"/>
         <result column="job_detail" property="jobDetail"/>
-        <result column="update_date" property="updateDate"/>
+        <result column="job_description" property="jobDescription"/>
+        <result column="job_requirements" property="jobRequirements"/>
+        <result column="company_description" property="companyDescription"/>
         <result column="company_detail" property="companyDetail"/>
+        <result column="update_date" property="updateDate"/>
         <result column="source_url" property="sourceUrl"/>
+        <result column="publish_date" property="publishDate"/>
         <result column="create_time" property="createTime" javaType="java.time.LocalDateTime"/>
         <result column="update_time" property="updateTime" javaType="java.time.LocalDateTime"/>
     </resultMap>
@@ -26,32 +32,42 @@
     <insert id="insert" parameterType="com.itsheng.pojo.entity.JobEntity" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO ai_career_plan.recruitment_data (
             job_name,
+            city,
             address,
             salary_range,
             company_name,
             industry,
             company_size,
+            company_nature,
             company_type,
             job_code,
             job_detail,
+            job_description,
+            job_requirements,
+            company_description,
             update_date,
-            company_detail,
             source_url,
+            publish_date,
             create_time,
             update_time
         ) VALUES (
             #{jobName},
+            #{city},
             #{address},
             #{salaryRange},
             #{companyName},
             #{industry},
             #{companySize},
+            #{companyNature},
             #{companyType},
             #{jobCode},
             #{jobDetail},
+            #{jobDescription},
+            #{jobRequirements},
+            #{companyDescription},
             #{updateDate},
-            #{companyDetail},
             #{sourceUrl},
+            #{publishDate},
             #{createTime},
             #{updateTime}
         )
@@ -61,34 +77,44 @@
     <insert id="insertBatch" parameterType="java.util.List">
         INSERT INTO ai_career_plan.recruitment_data (
             job_name,
+            city,
             address,
             salary_range,
             company_name,
             industry,
             company_size,
+            company_nature,
             company_type,
             job_code,
             job_detail,
+            job_description,
+            job_requirements,
+            company_description,
             update_date,
-            company_detail,
             source_url,
+            publish_date,
             create_time,
             update_time
         ) VALUES
         <foreach collection="jobs" item="job" separator=",">
             (
                 #{job.jobName},
+                #{job.city},
                 #{job.address},
                 #{job.salaryRange},
                 #{job.companyName},
                 #{job.industry},
                 #{job.companySize},
+                #{job.companyNature},
                 #{job.companyType},
                 #{job.jobCode},
                 #{job.jobDetail},
+                #{job.jobDescription},
+                #{job.jobRequirements},
+                #{job.companyDescription},
                 #{job.updateDate},
-                #{job.companyDetail},
                 #{job.sourceUrl},
+                #{job.publishDate},
                 #{job.createTime},
                 #{job.updateTime}
             )
@@ -102,6 +128,18 @@
         WHERE id = #{id}
     </select>
 
+    <!-- 按岗位名称分组，每组随机抽取指定数量的数据 -->
+    <select id="selectSampledByPositionName" resultMap="JobResultMap">
+        SELECT * FROM (
+            SELECT *,
+                   ROW_NUMBER() OVER (PARTITION BY job_name ORDER BY RANDOM()) as rn
+            FROM ai_career_plan.recruitment_data
+            WHERE job_name IS NOT NULL
+        ) t
+        WHERE rn &lt;= #{sampleSize}
+        ORDER BY job_name, id
+    </select>
+
     <!-- 查询所有岗位数据 -->
     <select id="selectAll" resultMap="JobResultMap">
         SELECT *
@@ -109,22 +147,36 @@
         ORDER BY id DESC
     </select>
 
+    <!-- 按 ID 范围查询岗位数据 -->
+    <select id="selectByIdRange" resultMap="JobResultMap">
+        SELECT *
+        FROM ai_career_plan.recruitment_data
+        WHERE id BETWEEN #{startId} AND #{endId}
+        ORDER BY id
+    </select>
+
     <!-- 动态更新岗位数据 -->
     <update id="update" parameterType="com.itsheng.pojo.entity.JobEntity">
         UPDATE ai_career_plan.recruitment_data
         <set>
             <if test="jobName != null">job_name = #{jobName},</if>
+            <if test="city != null">city = #{city},</if>
             <if test="address != null">address = #{address},</if>
             <if test="salaryRange != null">salary_range = #{salaryRange},</if>
             <if test="companyName != null">company_name = #{companyName},</if>
             <if test="industry != null">industry = #{industry},</if>
             <if test="companySize != null">company_size = #{companySize},</if>
+            <if test="companyNature != null">company_nature = #{companyNature},</if>
             <if test="companyType != null">company_type = #{companyType},</if>
             <if test="jobCode != null">job_code = #{jobCode},</if>
             <if test="jobDetail != null">job_detail = #{jobDetail},</if>
-            <if test="updateDate != null">update_date = #{updateDate},</if>
+            <if test="jobDescription != null">job_description = #{jobDescription},</if>
+            <if test="jobRequirements != null">job_requirements = #{jobRequirements},</if>
+            <if test="companyDescription != null">company_description = #{companyDescription},</if>
             <if test="companyDetail != null">company_detail = #{companyDetail},</if>
+            <if test="updateDate != null">update_date = #{updateDate},</if>
             <if test="sourceUrl != null">source_url = #{sourceUrl},</if>
+            <if test="publishDate != null">publish_date = #{publishDate},</if>
             <if test="updateTime != null">update_time = #{updateTime},</if>
         </set>
         WHERE id = #{id}

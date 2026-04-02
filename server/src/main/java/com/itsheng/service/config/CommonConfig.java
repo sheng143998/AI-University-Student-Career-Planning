@@ -57,6 +57,18 @@ public class CommonConfig implements AsyncConfigurer {
     }
 
     /**
+     * 岗位分类专用 ChatClient
+     * 用于岗位数据智能分类和级别判定
+     */
+    @Bean
+    public ChatClient jobClassificationChatClient(OpenAiChatModel model) {
+        return ChatClient
+                .builder(model)
+                .defaultAdvisors(new SimpleLoggerAdvisor())
+                .build();
+    }
+
+    /**
      * ObjectMapper Bean，用于 JSON 解析
      */
     @Bean

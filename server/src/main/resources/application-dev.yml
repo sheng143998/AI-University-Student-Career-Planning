@@ -10,3 +10,15 @@ fuchuang:
   alioss:
     endpoint: oss-cn-chengdu.aliyuncs.com
     bucket-name: itxiang-sky-out
+spring:
+  data:
+    redis:
+      client-type: lettuce
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: 30000ms
+      connect-timeout: 30000ms
+      read-timeout: 30000ms
