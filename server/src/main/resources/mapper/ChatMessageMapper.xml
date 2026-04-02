@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.itsheng.service.mapper.ChatMessageMapper">
+
+    <!-- 结果映射 -->
+    <resultMap id="ChatMessageMap" type="com.itsheng.pojo.entity.ChatMessage">
+        <id column="id" property="id"/>
+        <result column="conversation_id" property="conversationId"/>
+        <result column="user_id" property="userId"/>
+        <result column="role" property="role"/>
+        <result column="content" property="content"/>
+        <result column="create_time" property="createTime" javaType="java.time.LocalDateTime"/>
+    </resultMap>
+
+    <!-- 插入消息 -->
+    <insert id="insert" parameterType="com.itsheng.pojo.entity.ChatMessage" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ai_career_plan.chat_message (conversation_id, user_id, role, content, create_time)
+        VALUES (#{conversationId}, #{userId}, #{role}, #{content}, #{createTime})
+    </insert>
+
+    <!-- 根据会话ID查询消息列表（游标分页，按创建时间正序） -->
+    <select id="selectByConversationId" resultMap="ChatMessageMap">
+        SELECT id, conversation_id, user_id, role, content, create_time
+        FROM ai_career_plan.chat_message
+        WHERE conversation_id = #{conversationId}
+        <if test="cursor != null">
+            AND id > #{cursor}
+        </if>
+        ORDER BY create_time ASC, id ASC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 根据ID查询消息 -->
+    <select id="selectById" resultMap="ChatMessageMap">
+        SELECT id, conversation_id, user_id, role, content, create_time
+        FROM ai_career_plan.chat_message
+        WHERE id = #{id}
+    </select>
+
+    <!-- 删除会话的所有消息 -->
+    <delete id="deleteByConversationId">
+        DELETE FROM ai_career_plan.chat_message
+        WHERE conversation_id = #{conversationId}
+    </delete>
+
+</mapper>

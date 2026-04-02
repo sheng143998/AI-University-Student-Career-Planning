@@ -96,7 +96,12 @@ async function onLogout() {
         </div>
       </aside>
 
-      <main class="md:ml-64 pt-24 pb-24 px-8 max-w-7xl mx-auto">
+      <main
+        :class="[
+          'md:ml-64 pt-24',
+          route.name === 'chat' ? 'pb-8 px-6 max-w-none overflow-x-hidden' : 'pb-24 px-8 max-w-7xl mx-auto'
+        ]"
+      >
         <component :is="Component" :key="route.fullPath" />
       </main>
 

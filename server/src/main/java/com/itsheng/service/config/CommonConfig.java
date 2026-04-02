@@ -17,6 +17,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.AsyncConfigurer;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.cache.annotation.EnableCaching;
+import org.springframework.cache.CacheManager;
+import org.springframework.data.redis.cache.RedisCacheManager;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.serializer.RedisSerializationContext;
+import org.springframework.data.redis.serializer.RedisSerializer;
+import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 import java.util.concurrent.Executor;
 
@@ -25,6 +32,7 @@ import static org.springframework.ai.vectorstore.pgvector.PgVectorStore.PgIndexT
 
 @Configuration
 @EnableAsync
+@EnableCaching
 public class CommonConfig implements AsyncConfigurer {
 
     @Bean
@@ -74,6 +82,21 @@ public class CommonConfig implements AsyncConfigurer {
     @Bean
     public ObjectMapper objectMapper() {
         return new ObjectMapper();
+    }
+
+    /**
+     * Redis 缓存管理器
+     */
+    @Bean
+    public CacheManager cacheManager(RedisConnectionFactory connectionFactory) {
+        RedisSerializer<Object> jsonSerializer = RedisSerializer.json();
+        
+        RedisCacheManager.RedisCacheManagerBuilder builder = RedisCacheManager.builder(connectionFactory)
+                .cacheDefaults(org.springframework.data.redis.cache.RedisCacheConfiguration.defaultCacheConfig()
+                        .serializeKeysWith(RedisSerializationContext.SerializationPair.fromSerializer(new StringRedisSerializer()))
+                        .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(jsonSerializer))
+                        .entryTtl(java.time.Duration.ofHours(24)));
+        return builder.build();
     }
 
     //配置 pgVectorStore
