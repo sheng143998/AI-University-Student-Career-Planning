@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.itsheng.service.mapper.JobCategoryMapper">
+
+    <!-- 结果映射 -->
+    <resultMap id="JobCategoryResultMap" type="com.itsheng.pojo.entity.JobCategory">
+        <id column="id" property="id"/>
+        <result column="job_category_code" property="jobCategoryCode"/>
+        <result column="job_category_name" property="jobCategoryName"/>
+        <result column="job_level" property="jobLevel"/>
+        <result column="job_level_name" property="jobLevelName"/>
+        <result column="min_salary" property="minSalary"/>
+        <result column="max_salary" property="maxSalary"/>
+        <result column="salary_unit" property="salaryUnit"/>
+        <result column="source_job_ids" property="sourceJobIds"/>
+        <result column="source_job_count" property="sourceJobCount"/>
+        <result column="required_experience_years" property="requiredExperienceYears"/>
+        <result column="required_skills" property="requiredSkills"/>
+        <result column="job_description" property="jobDescription"/>
+        <result column="ai_confidence_score" property="aiConfidenceScore"/>
+        <result column="analysis_prompt_used" property="analysisPromptUsed"/>
+        <result column="created_at" property="createdAt" javaType="java.time.LocalDateTime"/>
+        <result column="updated_at" property="updatedAt" javaType="java.time.LocalDateTime"/>
+    </resultMap>
+
+    <!-- 插入岗位分类记录 -->
+    <insert id="insert" parameterType="com.itsheng.pojo.entity.JobCategory" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ai_career_plan.job (
+            job_category_code,
+            job_category_name,
+            job_level,
+            job_level_name,
+            min_salary,
+            max_salary,
+            salary_unit,
+            source_job_ids,
+            source_job_count,
+            required_experience_years,
+            required_skills,
+            job_description,
+            ai_confidence_score,
+            analysis_prompt_used,
+            created_at,
+            updated_at
+        ) VALUES (
+            #{jobCategoryCode},
+            #{jobCategoryName},
+            #{jobLevel},
+            #{jobLevelName},
+            #{minSalary},
+            #{maxSalary},
+            #{salaryUnit},
+            #{sourceJobIds}::jsonb,
+            #{sourceJobCount},
+            #{requiredExperienceYears},
+            #{requiredSkills}::jsonb,
+            #{jobDescription},
+            #{aiConfidenceScore},
+            #{analysisPromptUsed},
+            #{createdAt},
+            #{updatedAt}
+        )
+    </insert>
+
+    <!-- 批量插入岗位分类记录 -->
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO ai_career_plan.job (
+            job_category_code,
+            job_category_name,
+            job_level,
+            job_level_name,
+            min_salary,
+            max_salary,
+            salary_unit,
+            source_job_ids,
+            source_job_count,
+            required_experience_years,
+            required_skills,
+            job_description,
+            ai_confidence_score,
+            analysis_prompt_used,
+            created_at,
+            updated_at
+        ) VALUES
+        <foreach collection="jobCategories" item="job" separator=",">
+            (
+                #{job.jobCategoryCode},
+                #{job.jobCategoryName},
+                #{job.jobLevel},
+                #{job.jobLevelName},
+                #{job.minSalary},
+                #{job.maxSalary},
+                #{job.salaryUnit},
+                #{job.sourceJobIds}::jsonb,
+                #{job.sourceJobCount},
+                #{job.requiredExperienceYears},
+                #{job.requiredSkills}::jsonb,
+                #{job.jobDescription},
+                #{job.aiConfidenceScore},
+                #{job.analysisPromptUsed},
+                #{job.createdAt},
+                #{job.updatedAt}
+            )
+        </foreach>
+    </insert>
+
+    <!-- 根据 ID 查询岗位分类 -->
+    <select id="selectById" resultMap="JobCategoryResultMap">
+        SELECT *
+        FROM ai_career_plan.job
+        WHERE id = #{id}
+    </select>
+
+    <!-- 根据类别编码和级别查询岗位分类 -->
+    <select id="selectByCategoryAndLevel" resultMap="JobCategoryResultMap">
+        SELECT *
+        FROM ai_career_plan.job
+        WHERE job_category_code = #{categoryCode}
+          AND job_level = #{level}
+    </select>
+
+    <!-- 查询所有岗位分类 -->
+    <select id="selectAll" resultMap="JobCategoryResultMap">
+        SELECT *
+        FROM ai_career_plan.job
+        ORDER BY job_category_code, job_level
+    </select>
+
+    <!-- 根据类别编码查询所有级别 -->
+    <select id="selectByCategoryCode" resultMap="JobCategoryResultMap">
+        SELECT *
+        FROM ai_career_plan.job
+        WHERE job_category_code = #{categoryCode}
+        ORDER BY job_level
+    </select>
+
+    <!-- 根据完整类别编码查询（编码已包含级别后缀） -->
+    <select id="selectByFullCategoryCode" resultMap="JobCategoryResultMap">
+        SELECT *
+        FROM ai_career_plan.job
+        WHERE job_category_code = #{fullCategoryCode}
+    </select>
+
+    <!-- 更新岗位分类记录 -->
+    <update id="update" parameterType="com.itsheng.pojo.entity.JobCategory">
+        UPDATE ai_career_plan.job
+        <set>
+            <if test="jobCategoryCode != null">job_category_code = #{jobCategoryCode},</if>
+            <if test="jobCategoryName != null">job_category_name = #{jobCategoryName},</if>
+            <if test="jobLevel != null">job_level = #{jobLevel},</if>
+            <if test="jobLevelName != null">job_level_name = #{jobLevelName},</if>
+            <if test="minSalary != null">min_salary = #{minSalary},</if>
+            <if test="maxSalary != null">max_salary = #{maxSalary},</if>
+            <if test="salaryUnit != null">salary_unit = #{salaryUnit},</if>
+            <if test="sourceJobIds != null">source_job_ids = #{sourceJobIds}::jsonb,</if>
+            <if test="sourceJobCount != null">source_job_count = #{sourceJobCount},</if>
+            <if test="requiredExperienceYears != null">required_experience_years = #{requiredExperienceYears},</if>
+            <if test="requiredSkills != null">required_skills = #{requiredSkills}::jsonb,</if>
+            <if test="jobDescription != null">job_description = #{jobDescription},</if>
+            <if test="aiConfidenceScore != null">ai_confidence_score = #{aiConfidenceScore},</if>
+            <if test="analysisPromptUsed != null">analysis_prompt_used = #{analysisPromptUsed},</if>
+            <if test="updatedAt != null">updated_at = #{updatedAt},</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <!-- 删除岗位分类记录 -->
+    <delete id="deleteById" parameterType="java.lang.Long">
+        DELETE FROM ai_career_plan.job
+        WHERE id = #{id}
+    </delete>
+
+</mapper>
