@@ -85,7 +85,7 @@
               </button>
             </div>
             <div v-if="pdfPreviewUrl" class="mt-4 overflow-hidden rounded-lg border border-outline-variant/60 bg-surface-container-highest">
-              <iframe :src="pdfPreviewUrl" title="简历 PDF 预览" class="h-72 w-full" />
+              <iframe :src="pdfPreviewUrl" title="简历 PDF 预览" class="w-full min-h-[28rem] h-[70vh] max-h-[56rem]" />
             </div>
           </div>
 
@@ -130,7 +130,7 @@
             <p v-if="historyPreviewLoading" class="mt-4 text-sm text-on-surface-variant">正在加载预览…</p>
             <p v-else-if="historyPreviewHint" class="mt-4 text-sm text-amber-800 dark:text-amber-200">{{ historyPreviewHint }}</p>
             <div v-if="historyPreviewBlobUrl" class="mt-4 overflow-hidden rounded-lg border border-outline-variant/60 bg-surface-container-highest">
-              <iframe :src="historyPreviewBlobUrl" title="历史简历预览" class="h-72 w-full" />
+              <iframe :src="historyPreviewBlobUrl" title="历史简历预览" class="w-full min-h-[28rem] h-[70vh] max-h-[56rem]" />
             </div>
           </div>
 
@@ -277,6 +277,118 @@
           </div>
         </div>
 
+        <div class="bg-surface-container-lowest rounded-xl p-6 shadow-sm">
+          <div class="flex justify-between items-center mb-6">
+            <h3 class="text-xl font-bold">学生能力画像</h3>
+            <button
+              type="button"
+              class="text-sm font-bold text-primary hover:underline disabled:opacity-50"
+              :disabled="capabilityProfileLoading"
+              @click="refreshCapabilityProfile"
+            >
+              刷新
+            </button>
+          </div>
+
+          <p v-if="capabilityProfileLoading" class="text-sm text-on-surface-variant">加载中…</p>
+          <p v-else-if="capabilityProfileError" class="text-sm text-red-700 dark:text-red-200">{{ capabilityProfileError }}</p>
+          <div v-else-if="capabilityProfile" class="space-y-6">
+            <dl class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+              <div class="rounded-lg border border-outline-variant/60 bg-surface-container-highest p-4">
+                <dt class="text-xs font-bold uppercase tracking-wider text-on-surface-variant">综合评分</dt>
+                <dd class="mt-1 text-2xl font-black text-on-surface">{{ capabilityProfile.overallScore ?? '—' }}</dd>
+              </div>
+              <div class="rounded-lg border border-outline-variant/60 bg-surface-container-highest p-4">
+                <dt class="text-xs font-bold uppercase tracking-wider text-on-surface-variant">完整度评分</dt>
+                <dd class="mt-1 text-2xl font-black text-on-surface">{{ capabilityProfile.completenessScore ?? '—' }}</dd>
+              </div>
+              <div class="rounded-lg border border-outline-variant/60 bg-surface-container-highest p-4">
+                <dt class="text-xs font-bold uppercase tracking-wider text-on-surface-variant">竞争力评分</dt>
+                <dd class="mt-1 text-2xl font-black text-on-surface">{{ capabilityProfile.competitivenessScore ?? '—' }}</dd>
+              </div>
+            </dl>
+
+            <div class="text-xs text-on-surface-variant" v-if="capabilityProfile.generatedAt">
+              生成时间：{{ formatTime(capabilityProfile.generatedAt) }}
+            </div>
+
+            <div v-if="capabilityScoreRows.length">
+              <h4 class="text-sm font-bold mb-3">能力维度得分</h4>
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                <div
+                  v-for="row in capabilityScoreRows"
+                  :key="row.key"
+                  class="rounded-lg border border-outline-variant/60 bg-surface-container-highest p-4"
+                >
+                  <div class="flex items-center justify-between gap-4">
+                    <span class="text-xs font-bold text-on-surface-variant">{{ row.label }}</span>
+                    <span class="text-lg font-black text-on-surface">{{ row.value }}</span>
+                  </div>
+                  <div class="mt-3 w-full h-2 bg-surface-container-high rounded-full overflow-hidden">
+                    <div class="h-full bg-gradient-to-r from-primary to-primary-container" :style="{ width: row.value + '%' }" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="professionalSkillRows.length">
+              <h4 class="text-sm font-bold mb-3">专业技能</h4>
+              <div class="space-y-3">
+                <div
+                  v-for="(s, idx) in professionalSkillRows"
+                  :key="idx"
+                  class="rounded-lg border border-outline-variant/60 bg-surface-container-highest p-4"
+                >
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <span class="font-bold text-on-surface">{{ s.name || '—' }}</span>
+                    <span class="text-xs text-on-surface-variant">熟练度：{{ s.proficiency ?? '—' }} / 5 · 年限：{{ s.years ?? '—' }}</span>
+                  </div>
+                  <p v-if="s.evidence" class="text-sm text-on-surface-variant mt-2 leading-relaxed">{{ s.evidence }}</p>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="certificateRows.length">
+              <h4 class="text-sm font-bold mb-3">证书</h4>
+              <div class="flex flex-wrap gap-2">
+                <span
+                  v-for="(c, idx) in certificateRows"
+                  :key="idx"
+                  class="px-3 py-1 rounded-full text-xs font-bold bg-primary-fixed text-on-primary-fixed-variant"
+                >
+                  {{ c }}
+                </span>
+              </div>
+            </div>
+
+            <div v-if="softSkillRows.length">
+              <h4 class="text-sm font-bold mb-3">软技能</h4>
+              <div class="space-y-3">
+                <div
+                  v-for="row in softSkillRows"
+                  :key="row.key"
+                  class="rounded-lg border border-outline-variant/60 bg-surface-container-highest p-4"
+                >
+                  <div class="flex items-center justify-between gap-4">
+                    <div class="font-bold text-on-surface">{{ row.label }}</div>
+                    <div class="text-sm text-on-surface-variant">{{ row.score ?? '—' }}</div>
+                  </div>
+                  <p v-if="row.description" class="text-sm text-on-surface-variant mt-2 leading-relaxed">{{ row.description }}</p>
+                  <ul v-if="row.evidence?.length" class="mt-2 list-disc list-inside text-sm space-y-1 text-on-surface-variant">
+                    <li v-for="(ev, idx) in row.evidence" :key="idx">{{ ev }}</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="capabilityProfile.aiEvaluation">
+              <h4 class="text-sm font-bold mb-3">AI 综合评价</h4>
+              <p class="text-sm text-on-surface-variant leading-relaxed">{{ capabilityProfile.aiEvaluation }}</p>
+            </div>
+          </div>
+          <p v-else class="text-sm text-on-surface-variant">暂无能力画像数据（需先完成简历分析）。</p>
+        </div>
+
         <div v-if="detail?.highlights?.length" class="bg-surface-container-low rounded-xl p-6 shadow-sm">
           <h3 class="text-lg font-bold mb-3 flex items-center gap-2">
             <span class="material-symbols-outlined text-amber-600">star</span>
@@ -342,6 +454,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { isApiSuccess } from '@/api/client'
 import {
   fetchResumeAnalysisPreview,
+  getCapabilityProfile,
   getResumeAnalysis,
   isAnalysisComplete,
   listResumeAnalysis,
@@ -349,6 +462,7 @@ import {
   normalizeResumeStatus,
   pollResumeAnalysisUntilTerminal,
   uploadResume,
+  type CapabilityProfile,
   type ResumeAnalysisDetail,
   type ResumeAnalysisListItem,
 } from '@/api/resume'
@@ -401,6 +515,10 @@ const parsingStatusText = ref('等待上传简历…')
 const historyItems = ref<ResumeAnalysisListItem[]>([])
 const listNextCursor = ref<string | null>(null)
 const loadingList = ref(false)
+
+const capabilityProfile = ref<CapabilityProfile | null>(null)
+const capabilityProfileLoading = ref(false)
+const capabilityProfileError = ref('')
 
 /** 历史记录：经 fetch + Blob 预览（iframe 无法带 token 头，不能直链 /preview） */
 const historyPreviewBlobUrl = ref<string | null>(null)
@@ -630,6 +748,52 @@ const competitivenessNote = computed(() => {
   return '基于关键词匹配、排版、技能深度与经历四项得分的平均值。'
 })
 
+const capabilityScoreRows = computed(() => {
+  const map = capabilityProfile.value?.capabilityScores
+  if (!map) return []
+  const labelMap: Record<string, string> = {
+    professional_skill: '专业技能',
+    certificate: '证书',
+    innovation: '创新能力',
+    learning: '学习能力',
+    resilience: '抗压能力',
+    communication: '沟通能力',
+    internship: '实习能力',
+  }
+  return Object.entries(map)
+    .filter(([, v]) => typeof v === 'number')
+    .map(([k, v]) => ({ key: k, label: labelMap[k] || k, value: Math.min(100, Math.max(0, Math.round(v))) }))
+    .sort((a, b) => b.value - a.value)
+})
+
+const professionalSkillRows = computed(() => capabilityProfile.value?.professionalSkills ?? [])
+
+const certificateRows = computed(() => {
+  const list = capabilityProfile.value?.certificates ?? []
+  return list.filter((x) => typeof x === 'string' && x.trim() !== '')
+})
+
+const softSkillRows = computed(() => {
+  const map = capabilityProfile.value?.softSkills
+  if (!map) return []
+  const labelMap: Record<string, string> = {
+    innovation: '创新能力',
+    learning: '学习能力',
+    resilience: '抗压能力',
+    communication: '沟通能力',
+    internship: '实习能力',
+  }
+  return Object.entries(map)
+    .map(([k, v]) => ({
+      key: k,
+      label: labelMap[k] || k,
+      score: v?.score,
+      evidence: v?.evidence ?? [],
+      description: v?.description ?? '',
+    }))
+    .sort((a, b) => (Number(b.score ?? 0) - Number(a.score ?? 0)))
+})
+
 const completenessPercent = computed(() => {
   const p = detail.value?.parsed_data
   if (!p) return 0
@@ -672,6 +836,25 @@ async function refreshList() {
     historyItems.value = []
   } finally {
     loadingList.value = false
+  }
+}
+
+async function refreshCapabilityProfile() {
+  capabilityProfileLoading.value = true
+  capabilityProfileError.value = ''
+  try {
+    const r = await getCapabilityProfile()
+    if (!isApiSuccess(r.code)) {
+      capabilityProfile.value = null
+      capabilityProfileError.value = r.msg || '获取能力画像失败'
+      return
+    }
+    capabilityProfile.value = r.data ?? null
+  } catch (e) {
+    capabilityProfile.value = null
+    capabilityProfileError.value = e instanceof Error ? e.message : '网络错误'
+  } finally {
+    capabilityProfileLoading.value = false
   }
 }
 
@@ -747,6 +930,8 @@ async function loadDetail(id: string) {
     globalError.value = e instanceof Error ? e.message : '网络错误'
     detail.value = null
     historyPanelFile.value = null
+  } finally {
+    void refreshCapabilityProfile()
   }
 }
 
@@ -830,6 +1015,7 @@ async function onFileChange(e: Event) {
       warningNotice.value = ''
       globalError.value = ''
       parsingStatusText.value = `分析已完成（completed），进度 ${parsingProgress.value}%。以下为解析结果。`
+      void refreshCapabilityProfile()
     } else if (pollResult.kind === 'failed') {
       bannerAfterUpload.value = true
       bannerPhase.value = 'error'
@@ -858,5 +1044,6 @@ async function onFileChange(e: Event) {
 
 onMounted(() => {
   void refreshList()
+  void refreshCapabilityProfile()
 })
 </script>

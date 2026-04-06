@@ -1,6 +1,7 @@
 package com.itsheng.service.service.Impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.itsheng.common.context.BaseContext;
 import com.itsheng.common.constant.ResumeConstant;
@@ -13,11 +14,14 @@ import com.itsheng.pojo.dto.ResumeParsedData;
 import com.itsheng.pojo.dto.ResumeScores;
 import com.itsheng.pojo.dto.ResumeSuggestion;
 import com.itsheng.pojo.entity.ResumeAnalysisResult;
+import com.itsheng.pojo.entity.StudentCapabilityProfile;
 import com.itsheng.pojo.entity.UserVectorStore;
+import com.itsheng.pojo.vo.CapabilityProfileVO;
 import com.itsheng.pojo.vo.ResumeAnalysisResultVO;
 import com.itsheng.pojo.vo.ResumeUploadVO;
 import com.itsheng.service.controller.CommonController;
 import com.itsheng.service.mapper.ResumeMapper;
+import com.itsheng.service.mapper.StudentCapabilityProfileMapper;
 import com.itsheng.service.mapper.UserVectorStoreMapper;
 import com.itsheng.service.service.ResumeService;
 import com.itsheng.common.utils.AliOssUtil;
@@ -62,6 +66,7 @@ public class ResumeServiceImpl implements ResumeService {
     private final CommonController commonController;
     private final UserVectorStoreMapper userVectorStoreMapper;
     private final ResumeMapper resumeMapper;
+    private final StudentCapabilityProfileMapper capabilityProfileMapper;
     private final AliOssUtil aliOssUtil;
     private final ChatClient resumeAnalysisChatClient;
     private final ObjectMapper objectMapper;
@@ -220,7 +225,14 @@ public class ResumeServiceImpl implements ResumeService {
             resumeMapper.update(analysisRecord);
             log.info("简历分析结果已更新，analysisId: {}", analysisRecord.getId());
 
-            // 8. 更新 user_vector_store 表的状态为 COMPLETED
+            // 8. 调用 AI 生成学生能力画像并保存
+            try {
+                generateCapabilityProfile(userId, analysisRecord.getId(), resumeContent);
+            } catch (Exception e) {
+                log.error("生成学生能力画像失败，userId: {}, analysisId: {}", userId, analysisRecord.getId(), e);
+            }
+
+            // 9. 更新 user_vector_store 表的状态为 COMPLETED
             UserVectorStore userVectorStore = UserVectorStore.builder()
                     .id(vectorStoreId)
                     .resumeContent(resumeContent)
@@ -324,6 +336,162 @@ public class ResumeServiceImpl implements ResumeService {
 
         // 2. 生成签名 URL（1 小时有效期）
         return aliOssUtil.generatePresignedUrl(fileUrl, 60);
+    }
+
+    @Override
+    public CapabilityProfileVO getCapabilityProfile(Long userId) {
+        StudentCapabilityProfile profile = capabilityProfileMapper.selectByUserId(userId);
+        if (profile == null) {
+            return null;
+        }
+        return buildCapabilityProfileVO(profile);
+    }
+
+    /**
+     * 调用 AI 生成学生能力画像并保存到数据库
+     */
+    private void generateCapabilityProfile(Long userId, Long analysisId, String resumeContent) {
+        log.info("开始生成学生能力画像，userId: {}, analysisId: {}", userId, analysisId);
+
+        // 1. 调用 AI 分析
+        String prompt = """
+                请分析以下简历内容，生成学生就业能力画像：
+
+                ===== 简历开始 =====
+                %s
+                ===== 简历结束 =====
+
+                请按照要求的 JSON 格式返回能力画像，直接返回 JSON 对象，不要包含任何 markdown 标记或额外说明。
+                """.formatted(resumeContent);
+
+        ChatResponse response = resumeAnalysisChatClient.prompt()
+                .system(SystemConstants.CAPABILITY_PROFILE_PROMPT)
+                .user(prompt)
+                .call()
+                .chatResponse();
+
+        String capabilityJson = response.getResult().getOutput().getText();
+        log.info("AI 返回的能力画像 JSON：{}", capabilityJson);
+
+        // 2. 解析 JSON
+        String cleanedJson = cleanJsonResponse(capabilityJson);
+        JsonNode rootNode;
+        try {
+            rootNode = objectMapper.readTree(cleanedJson);
+        } catch (JsonProcessingException e) {
+            throw new ResumeAnalysisException("能力画像 JSON 解析失败：" + e.getMessage(), e);
+        }
+
+        // 3. 构建实体
+        try {
+            StudentCapabilityProfile profile = StudentCapabilityProfile.builder()
+                    .userId(userId)
+                    .resumeAnalysisId(analysisId)
+                    .overallScore(getIntValue(rootNode, "overall_score", 0))
+                    .completenessScore(getIntValue(rootNode, "completeness_score", 0))
+                    .competitivenessScore(getIntValue(rootNode, "competitiveness_score", 0))
+                    .capabilityScores(objectMapper.writeValueAsString(rootNode.get("capability_scores")))
+                    .professionalSkills(objectMapper.writeValueAsString(rootNode.get("professional_skills")))
+                    .certificates(objectMapper.writeValueAsString(rootNode.get("certificates")))
+                    .softSkills(objectMapper.writeValueAsString(rootNode.get("soft_skills")))
+                    .aiEvaluation(getStringValue(rootNode, "ai_evaluation", ""))
+                    .generatedAt(LocalDateTime.now())
+                    .updatedAt(LocalDateTime.now())
+                    .build();
+
+            // 4. 插入数据库
+            capabilityProfileMapper.insert(profile);
+            log.info("学生能力画像已保存，profileId: {}, userId: {}", profile.getId(), userId);
+        } catch (JsonProcessingException e) {
+            throw new ResumeAnalysisException("序列化能力画像数据失败：" + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 从 JsonNode 安全获取整数值
+     */
+    private int getIntValue(JsonNode rootNode, String fieldName, int defaultValue) {
+        var node = rootNode.get(fieldName);
+        if (node != null && node.isNumber()) {
+            return node.asInt();
+        }
+        return defaultValue;
+    }
+
+    /**
+     * 从 JsonNode 安全获取字符串值
+     */
+    private String getStringValue(JsonNode rootNode, String fieldName, String defaultValue) {
+        var node = rootNode.get(fieldName);
+        if (node != null && node.isTextual()) {
+            return node.asText();
+        }
+        return defaultValue;
+    }
+
+    /**
+     * 构建能力画像 VO
+     */
+    private CapabilityProfileVO buildCapabilityProfileVO(StudentCapabilityProfile profile) {
+        try {
+            CapabilityProfileVO.CapabilityProfileVOBuilder builder = CapabilityProfileVO.builder()
+                    .id(profile.getId())
+                    .userId(profile.getUserId())
+                    .overallScore(profile.getOverallScore())
+                    .completenessScore(profile.getCompletenessScore())
+                    .competitivenessScore(profile.getCompetitivenessScore())
+                    .aiEvaluation(profile.getAiEvaluation())
+                    .generatedAt(profile.getGeneratedAt() != null ? profile.getGeneratedAt().toString() : null);
+
+            // 解析 capability_scores
+            if (profile.getCapabilityScores() != null && !profile.getCapabilityScores().isEmpty()
+                    && !profile.getCapabilityScores().equals("{}")) {
+                builder.capabilityScores(objectMapper.readValue(
+                        profile.getCapabilityScores(),
+                        objectMapper.getTypeFactory().constructMapType(Map.class, String.class, Integer.class)
+                ));
+            }
+
+            // 解析 professional_skills
+            if (profile.getProfessionalSkills() != null && !profile.getProfessionalSkills().isEmpty()
+                    && !profile.getProfessionalSkills().equals("[]")) {
+                builder.professionalSkills(objectMapper.readValue(
+                        profile.getProfessionalSkills(),
+                        objectMapper.getTypeFactory().constructCollectionType(
+                                List.class, CapabilityProfileVO.ProfessionalSkill.class
+                        )
+                ));
+            }
+
+            // 解析 certificates
+            if (profile.getCertificates() != null && !profile.getCertificates().isEmpty()
+                    && !profile.getCertificates().equals("[]")) {
+                builder.certificates(objectMapper.readValue(
+                        profile.getCertificates(),
+                        objectMapper.getTypeFactory().constructCollectionType(List.class, String.class)
+                ));
+            }
+
+            // 解析 soft_skills
+            if (profile.getSoftSkills() != null && !profile.getSoftSkills().isEmpty()
+                    && !profile.getSoftSkills().equals("{}")) {
+                builder.softSkills(objectMapper.readValue(
+                        profile.getSoftSkills(),
+                        objectMapper.getTypeFactory().constructMapType(
+                                Map.class, String.class, CapabilityProfileVO.SoftSkillDetail.class
+                        )
+                ));
+            }
+
+            return builder.build();
+        } catch (JsonProcessingException e) {
+            log.error("解析能力画像 JSON 失败：{}", e.getMessage());
+            return CapabilityProfileVO.builder()
+                    .id(profile.getId())
+                    .userId(profile.getUserId())
+                    .overallScore(profile.getOverallScore())
+                    .build();
+        }
     }
 
     /**

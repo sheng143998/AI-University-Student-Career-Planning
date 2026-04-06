@@ -2,6 +2,7 @@ package com.itsheng.service.controller;
 
 import com.itsheng.common.context.BaseContext;
 import com.itsheng.common.result.Result;
+import com.itsheng.pojo.vo.CapabilityProfileVO;
 import com.itsheng.pojo.vo.ResumeAnalysisResultVO;
 import com.itsheng.pojo.vo.ResumeUploadVO;
 import com.itsheng.service.service.ResumeService;
@@ -21,7 +22,7 @@ import java.util.List;
 @RequestMapping("/api/resume")
 @Tag(name = "简历接口")
 @RequiredArgsConstructor
-public class ResumeController {
+public class  ResumeController {
 
     private final ResumeService resumeService;
 
@@ -105,5 +106,22 @@ public class ResumeController {
 
         String url = resumeService.getPreviewUrl(vectorStoreId);
         return Result.success(url);
+    }
+
+    /**
+     * 获取学生能力画像
+     * @return 学生就业能力画像数据
+     */
+    @GetMapping("/capability-profile")
+    @Operation(summary = "获取学生能力画像", description = "获取当前用户的学生就业能力画像，包含完整度评分、竞争力评分及各维度能力评估")
+    public Result<CapabilityProfileVO> getCapabilityProfile() {
+        Long userId = BaseContext.getUserId();
+        log.info("用户 ID:{}, 获取学生能力画像", userId);
+
+        CapabilityProfileVO result = resumeService.getCapabilityProfile(userId);
+        if (result == null) {
+            return Result.error("尚未上传简历，无法获取能力画像");
+        }
+        return Result.success(result);
     }
 }

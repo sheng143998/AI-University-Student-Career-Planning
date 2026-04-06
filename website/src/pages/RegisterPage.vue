@@ -1,22 +1,24 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import { authContent } from '@/config/authContent'
 import { isApiSuccess } from '@/api/client'
-import { fileToAvatarBase64, isLikelyImageFile } from '@/lib/resizeAvatar'
+import { uploadFile } from '@/api/auth'
+import { isLikelyImageFile } from '@/lib/resizeAvatar'
 import { useAuthStore } from '@/stores/auth'
 
 const content = authContent.register
 const auth = useAuthStore()
+const router = useRouter()
 
 const form = reactive({
-  email: '',
+  username: '',
   password: '',
   confirmPassword: '',
 })
 
 const avatarPreviewUrl = ref<string | null>(null)
-const avatarBase64 = ref<string | null>(null)
+const avatarFile = ref<File | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 
 const loading = ref(false)
@@ -34,7 +36,7 @@ function revokeAvatarPreview() {
 function clearAvatar() {
   revokeAvatarPreview()
   avatarPreviewUrl.value = null
-  avatarBase64.value = null
+  avatarFile.value = null
 }
 
 function openAvatarPicker() {
@@ -59,7 +61,7 @@ async function onAvatarSelected(ev: Event) {
   try {
     revokeAvatarPreview()
     avatarPreviewUrl.value = URL.createObjectURL(file)
-    avatarBase64.value = await fileToAvatarBase64(file)
+    avatarFile.value = file
     if (errorMessage.value) errorMessage.value = ''
   } catch (e) {
     errorMessage.value = e instanceof Error ? e.message : '头像处理失败，请换一张图片重试。'
@@ -68,7 +70,7 @@ async function onAvatarSelected(ev: Event) {
 }
 
 watch(
-  () => [form.email, form.password, form.confirmPassword, avatarBase64.value],
+  () => [form.username, form.password, form.confirmPassword, avatarFile.value],
   () => {
     if (errorMessage.value) errorMessage.value = ''
   }
@@ -79,8 +81,8 @@ onBeforeUnmount(() => {
 })
 
 function validateRegisterForm() {
-  if (!form.email.trim()) {
-    errorMessage.value = '请输入邮箱。'
+  if (!form.username.trim()) {
+    errorMessage.value = '请输入用户名。'
     return false
   }
 
@@ -107,12 +109,23 @@ async function handleRegisterSubmit() {
 
   loading.value = true
   try {
-    const r = await auth.register(form.email.trim(), form.password, avatarBase64.value ?? undefined)
+    let userImageUrl: string | undefined
+    if (avatarFile.value) {
+      const up = await uploadFile(avatarFile.value)
+      if (!isApiSuccess(up.code) || !up.data) {
+        errorMessage.value = up.msg || '头像上传失败'
+        return
+      }
+      userImageUrl = up.data
+    }
+
+    const r = await auth.register(form.username.trim(), form.password, userImageUrl)
     if (!isApiSuccess(r.code)) {
       errorMessage.value = r.msg || '注册失败'
       return
     }
     successMessage.value = '注册成功，请前往登录'
+    await router.push({ name: 'login' })
   } catch (e) {
     errorMessage.value = '注册失败，请稍后重试。'
     console.error(e)
@@ -153,8 +166,8 @@ async function handleRegisterSubmit() {
               </button>
               <div class="auth-avatar-actions">
                 <button type="button" class="auth-avatar-btn" @click="openAvatarPicker">上传图片</button>
-                <button v-if="avatarBase64" type="button" class="auth-avatar-btn ghost" @click="clearAvatar">移除</button>
-                <p class="auth-avatar-hint">支持 JPG / PNG / WebP，最大 5MB，将自动压缩后提交。</p>
+                <button v-if="avatarFile" type="button" class="auth-avatar-btn ghost" @click="clearAvatar">移除</button>
+                <p class="auth-avatar-hint">支持 JPG / PNG / WebP，最大 5MB，将在注册前上传。</p>
               </div>
             </div>
             <input
@@ -167,8 +180,8 @@ async function handleRegisterSubmit() {
           </div>
 
           <label>
-            邮箱
-            <input v-model="form.email" type="email" autocomplete="email" placeholder="name@example.com" />
+            用户名
+            <input v-model="form.username" type="text" autocomplete="username" placeholder="请输入用户名" />
           </label>
 
           <label>

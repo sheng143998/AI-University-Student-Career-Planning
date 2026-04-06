@@ -14,7 +14,7 @@ export const useAuthStore = defineStore('auth', () => {
     setToken(t)
     token.value = t
     if (u) {
-      const su: StoredUser = { id: u.id, name: u.name }
+      const su: StoredUser = { id: String(u.id), name: u.name }
       setStoredUser(su)
       user.value = su
     }
@@ -30,11 +30,7 @@ export const useAuthStore = defineStore('auth', () => {
     const r = await authApi.login({ username, password })
     if (isApiSuccess(r.code) && r.data?.token) {
       const d = r.data
-      const fromVo =
-        d.username != null && d.username !== ''
-          ? { id: d.username, name: d.username }
-          : null
-      applySession(d.token, d.user ?? fromVo)
+      applySession(d.token, d.user ?? null)
     }
     return r
   }
@@ -43,7 +39,7 @@ export const useAuthStore = defineStore('auth', () => {
     const r = await authApi.register({
       username,
       password,
-      ...(userimage ? { userimage } : {}),
+      ...(userimage ? { userImage: userimage } : {}),
     })
     return r
   }

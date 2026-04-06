@@ -1,5 +1,6 @@
 package com.itsheng.service.service;
 
+import com.itsheng.pojo.vo.CapabilityProfileVO;
 import com.itsheng.pojo.vo.ResumeAnalysisResultVO;
 import com.itsheng.pojo.vo.ResumeUploadVO;
 import org.springframework.core.io.Resource;
@@ -64,4 +65,11 @@ public interface ResumeService {
      * @return 签名后的预览 URL
      */
     String getPreviewUrl(String vectorStoreId);
+
+    /**
+     * 获取当前用户的学生能力画像
+     * @param userId 用户 ID
+     * @return 能力画像 VO，未上传简历返回 null
+     */
+    CapabilityProfileVO getCapabilityProfile(Long userId);
 }

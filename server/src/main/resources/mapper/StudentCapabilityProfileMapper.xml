@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.itsheng.service.mapper.StudentCapabilityProfileMapper">
+
+    <!-- 结果映射 -->
+    <resultMap id="CapabilityProfileMap" type="com.itsheng.pojo.entity.StudentCapabilityProfile">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="resume_analysis_id" property="resumeAnalysisId"/>
+        <result column="overall_score" property="overallScore"/>
+        <result column="completeness_score" property="completenessScore"/>
+        <result column="competitiveness_score" property="competitivenessScore"/>
+        <result column="capability_scores" property="capabilityScores"/>
+        <result column="professional_skills" property="professionalSkills"/>
+        <result column="certificates" property="certificates"/>
+        <result column="soft_skills" property="softSkills"/>
+        <result column="ai_evaluation" property="aiEvaluation"/>
+        <result column="generated_at" property="generatedAt" javaType="java.time.LocalDateTime"/>
+        <result column="updated_at" property="updatedAt" javaType="java.time.LocalDateTime"/>
+    </resultMap>
+
+    <!-- 插入能力画像记录 -->
+    <insert id="insert" parameterType="com.itsheng.pojo.entity.StudentCapabilityProfile" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ai_career_plan.student_capability_profile (
+            user_id,
+            resume_analysis_id,
+            overall_score,
+            completeness_score,
+            competitiveness_score,
+            capability_scores,
+            professional_skills,
+            certificates,
+            soft_skills,
+            ai_evaluation,
+            generated_at,
+            updated_at
+        ) VALUES (
+            #{userId},
+            #{resumeAnalysisId},
+            #{overallScore},
+            #{completenessScore},
+            #{competitivenessScore},
+            #{capabilityScores}::jsonb,
+            #{professionalSkills}::jsonb,
+            #{certificates}::jsonb,
+            #{softSkills}::jsonb,
+            #{aiEvaluation},
+            #{generatedAt},
+            #{updatedAt}
+        )
+    </insert>
+
+    <!-- 根据用户 ID 查询最新一条能力画像 -->
+    <select id="selectByUserId" resultMap="CapabilityProfileMap">
+        SELECT *
+        FROM ai_career_plan.student_capability_profile
+        WHERE user_id = #{userId}
+        ORDER BY id DESC
+        LIMIT 1
+    </select>
+
+</mapper>

@@ -373,8 +373,8 @@ public class JobImportServiceImpl implements JobImportService {
 
         try {
             // 1. 按 ID 范围查询岗位数据（ID 20-1000，测试用）
-            Long startId = 1101L;
-            Long endId = 5000L;
+            Long startId = 6001L;
+            Long endId = 10000L;
             List<JobEntity> jobsInRange = jobMapper.selectByIdRange(startId, endId);
             if (jobsInRange == null || jobsInRange.isEmpty()) {
                 log.warn("recruitment_data 表中 ID {}-{} 范围内暂无数据，无法进行分类", startId, endId);

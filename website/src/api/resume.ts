@@ -47,6 +47,33 @@ export interface ResumeSuggestion {
   content?: string
 }
 
+export interface CapabilityProfileProfessionalSkill {
+  name?: string
+  proficiency?: number
+  years?: number
+  evidence?: string
+}
+
+export interface CapabilityProfileSoftSkillDetail {
+  score?: number
+  evidence?: string[]
+  description?: string
+}
+
+export interface CapabilityProfile {
+  id?: number
+  userId?: number
+  overallScore?: number
+  completenessScore?: number
+  competitivenessScore?: number
+  capabilityScores?: Record<string, number>
+  professionalSkills?: CapabilityProfileProfessionalSkill[]
+  certificates?: string[]
+  softSkills?: Record<string, CapabilityProfileSoftSkillDetail>
+  aiEvaluation?: string
+  generatedAt?: string
+}
+
 /** 与 resume_analysis_result.status 对齐 */
 export type ResumeAnalysisStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'stopped'
 
@@ -112,6 +139,18 @@ export async function getResumeAnalysis(id: string): Promise<ApiResult<ResumeAna
   const raw = await parseApiResponse<unknown>(res)
   if (!isApiSuccess(raw.code)) return raw as ApiResult<ResumeAnalysisDetail>
   const data = raw.data != null ? normalizeResumeAnalysisDetail(raw.data) : undefined
+  return { ...raw, data }
+}
+
+export async function getCapabilityProfile(): Promise<ApiResult<CapabilityProfile>> {
+  const res = await fetch(`${apiBase()}/api/resume/capability-profile`, {
+    method: 'GET',
+    headers: headersAuth(),
+    credentials: 'include',
+  })
+  const raw = await parseApiResponse<unknown>(res)
+  if (!isApiSuccess(raw.code)) return raw as ApiResult<CapabilityProfile>
+  const data = raw.data != null ? normalizeCapabilityProfile(raw.data) : undefined
   return { ...raw, data }
 }
 
@@ -236,6 +275,24 @@ export function normalizeResumeAnalysisDetail(input: unknown): ResumeAnalysisDet
     suggestions: o.suggestions as ResumeSuggestion[] | undefined,
     created_at: (o.created_at ?? o.createdAt) as string | undefined,
     updated_at: (o.updated_at ?? o.updatedAt) as string | undefined,
+  }
+}
+
+export function normalizeCapabilityProfile(input: unknown): CapabilityProfile {
+  if (input == null || typeof input !== 'object') return {}
+  const o = input as Record<string, unknown>
+  return {
+    id: (o.id ?? o.profile_id ?? o.profileId) as number | undefined,
+    userId: (o.userId ?? o.user_id) as number | undefined,
+    overallScore: (o.overallScore ?? o.overall_score) as number | undefined,
+    completenessScore: (o.completenessScore ?? o.completeness_score) as number | undefined,
+    competitivenessScore: (o.competitivenessScore ?? o.competitiveness_score) as number | undefined,
+    capabilityScores: (o.capabilityScores ?? o.capability_scores) as Record<string, number> | undefined,
+    professionalSkills: (o.professionalSkills ?? o.professional_skills) as CapabilityProfileProfessionalSkill[] | undefined,
+    certificates: (o.certificates ?? o.certificate_list) as string[] | undefined,
+    softSkills: (o.softSkills ?? o.soft_skills) as Record<string, CapabilityProfileSoftSkillDetail> | undefined,
+    aiEvaluation: (o.aiEvaluation ?? o.ai_evaluation) as string | undefined,
+    generatedAt: (o.generatedAt ?? o.generated_at) as string | undefined,
   }
 }
 
