@@ -139,14 +139,43 @@
         <router-link to="/market" class="w-full mt-6 text-primary text-xs text-center font-bold hover:underline">探索市场</router-link>
       </div>
 
-      <!-- Action Items (Span 12 - full width) -->
-      <div class="md:col-span-12 bg-surface-container-lowest rounded-xl p-8 shadow-[0_20px_40px_rgba(25,28,30,0.04)]">
+      <!-- Skill Gap Visualization (Span 6) -->
+      <div class="md:col-span-6 bg-surface-container-lowest rounded-xl p-8 shadow-[0_20px_40px_rgba(25,28,30,0.04)]">
+        <h3 class="text-lg font-bold headline-font mb-8">技能差距可视化</h3>
+        <div class="aspect-square max-w-[300px] mx-auto relative flex items-center justify-center">
+          <div class="absolute inset-0 border border-outline-variant/20 rounded-full scale-100"></div>
+          <div class="absolute inset-0 border border-outline-variant/20 rounded-full scale-[0.75]"></div>
+          <div class="absolute inset-0 border border-outline-variant/20 rounded-full scale-[0.5]"></div>
+          <div class="absolute inset-0 border border-outline-variant/20 rounded-full scale-[0.25]"></div>
+          <svg class="w-full h-full transform -rotate-18 overflow-visible" viewBox="0 0 100 100">
+            <polygon fill="rgba(0, 86, 210, 0.1)" points="50,10 90,50 50,90 10,50" stroke="#0056d2" stroke-width="2"></polygon>
+            <polygon fill="rgba(76, 214, 255, 0.2)" points="50,25 70,50 50,75 30,50" stroke="#004d60" stroke-dasharray="2,2" stroke-width="1.5"></polygon>
+          </svg>
+          <div class="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-4 text-[10px] font-bold text-on-surface-variant uppercase">技术</div>
+          <div class="absolute right-0 top-1/2 translate-x-12 -translate-y-1/2 text-[10px] font-bold text-on-surface-variant uppercase">创新</div>
+          <div class="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-4 text-[10px] font-bold text-on-surface-variant uppercase">韧性</div>
+          <div class="absolute left-0 top-1/2 -translate-x-12 -translate-y-1/2 text-[10px] font-bold text-on-surface-variant uppercase">沟通</div>
+        </div>
+        <div class="mt-8 flex justify-center gap-6">
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 bg-primary rounded-full"></span>
+            <span class="text-xs text-on-surface-variant">您的水平</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 bg-tertiary-fixed-dim rounded-full"></span>
+            <span class="text-xs text-on-surface-variant">行业前 10%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Items (Span 6) -->
+      <div class="md:col-span-6 bg-surface-container-lowest rounded-xl p-8 shadow-[0_20px_40px_rgba(25,28,30,0.04)]">
         <div class="flex items-center justify-between mb-8">
           <h3 class="text-lg font-bold headline-font">行动指南</h3>
           <span class="material-symbols-outlined text-primary">priority_high</span>
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div v-if="(actions?.length ?? 0) === 0" class="text-sm text-on-surface-variant md:col-span-2">暂无行动建议</div>
+        <div class="space-y-4">
+          <div v-if="(actions?.length ?? 0) === 0" class="text-sm text-on-surface-variant">暂无行动建议</div>
           <div v-for="(item, index) in actions" :key="item.id || index" class="group flex items-center justify-between p-4 bg-surface rounded-xl hover:bg-primary-fixed/30 transition-all cursor-pointer" @click="onActionClick(item)">
             <div class="flex items-center gap-4">
               <div class="w-10 h-10 rounded-lg bg-surface-container-highest flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-colors">
