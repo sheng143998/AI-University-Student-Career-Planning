@@ -22,8 +22,10 @@ export interface LoginBody {
 /** 后端 UserLoginVO：token + user… */
 export interface LoginData {
   token: string
-  expires_in?: number
-  user: AuthUser
+  username: string
+  sex?: number
+  userImage?: string
+  createtime?: string
 }
 
 export interface RegisterBody {
@@ -74,7 +76,7 @@ export async function register(body: RegisterBody): Promise<ApiResult<RegisterDa
 }
 
 export async function logout(): Promise<ApiResult<LogoutData>> {
-  const res = await fetch(`${apiBase()}/api/auth/logout`, {
+  const res = await fetch(`${apiBase()}/api/user/logout`, {
     method: 'POST',
     headers: headersAuth(),
     credentials: 'include',

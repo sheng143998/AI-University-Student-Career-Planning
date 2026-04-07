@@ -11,9 +11,9 @@ fuchuang:
     endpoint: ${FUCHUANG_ALIOSS_ENDPOINT}
     bucket-name: ${FUCHUANG_ALIOSS_BUCKET_NAME}
   redis:
-        port: ${FUCHUANG_REDIS_PORT}
-        host: ${FUCHUANG_REDIS_HOST}
-        database: ${FUCHUANG_REDIS_DATABASE}
+    port: ${FUCHUANG_REDIS_PORT}
+    host: ${FUCHUANG_REDIS_HOST}
+    database: ${FUCHUANG_REDIS_DATABASE}
 spring:
   data:
     redis:
