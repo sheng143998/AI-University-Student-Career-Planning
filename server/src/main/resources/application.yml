@@ -4,9 +4,9 @@ server:
 spring:
   data:
     redis:
-      port: ${fuchuang.redis.port}
-      host: ${fuchuang.redis.host}
-      database: ${fuchuang.redis.database}
+      port: ${FUCHUANG_REDIS_PORT}
+      host: ${FUCHUANG_REDIS_HOST}
+      database: ${FUCHUANG_REDIS_DATABASE}
       timeout: 5000
   profiles:
     active: dev
@@ -62,7 +62,7 @@ fuchuang:
     # 令牌名称
     tokenName: token
   alioss:
-    endpoint: ${fuchuang.alioss.access-key-secret}
-    access-key-id: ${fuchuang.alioss.access-key-id}
-    access-key-secret: ${fuchuang.alioss.access-key-secret}
-    bucket-name: ${fuchuang.alioss.bucket-name}
+    endpoint: ${FUCHUANG_ALIOSS_ENDPOINT}
+    access-key-id: ${FUCHUANG_ALIOSS_ACCESS_KEY_ID}
+    access-key-secret: ${FUCHUANG_ALIOSS_ACCESS_KEY_SECRET}
+    bucket-name: ${FUCHUANG_ALIOSS_BUCKET_NAME}

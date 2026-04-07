@@ -135,6 +135,47 @@
         ORDER BY job_level
     </select>
 
+    <!-- 搜索职业节点（基于 job 表） -->
+    <select id="searchByKeyword" resultMap="JobCategoryResultMap">
+        SELECT *
+        FROM ai_career_plan.job
+        <where>
+            <if test="keyword != null and keyword != ''">
+                (job_category_name ILIKE '%' || #{keyword} || '%'
+                OR job_category_code ILIKE '%' || #{keyword} || '%')
+            </if>
+        </where>
+        ORDER BY updated_at DESC NULLS LAST, id DESC
+        <if test="limit != null and limit &gt; 0">
+            LIMIT #{limit}
+        </if>
+    </select>
+
+    <!-- 根据基础类别编码查询所有级别（垂直晋升路径） -->
+    <select id="selectVerticalPathByCategoryCode" resultMap="JobCategoryResultMap">
+        SELECT *
+        FROM ai_career_plan.job
+        WHERE REGEXP_REPLACE(job_category_code, '_(INTERNSHIP|JUNIOR|MID|SENIOR)$', '') = #{categoryCode}
+        ORDER BY CASE job_level
+            WHEN 'INTERNSHIP' THEN 1
+            WHEN 'JUNIOR' THEN 2
+            WHEN 'MID' THEN 3
+            WHEN 'SENIOR' THEN 4
+            ELSE 99
+        END, id ASC
+    </select>
+
+    <!-- 随机获取一个基础类别编码（去掉级别后缀） -->
+    <select id="selectRandomCategoryCode" resultType="java.lang.String">
+        SELECT base_code FROM (
+            SELECT DISTINCT REGEXP_REPLACE(job_category_code, '_(INTERNSHIP|JUNIOR|MID|SENIOR)$', '') AS base_code
+            FROM ai_career_plan.job
+            WHERE job_category_code IS NOT NULL AND job_category_code &lt;&gt; ''
+        ) t
+        ORDER BY RANDOM()
+        LIMIT 1
+    </select>
+
     <!-- 根据完整类别编码查询（编码已包含级别后缀） -->
     <select id="selectByFullCategoryCode" resultMap="JobCategoryResultMap">
         SELECT *

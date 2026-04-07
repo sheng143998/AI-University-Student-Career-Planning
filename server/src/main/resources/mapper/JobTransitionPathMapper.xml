@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.itsheng.service.mapper.JobTransitionPathMapper">
+
+    <resultMap id="BaseResultMap" type="com.itsheng.pojo.entity.JobTransitionPath">
+        <id column="id" property="id"/>
+        <result column="from_job_id" property="fromJobId"/>
+        <result column="from_job_name" property="fromJobName"/>
+        <result column="to_job_id" property="toJobId"/>
+        <result column="to_job_name" property="toJobName"/>
+        <result column="transition_difficulty" property="transitionDifficulty"/>
+        <result column="avg_transition_time_months" property="avgTransitionTimeMonths"/>
+        <result column="required_skills_gap" property="requiredSkillsGap"/>
+        <result column="similarity_score" property="similarityScore"/>
+        <result column="create_time" property="createTime"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, from_job_id, from_job_name, to_job_id, to_job_name, transition_difficulty,
+        avg_transition_time_months, required_skills_gap, similarity_score, create_time
+    </sql>
+
+    <insert id="insert" parameterType="com.itsheng.pojo.entity.JobTransitionPath">
+        INSERT INTO ai_career_plan.job_transition_paths (
+            from_job_id, from_job_name, to_job_id, to_job_name, transition_difficulty,
+            avg_transition_time_months, required_skills_gap, similarity_score
+        ) VALUES (
+            #{fromJobId}, #{fromJobName}, #{toJobId}, #{toJobName}, #{transitionDifficulty},
+            #{avgTransitionTimeMonths}, #{requiredSkillsGap}::jsonb, #{similarityScore}
+        )
+    </insert>
+
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO ai_career_plan.job_transition_paths (
+            from_job_id, from_job_name, to_job_id, to_job_name, transition_difficulty,
+            avg_transition_time_months, required_skills_gap, similarity_score
+        ) VALUES
+        <foreach collection="paths" item="path" separator=",">
+            (
+                #{path.fromJobId}, #{path.fromJobName}, #{path.toJobId}, #{path.toJobName},
+                #{path.transitionDifficulty}, #{path.avgTransitionTimeMonths},
+                #{path.requiredSkillsGap}::jsonb, #{path.similarityScore}
+            )
+        </foreach>
+    </insert>
+
+    <select id="selectByFromJobId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM ai_career_plan.job_transition_paths
+        WHERE from_job_id = #{fromJobId}
+        ORDER BY similarity_score DESC
+    </select>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM ai_career_plan.job_transition_paths
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectAll" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM ai_career_plan.job_transition_paths
+        ORDER BY from_job_id, similarity_score DESC
+    </select>
+
+    <delete id="deleteAll">
+        DELETE FROM ai_career_plan.job_transition_paths
+    </delete>
+
+    <select id="countByFromJobId" resultType="int">
+        SELECT COUNT(*) FROM ai_career_plan.job_transition_paths
+        WHERE from_job_id = #{fromJobId}
+    </select>
+
+</mapper>

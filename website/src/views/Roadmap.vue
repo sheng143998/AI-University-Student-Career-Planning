@@ -7,27 +7,39 @@
       </div>
 
       <div class="flex flex-wrap items-center gap-4">
-        <div class="relative">
-          <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline">search</span>
+        <!-- 搜索框带下拉建议 -->
+        <div class="relative" ref="searchContainer">
+          <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline z-10">search</span>
           <input
             v-model="query"
+            @input="onSearchInput"
+            @focus="showSuggestions = query.length > 0"
+            @keydown.enter="onSearchEnter"
             class="pl-10 pr-4 py-2.5 w-64 bg-surface-container-highest border-none rounded-xl focus:ring-2 focus:ring-tertiary-fixed-dim focus:ring-offset-0 text-sm outline-none"
             placeholder="搜索职业节点..."
             type="text"
           />
-        </div>
-
-        <div class="flex items-center bg-surface-container-low rounded-xl p-1">
-          <button
-            v-for="s in segments"
-            :key="s"
-            type="button"
-            class="px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors"
-            :class="activeSegment === s ? 'bg-white shadow-sm text-primary' : 'text-on-surface-variant hover:bg-surface-container-high'"
-            @click="activeSegment = s"
-          >
-            {{ s }}
-          </button>
+          <!-- 搜索建议下拉列表 -->
+          <div v-if="showSuggestions && searchResults.length > 0" class="absolute top-full left-0 right-0 mt-2 bg-surface-container-highest rounded-xl shadow-lg border border-outline-variant/20 max-h-64 overflow-y-auto z-50">
+            <div
+              v-for="item in searchResults"
+              :key="item.id"
+              @click="selectSearchResult(item)"
+              class="px-4 py-3 hover:bg-primary/10 cursor-pointer border-b border-outline-variant/10 last:border-b-0"
+            >
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="text-sm font-semibold text-on-surface">{{ item.title }}</div>
+                  <div class="text-xs text-on-surface-variant">{{ item.subtitle }}</div>
+                </div>
+                <span v-if="item.tags && item.tags.length > 0" class="text-[10px] px-2 py-1 rounded-full bg-primary/20 text-primary">{{ item.tags[0] }}</span>
+              </div>
+            </div>
+          </div>
+          <!-- 无结果提示 -->
+          <div v-if="showSuggestions && query.length > 0 && searchResults.length === 0 && !searchLoading" class="absolute top-full left-0 right-0 mt-2 bg-surface-container-highest rounded-xl shadow-lg border border-outline-variant/20 p-4 text-center text-sm text-on-surface-variant z-50">
+            未找到相关职业
+          </div>
         </div>
 
         <div class="flex items-center gap-2 bg-surface-container-low px-3 py-2 rounded-xl">
@@ -222,7 +234,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+
+import { getRoadmapGraph, getRoadmapNodeDetail, isApiSuccess, searchRoadmapNodes, type RoadmapGraph, type RoadmapNodeDetail, type RoadmapSearchItem } from '@/api/roadmap'
 
 type Segment = '互联网' | '金融科技' | '人工智能'
 
@@ -256,151 +270,239 @@ const segments: Segment[] = ['互联网', '金融科技', '人工智能']
 const activeSegment = ref<Segment>('互联网')
 const verticalMode = ref(true)
 const query = ref('')
+const searchResults = ref<RoadmapSearchItem[]>([])
+const showSuggestions = ref(false)
+const searchLoading = ref(false)
+const searchContainer = ref<HTMLElement | null>(null)
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
-const nodes = ref<RoadmapNode[]>([
-  {
-    id: 'visual',
-    label: '视觉设计师',
-    kind: 'secondary',
-    icon: 'brush',
-    iconClass: 'text-outline',
-    pos: { left: '6%', top: '70%' },
-    searchable: '视觉设计师 visual designer',
-    segment: '互联网',
-    tagline: '视觉表达与品牌一致性',
-    description: '聚焦视觉体系、品牌与视觉表现，支撑产品设计语言的一致性。',
-    skills: [
-      { name: '视觉规范', value: 'Design System' },
-      { name: '工具', value: 'Figma / PS' },
-      { name: '表达', value: 'Motion' },
-      { name: '协作', value: 'Hand-off' }
-    ],
-    salaryBands: [
-      { label: '初级', range: '8k-15k', width: '33%', barClass: 'bg-primary-fixed-dim' },
-      { label: '资深', range: '20k-35k', width: '60%', barClass: 'bg-primary' },
-      { label: '专家', range: '50k+', width: '100%', barClass: 'bg-tertiary' }
-    ]
-  },
-  {
-    id: 'ui',
-    label: 'UI 设计师',
-    subLabel: undefined,
-    kind: 'core',
-    icon: 'grid_view',
-    iconClass: 'text-white',
-    levelLabel: 'L1',
-    pos: { left: '20%', top: '45%' },
-    searchable: 'ui 设计师 ui designer',
-    segment: '互联网',
-    tagline: '用户界面与视觉交互专家',
-    description: '负责产品的界面设计、交互原型制作及视觉风格定义。需要紧密配合产品经理和前端工程师，确保设计稿的高质量还原与极致用户体验。',
-    skills: [
-      { name: '设计工具', value: 'Figma / PS' },
-      { name: '交互逻辑', value: 'Prototyping' },
-      { name: '审美', value: 'Visual Theory' },
-      { name: '协作', value: 'Hand-off' }
-    ],
-    salaryBands: [
-      { label: '初级', range: '8k-15k', width: '33%', barClass: 'bg-primary-fixed-dim' },
-      { label: '资深', range: '20k-35k', width: '60%', barClass: 'bg-primary' },
-      { label: '专家', range: '50k+', width: '100%', barClass: 'bg-tertiary' }
-    ]
-  },
-  {
-    id: 'ux',
-    label: 'UX 研究员',
-    subLabel: 'L2 进阶路径',
-    kind: 'secondary',
-    icon: 'psychology',
-    iconClass: 'text-secondary',
-    pos: { left: '42%', top: '22%' },
-    searchable: 'ux 研究员 ux researcher',
-    segment: '互联网',
-    tagline: '洞察用户与验证假设',
-    description: '通过定性/定量研究方法洞察用户需求，建立可验证的产品与设计决策依据。',
-    skills: [
-      { name: '研究方法', value: 'Interview' },
-      { name: '数据', value: 'Analytics' },
-      { name: '实验', value: 'A/B Test' },
-      { name: '表达', value: 'Storytelling' }
-    ],
-    salaryBands: [
-      { label: '初级', range: '10k-18k', width: '35%', barClass: 'bg-primary-fixed-dim' },
-      { label: '资深', range: '22k-38k', width: '65%', barClass: 'bg-primary' },
-      { label: '专家', range: '55k+', width: '100%', barClass: 'bg-tertiary' }
-    ]
-  },
-  {
-    id: 'interaction',
-    label: '交互设计师',
-    kind: 'secondary',
-    icon: 'gesture',
-    iconClass: 'text-secondary',
-    pos: { left: '54%', top: '65%' },
-    searchable: '交互设计师 interaction designer',
-    segment: '互联网',
-    tagline: '流程与体验打磨',
-    description: '聚焦关键流程、动效与反馈机制，提升可用性与体验一致性。',
-    skills: [
-      { name: '信息架构', value: 'IA' },
-      { name: '动效', value: 'Motion' },
-      { name: '可用性', value: 'Usability' },
-      { name: '交付', value: 'Spec' }
-    ],
-    salaryBands: [
-      { label: '初级', range: '9k-16k', width: '33%', barClass: 'bg-primary-fixed-dim' },
-      { label: '资深', range: '20k-34k', width: '60%', barClass: 'bg-primary' },
-      { label: '专家', range: '48k+', width: '100%', barClass: 'bg-tertiary' }
-    ]
-  },
-  {
-    id: 'product-lead',
-    label: '产品负责人',
-    subLabel: '战略决策层',
-    kind: 'secondary',
-    icon: 'rocket_launch',
-    iconClass: 'text-tertiary',
-    pos: { left: '76%', top: '30%' },
-    searchable: '产品负责人 product lead',
-    segment: '互联网',
-    tagline: '业务与战略增长',
-    description: '负责产品战略规划与团队协作，推动关键指标增长与跨团队资源整合。',
-    skills: [
-      { name: '战略', value: 'Strategy' },
-      { name: '增长', value: 'Growth' },
-      { name: '管理', value: 'Leadership' },
-      { name: '商业', value: 'Business' }
-    ],
-    salaryBands: [
-      { label: '初级', range: '18k-28k', width: '40%', barClass: 'bg-primary-fixed-dim' },
-      { label: '资深', range: '30k-50k', width: '70%', barClass: 'bg-primary' },
-      { label: '核心', range: '60k+', width: '100%', barClass: 'bg-tertiary' }
-    ]
+const nodes = ref<RoadmapNode[]>([])
+const paths = ref<Path[]>([])
+
+const activeNodeId = ref<string | null>(null)
+const currentNodeDetail = ref<RoadmapNodeDetail | null>(null)
+
+const activeNode = computed(() => {
+  if (!activeNodeId.value) return null
+
+  const base = nodes.value.find((n) => n.id === activeNodeId.value)
+  if (!base) return null
+
+  const detail = currentNodeDetail.value
+  if (!detail || detail.id !== base.id) return base
+
+  const salaryRange = detail.salaryRange || ''
+  const salaryBands = salaryRange
+    ? [
+        { label: detail.levelName || '', range: salaryRange, width: '70%', barClass: 'bg-primary' }
+      ]
+    : []
+
+  const skills = (detail.requirements || []).slice(0, 4).map((s) => ({ name: s, value: '' }))
+
+  return {
+    ...base,
+    tagline: detail.levelName || base.tagline,
+    description: detail.summary || base.description,
+    skills,
+    salaryBands
   }
-])
+})
 
-const paths = ref<Path[]>([
-  { d: 'M 180 300 Q 250 250 320 220', variant: 'primary', mode: 'vertical', segment: '互联网' },
-  { d: 'M 440 200 Q 550 180 660 210', variant: 'primary', mode: 'vertical', segment: '互联网' },
-  { d: 'M 180 320 Q 300 380 420 400', variant: 'secondary', mode: 'lateral', segment: '互联网' },
-  { d: 'M 50 450 Q 100 400 120 340', variant: 'secondary', mode: 'lateral', segment: '互联网' }
-])
+function generatePathD(from: { x: number; y: number }, to: { x: number; y: number }) {
+  const dx = Math.abs(to.x - from.x)
+  const cx1 = from.x + dx * 0.5
+  const cy1 = from.y
+  const cx2 = to.x - dx * 0.5
+  const cy2 = to.y
+  return `M ${from.x} ${from.y} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${to.x} ${to.y}`
+}
 
-const activeNodeId = ref<string | null>('ui')
-const activeNode = computed(() => nodes.value.find((n) => n.id === activeNodeId.value) ?? null)
+function toRoadmapNode(n: RoadmapGraph['nodes'][number], index: number): RoadmapNode {
+  const kind: NodeKind = index === 0 ? 'core' : 'secondary'
+  const icon = kind === 'core' ? 'grid_view' : 'work'
+  const iconClass = kind === 'core' ? 'text-white' : 'text-outline'
+  const levelLabel = kind === 'core' ? 'L1' : undefined
+
+  return {
+    id: n.id,
+    label: n.label || n.title,
+    subLabel: n.subLabel || n.subtitle,
+    kind,
+    icon,
+    iconClass,
+    levelLabel,
+    pos: { left: `${n.x}px`, top: `${n.y}px` },
+    searchable: `${n.title} ${n.label} ${n.subtitle}`,
+    segment: activeSegment.value,
+    tagline: n.subtitle || '',
+    description: '',
+    skills: [],
+    salaryBands: []
+  }
+}
+
+async function loadGraph() {
+  console.log('[Roadmap] loadGraph called')
+  const mode = verticalMode.value ? 'vertical' : 'lateral'
+  console.log('[Roadmap] calling getRoadmapGraph, mode=', mode)
+  try {
+    const res = await getRoadmapGraph('', mode)
+    console.log('[Roadmap] API response:', res)
+    if (!isApiSuccess(res.code)) {
+      console.log('[Roadmap] API failed, code:', res.code)
+      nodes.value = []
+      paths.value = []
+      activeNodeId.value = null
+      currentNodeDetail.value = null
+      return
+    }
+    console.log('[Roadmap] API success, nodes:', res.data?.nodes?.length || 0)
+
+    const graph = res.data
+    console.log('[Roadmap] graph data:', graph)
+    nodes.value = (graph.nodes || []).map((n, idx) => toRoadmapNode(n, idx))
+
+    const nodeIndex = new Map<string, { x: number; y: number }>()
+    for (const n of graph.nodes || []) {
+      nodeIndex.set(n.id, { x: n.x, y: n.y })
+    }
+
+    paths.value = (graph.paths || []).map((p) => {
+      const from = nodeIndex.get(p.from) || { x: 0, y: 0 }
+      const to = nodeIndex.get(p.to) || { x: 0, y: 0 }
+      return {
+        d: generatePathD(from, to),
+        variant: p.variant === 'primary' ? 'primary' : 'secondary',
+        mode: verticalMode.value ? 'vertical' : 'lateral',
+        segment: activeSegment.value
+      }
+    })
+
+    activeNodeId.value = nodes.value.length ? nodes.value[0].id : null
+    currentNodeDetail.value = null
+    console.log('[Roadmap] nodes:', nodes.value.length, 'paths:', paths.value.length)
+    if (activeNodeId.value) {
+      await selectNode(activeNodeId.value)
+    }
+  } catch (e) {
+    console.error('[Roadmap] loadGraph error:', e)
+    nodes.value = []
+    paths.value = []
+  }
+}
 
 const visibleNodes = computed(() => {
-  const q = query.value.trim().toLowerCase()
-  return nodes.value.filter((n) => {
-    if (n.segment !== activeSegment.value) return false
-    if (!q) return true
-    return n.searchable.toLowerCase().includes(q)
-  })
+  console.log('[Roadmap] visibleNodes computed, nodes:', nodes.value?.length)
+  // 暂时直接返回所有节点，搜索功能后续完善
+  return nodes.value || []
 })
+
+// 搜索输入防抖处理
+function onSearchInput() {
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
+  }
+  if (!query.value || query.value.length < 2) {
+    searchResults.value = []
+    showSuggestions.value = false
+    return
+  }
+  searchDebounceTimer = setTimeout(() => {
+    performSearch()
+  }, 300)
+}
+
+// 执行搜索
+async function performSearch() {
+  if (!query.value || query.value.length < 2) return
+  searchLoading.value = true
+  try {
+    const res = await searchRoadmapNodes(query.value, 10)
+    console.log('[Roadmap] search API response:', res)
+    if (isApiSuccess(res.code)) {
+      searchResults.value = res.data?.items || []
+      console.log('[Roadmap] search results:', searchResults.value)
+      showSuggestions.value = searchResults.value.length > 0
+    }
+  } catch (e) {
+    console.error('[Roadmap] search error:', e)
+    searchResults.value = []
+  } finally {
+    searchLoading.value = false
+  }
+}
+
+// 选择搜索结果
+async function selectSearchResult(item: RoadmapSearchItem) {
+  console.log('[Roadmap] selected:', item)
+  query.value = item.title
+  showSuggestions.value = false
+  
+  // 使用 categoryCode 加载图谱
+  if (item.categoryCode) {
+    await loadGraphWithCategory(item.categoryCode)
+  }
+}
+
+// 加载指定类别的图谱
+async function loadGraphWithCategory(categoryCode: string) {
+  const mode = verticalMode.value ? 'vertical' : 'lateral'
+  try {
+    const res = await getRoadmapGraph(categoryCode, mode)
+    if (isApiSuccess(res.code) && res.data) {
+      const graph = res.data
+      nodes.value = (graph.nodes || []).map((n, idx) => toRoadmapNode(n, idx))
+      
+      const nodeIndex = new Map<string, { x: number; y: number }>()
+      for (const n of graph.nodes || []) {
+        nodeIndex.set(n.id, { x: n.x, y: n.y })
+      }
+      
+      paths.value = (graph.paths || []).map((p) => {
+        const from = nodeIndex.get(p.from) || { x: 0, y: 0 }
+        const to = nodeIndex.get(p.to) || { x: 0, y: 0 }
+        return {
+          d: generatePathD(from, to),
+          variant: p.variant === 'primary' ? 'primary' : 'secondary',
+          mode: verticalMode.value ? 'vertical' : 'lateral',
+          segment: activeSegment.value
+        }
+      })
+      
+      activeNodeId.value = nodes.value.length ? nodes.value[0].id : null
+      if (activeNodeId.value) {
+        await selectNode(activeNodeId.value)
+      }
+    }
+  } catch (e) {
+    console.error('[Roadmap] loadGraphWithCategory error:', e)
+  }
+}
+
+// 点击外部关闭建议
+function onClickOutside(e: MouseEvent) {
+  if (searchContainer.value && !searchContainer.value.contains(e.target as Node)) {
+    showSuggestions.value = false
+  }
+}
+
+// 回车搜索
+function onSearchEnter() {
+  if (searchResults.value.length > 0) {
+    selectSearchResult(searchResults.value[0])
+  }
+}
+
+// 监听点击外部
+if (typeof document !== 'undefined') {
+  document.addEventListener('click', onClickOutside)
+}
 
 const visiblePaths = computed(() => {
   const mode = verticalMode.value ? 'vertical' : 'lateral'
-  return paths.value.filter((p) => p.segment === activeSegment.value && p.mode === mode)
+  // TODO: 后端数据暂无行业分类，暂时不过滤 segment
+  return paths.value.filter((p) => p.mode === mode)
 })
 
 const aiChip = computed(() => {
@@ -410,7 +512,19 @@ const aiChip = computed(() => {
 
 function selectNode(id: string) {
   activeNodeId.value = id
+  getRoadmapNodeDetail(id).then((res) => {
+    if (!isApiSuccess(res.code)) return
+    currentNodeDetail.value = res.data
+  })
 }
+
+onMounted(async () => {
+  await loadGraph()
+})
+
+watch([verticalMode, activeSegment], async () => {
+  await loadGraph()
+})
 
 function nodeCardClass(n: RoadmapNode) {
   const active = n.id === activeNodeId.value

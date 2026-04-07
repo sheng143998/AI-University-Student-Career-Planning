@@ -1,15 +1,19 @@
 fuchuang:
   datasource:
     driver-class-name: org.postgresql.Driver
-    host: localhost
-    port: 5433
+    host: pgm-bp1m35r42v5tn93aso.pg.rds.aliyuncs.com
+    port: 5432
     database: ai_career_plan
-    username: postgres
-    password: 123456
+    username: ai_career_plan
+    password: Syy666666@
     schema: ai_career_plan
   alioss:
-    endpoint: oss-cn-chengdu.aliyuncs.com
-    bucket-name: itxiang-sky-out
+    endpoint: ${FUCHUANG_ALIOSS_ENDPOINT}
+    bucket-name: ${FUCHUANG_ALIOSS_BUCKET_NAME}
+  redis:
+        port: ${FUCHUANG_REDIS_PORT}
+        host: ${FUCHUANG_REDIS_HOST}
+        database: ${FUCHUANG_REDIS_DATABASE}
 spring:
   data:
     redis:

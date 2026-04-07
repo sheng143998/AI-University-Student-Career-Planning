@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.itsheng.service.mapper.JobVerticalPathMapper">
+
+    <resultMap id="BaseResultMap" type="com.itsheng.pojo.entity.JobVerticalPath">
+        <id column="id" property="id"/>
+        <result column="job_id" property="jobId"/>
+        <result column="job_name" property="jobName"/>
+        <result column="target_job_id" property="targetJobId"/>
+        <result column="target_job_name" property="targetJobName"/>
+        <result column="path_steps" property="pathSteps"/>
+        <result column="total_steps" property="totalSteps"/>
+        <result column="estimated_total_months" property="estimatedTotalMonths"/>
+        <result column="confidence_score" property="confidenceScore"/>
+        <result column="path_type" property="pathType"/>
+        <result column="create_time" property="createTime"/>
+        <result column="update_time" property="updateTime"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, job_id, job_name, target_job_id, target_job_name, path_steps, total_steps,
+        estimated_total_months, confidence_score, path_type, create_time, update_time
+    </sql>
+
+    <insert id="insert" parameterType="com.itsheng.pojo.entity.JobVerticalPath">
+        INSERT INTO ai_career_plan.job_vertical_paths (
+            job_id, job_name, target_job_id, target_job_name, path_steps, total_steps,
+            estimated_total_months, confidence_score, path_type
+        ) VALUES (
+            #{jobId}, #{jobName}, #{targetJobId}, #{targetJobName}, #{pathSteps}::jsonb, #{totalSteps},
+            #{estimatedTotalMonths}, #{confidenceScore}, #{pathType}
+        )
+    </insert>
+
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO ai_career_plan.job_vertical_paths (
+            job_id, job_name, target_job_id, target_job_name, path_steps, total_steps,
+            estimated_total_months, confidence_score, path_type
+        ) VALUES
+        <foreach collection="paths" item="path" separator=",">
+            (
+                #{path.jobId}, #{path.jobName}, #{path.targetJobId}, #{path.targetJobName},
+                #{path.pathSteps}::jsonb, #{path.totalSteps}, #{path.estimatedTotalMonths},
+                #{path.confidenceScore}, #{path.pathType}
+            )
+        </foreach>
+    </insert>
+
+    <select id="selectByJobId" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM ai_career_plan.job_vertical_paths
+        WHERE job_id = #{jobId}
+        ORDER BY confidence_score DESC
+    </select>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM ai_career_plan.job_vertical_paths
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectAll" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM ai_career_plan.job_vertical_paths
+        ORDER BY job_id, confidence_score DESC
+    </select>
+
+    <delete id="deleteAll">
+        DELETE FROM ai_career_plan.job_vertical_paths
+    </delete>
+
+    <select id="countByJobId" resultType="int">
+        SELECT COUNT(*) FROM ai_career_plan.job_vertical_paths
+        WHERE job_id = #{jobId}
+    </select>
+
+    <select id="selectRandomOne" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM ai_career_plan.job_vertical_paths
+        ORDER BY RANDOM()
+        LIMIT 1
+    </select>
+
+</mapper>
