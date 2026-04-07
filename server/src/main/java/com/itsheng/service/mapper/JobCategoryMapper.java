@@ -97,4 +97,11 @@ public interface JobCategoryMapper {
      * @return 影响行数
      */
     int deleteById(@Param("id") Long id);
+
+    /**
+     * 根据 source_job_ids 包含指定 job_id 查询岗位分类
+     * @param jobId 原始岗位 ID
+     * @return 岗位分类实体
+     */
+    JobCategory selectBySourceJobId(@Param("jobId") Long jobId);
 }

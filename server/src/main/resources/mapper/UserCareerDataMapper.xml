@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.itsheng.service.mapper.UserCareerDataMapper">
+
+    <!-- 结果映射 -->
+    <resultMap id="UserCareerDataResult" type="com.itsheng.pojo.entity.UserCareerData">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="target_job" property="targetJob"/>
+        <result column="target_job_id" property="targetJobId"/>
+        <result column="job_profile" property="jobProfile"/>
+        <result column="match_summary" property="matchSummary"/>
+        <result column="market_trends" property="marketTrends"/>
+        <result column="skill_radar" property="skillRadar"/>
+        <result column="actions" property="actions"/>
+        <result column="create_time" property="createTime" javaType="java.time.LocalDateTime"/>
+        <result column="update_time" property="updateTime" javaType="java.time.LocalDateTime"/>
+    </resultMap>
+
+    <!-- 插入用户职业数据 -->
+    <insert id="insert" parameterType="com.itsheng.pojo.entity.UserCareerData" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ai_career_plan.user_career_data (
+            user_id,
+            target_job,
+            target_job_id,
+            job_profile,
+            match_summary,
+            market_trends,
+            skill_radar,
+            actions,
+            create_time,
+            update_time
+        ) VALUES (
+            #{userId},
+            #{targetJob},
+            #{targetJobId},
+            #{jobProfile}::jsonb,
+            #{matchSummary}::jsonb,
+            #{marketTrends}::jsonb,
+            #{skillRadar}::jsonb,
+            #{actions}::jsonb,
+            #{createTime},
+            #{updateTime}
+        )
+    </insert>
+
+    <!-- 根据用户 ID 查询职业数据 -->
+    <select id="selectByUserId" resultMap="UserCareerDataResult">
+        SELECT *
+        FROM ai_career_plan.user_career_data
+        WHERE user_id = #{userId}
+        ORDER BY create_time DESC
+        LIMIT 1
+    </select>
+
+    <!-- 动态更新用户职业数据 -->
+    <update id="update" parameterType="com.itsheng.pojo.entity.UserCareerData">
+        UPDATE ai_career_plan.user_career_data
+        <set>
+            <if test="targetJob != null">target_job = #{targetJob},</if>
+            <if test="targetJobId != null">target_job_id = #{targetJobId},</if>
+            <if test="jobProfile != null">job_profile = #{jobProfile}::jsonb,</if>
+            <if test="matchSummary != null">match_summary = #{matchSummary}::jsonb,</if>
+            <if test="marketTrends != null">market_trends = #{marketTrends}::jsonb,</if>
+            <if test="skillRadar != null">skill_radar = #{skillRadar}::jsonb,</if>
+            <if test="actions != null">actions = #{actions}::jsonb,</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+        </set>
+        WHERE user_id = #{userId}
+    </update>
+
+</mapper>

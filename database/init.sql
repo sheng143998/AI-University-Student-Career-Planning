@@ -237,6 +237,8 @@ CREATE TABLE ai_career_plan.job_vector_store (
 CREATE TABLE ai_career_plan.user_career_data (
                                                  id BIGSERIAL PRIMARY KEY,
                                                  user_id BIGINT NOT NULL,
+                                                 target_job VARCHAR(100),
+                                                 target_job_id BIGINT,
                                                  job_profile JSONB,
                                                  match_summary JSONB,
                                                  market_trends JSONB,

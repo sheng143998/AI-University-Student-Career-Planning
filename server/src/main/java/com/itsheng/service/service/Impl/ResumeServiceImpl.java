@@ -13,16 +13,21 @@ import com.itsheng.common.result.Result;
 import com.itsheng.pojo.dto.ResumeParsedData;
 import com.itsheng.pojo.dto.ResumeScores;
 import com.itsheng.pojo.dto.ResumeSuggestion;
+import com.itsheng.pojo.entity.JobCategory;
 import com.itsheng.pojo.entity.ResumeAnalysisResult;
 import com.itsheng.pojo.entity.StudentCapabilityProfile;
+import com.itsheng.pojo.entity.UserCareerData;
 import com.itsheng.pojo.entity.UserVectorStore;
 import com.itsheng.pojo.vo.CapabilityProfileVO;
 import com.itsheng.pojo.vo.ResumeAnalysisResultVO;
 import com.itsheng.pojo.vo.ResumeUploadVO;
 import com.itsheng.service.controller.CommonController;
+import com.itsheng.service.mapper.JobCategoryMapper;
 import com.itsheng.service.mapper.ResumeMapper;
 import com.itsheng.service.mapper.StudentCapabilityProfileMapper;
+import com.itsheng.service.mapper.UserCareerDataMapper;
 import com.itsheng.service.mapper.UserVectorStoreMapper;
+import com.itsheng.service.service.JobVectorSearchService;
 import com.itsheng.service.service.ResumeService;
 import com.itsheng.common.utils.AliOssUtil;
 import lombok.RequiredArgsConstructor;
@@ -70,6 +75,9 @@ public class ResumeServiceImpl implements ResumeService {
     private final AliOssUtil aliOssUtil;
     private final ChatClient resumeAnalysisChatClient;
     private final ObjectMapper objectMapper;
+    private final JobCategoryMapper jobCategoryMapper;
+    private final JobVectorSearchService jobVectorSearchService;
+    private final UserCareerDataMapper userCareerDataMapper;
 
     // 文件类型与 MIME 类型的映射
     private static final Map<String, String> MIME_TYPE_MAP = new HashMap<>();
@@ -194,17 +202,23 @@ public class ResumeServiceImpl implements ResumeService {
             ProgressTracker tracker = new ProgressTracker();
             tracker.startTracking(vectorStoreId);
 
-            // 3. 调用 AI 进行简历解析
-            String analysisJson = callAiForAnalysis(resumeContent);
+            // 3. 匹配用户目标岗位
+            JobCategory targetJob = matchTargetJob(vectorStoreId, resumeContent);
+            String targetJobName = targetJob != null ? targetJob.getJobCategoryName() : null;
+            Long targetJobId = targetJob != null ? targetJob.getId() : null;
+            log.info("目标岗位匹配完成: {}, jobId: {}", targetJobName, targetJobId);
+
+            // 4. 调用 AI 进行简历解析（结合目标岗位）
+            String analysisJson = callAiForAnalysis(resumeContent, targetJob);
             log.info("AI 返回的解析结果：{}", analysisJson);
 
-            // 4. 停止进度更新
+            // 5. 停止进度更新
             tracker.stopTracking();
 
-            // 5. 解析 JSON 并提取各字段
+            // 6. 解析 JSON 并提取各字段
             JsonAnalysisResult analysisResult = parseAnalysisJson(analysisJson);
 
-            // 6. 更新分析结果记录为完成状态
+            // 7. 更新分析结果记录为完成状态
             ResumeAnalysisResult analysisRecord = ResumeAnalysisResult.builder()
                     .id(initialRecord.getId())
                     .vectorStoreId(vectorStoreId)
@@ -221,23 +235,31 @@ public class ResumeServiceImpl implements ResumeService {
                     .updateTime(LocalDateTime.now())
                     .build();
 
-            // 7. 更新数据库
+            // 8. 更新数据库
             resumeMapper.update(analysisRecord);
             log.info("简历分析结果已更新，analysisId: {}", analysisRecord.getId());
 
-            // 8. 调用 AI 生成学生能力画像并保存
+            // 9. 调用 AI 生成学生能力画像并保存（结合目标岗位）
             try {
-                generateCapabilityProfile(userId, analysisRecord.getId(), resumeContent);
+                generateCapabilityProfile(userId, analysisRecord.getId(), resumeContent, targetJob);
             } catch (Exception e) {
                 log.error("生成学生能力画像失败，userId: {}, analysisId: {}", userId, analysisRecord.getId(), e);
             }
 
-            // 9. 更新 user_vector_store 表的状态为 COMPLETED
+            // 10. 更新 user_vector_store 表的状态为 COMPLETED
             UserVectorStore userVectorStore = UserVectorStore.builder()
                     .id(vectorStoreId)
                     .resumeContent(resumeContent)
                     .build();
             userVectorStoreMapper.update(userVectorStore);
+
+            // 11. 自动生成 user_career_data（Dashboard 数据）
+            try {
+                generateUserCareerData(userId, targetJob, targetJobName, targetJobId, analysisRecord);
+            } catch (Exception e) {
+                log.error("生成用户职业数据失败，userId: {}", userId, e);
+            }
+
             log.info("简历解析完成，vectorStoreId: {}", vectorStoreId);
 
         } catch (Exception e) {
@@ -349,9 +371,35 @@ public class ResumeServiceImpl implements ResumeService {
 
     /**
      * 调用 AI 生成学生能力画像并保存到数据库
+     * @param userId 用户 ID
+     * @param analysisId 分析记录 ID
+     * @param resumeContent 简历内容
+     * @param targetJob 目标岗位（可为 null）
      */
-    private void generateCapabilityProfile(Long userId, Long analysisId, String resumeContent) {
-        log.info("开始生成学生能力画像，userId: {}, analysisId: {}", userId, analysisId);
+    private void generateCapabilityProfile(Long userId, Long analysisId, String resumeContent, JobCategory targetJob) {
+        log.info("开始生成学生能力画像，userId: {}, analysisId: {}, targetJob: {}", userId, analysisId,
+                targetJob != null ? targetJob.getJobCategoryName() : "未匹配");
+
+        String targetJobPrompt = "";
+        if (targetJob != null) {
+            targetJobPrompt = """
+
+                    【目标岗位要求】
+                    - 岗位名称：%s
+                    - 岗位要求技能：%s
+                    - 岗位描述：%s
+
+                    请结合该目标岗位的需求，在7个维度的评分时以岗位要求为参考基准。
+                    60分为及格线，表示学生已经初步具备进入该岗位并工作的能力。
+                    如果学生具备岗位所需的核心技能，评分应适当提高；
+                    如果缺少岗位关键技能，相关维度评分应低于60分。
+                    最低评分为 30 分（例如简历上完全没有相关证书/技能，对应维度给 30 分）。
+                    """.formatted(
+                    targetJob.getJobCategoryName(),
+                    targetJob.getRequiredSkills(),
+                    targetJob.getJobDescription()
+            );
+        }
 
         // 1. 调用 AI 分析
         String prompt = """
@@ -360,9 +408,11 @@ public class ResumeServiceImpl implements ResumeService {
                 ===== 简历开始 =====
                 %s
                 ===== 简历结束 =====
+                %s
 
+                评分范围说明：所有评分范围为 30-100 分，最低 30 分（表示完全没有相关内容），60 分为及格（初步具备岗位能力），100 分为优秀。
                 请按照要求的 JSON 格式返回能力画像，直接返回 JSON 对象，不要包含任何 markdown 标记或额外说明。
-                """.formatted(resumeContent);
+                """.formatted(resumeContent, targetJobPrompt);
 
         ChatResponse response = resumeAnalysisChatClient.prompt()
                 .system(SystemConstants.CAPABILITY_PROFILE_PROMPT)
@@ -408,8 +458,285 @@ public class ResumeServiceImpl implements ResumeService {
     }
 
     /**
-     * 从 JsonNode 安全获取整数值
+     * 生成用户职业数据（user_career_data），在简历分析完成后自动填充
+     * @param userId 用户 ID
+     * @param targetJob 目标岗位
+     * @param targetJobName 目标岗位名称
+     * @param targetJobId 目标岗位 ID
+     * @param analysisRecord 简历分析记录
      */
+    private void generateUserCareerData(Long userId, JobCategory targetJob, String targetJobName,
+                                        Long targetJobId, ResumeAnalysisResult analysisRecord) {
+        log.info("开始生成用户职业数据，userId: {}, targetJob: {}", userId, targetJobName);
+
+        try {
+            // 1. 构建 job_profile（岗位画像）
+            String jobProfileJson = buildJobProfile(targetJob);
+
+            // 2. 获取学生能力画像
+            StudentCapabilityProfile profile = capabilityProfileMapper.selectByUserId(userId);
+
+            // 3. 构建 match_summary（匹配度摘要）
+            String matchSummaryJson = buildMatchSummary(profile, targetJob);
+
+            // 4. 构建 skill_radar（能力雷达）
+            String skillRadarJson = buildSkillRadar(profile);
+
+            // 5. 构建 actions（行动建议，从 resume_analysis_result.suggestions 转换）
+            String actionsJson = buildActions(analysisRecord.getSuggestions());
+
+            // 6. 构建 market_trends（市场趋势，使用默认数据）
+            String marketTrendsJson = buildDefaultMarketTrends(targetJobName);
+
+            // 7. 检查是否已有记录
+            UserCareerData existing = userCareerDataMapper.selectByUserId(userId);
+
+            UserCareerData careerData = UserCareerData.builder()
+                    .userId(userId)
+                    .targetJob(targetJobName)
+                    .targetJobId(targetJobId)
+                    .jobProfile(jobProfileJson)
+                    .matchSummary(matchSummaryJson)
+                    .marketTrends(marketTrendsJson)
+                    .skillRadar(skillRadarJson)
+                    .actions(actionsJson)
+                    .createTime(LocalDateTime.now())
+                    .updateTime(LocalDateTime.now())
+                    .build();
+
+            if (existing != null) {
+                careerData.setId(existing.getId());
+                userCareerDataMapper.update(careerData);
+                log.info("用户职业数据已更新，userId: {}", userId);
+            } else {
+                userCareerDataMapper.insert(careerData);
+                log.info("用户职业数据已创建，userId: {}", userId);
+            }
+        } catch (Exception e) {
+            log.error("生成用户职业数据失败，userId: {}", userId, e);
+            throw new RuntimeException("生成用户职业数据失败", e);
+        }
+    }
+
+    /**
+     * 构建岗位画像 JSON
+     */
+    private String buildJobProfile(JobCategory targetJob) {
+        try {
+            if (targetJob == null) {
+                return "{}";
+            }
+
+            Map<String, Object> profile = new LinkedHashMap<>();
+            profile.put("id", targetJob.getId());
+            profile.put("name", targetJob.getJobCategoryName());
+            profile.put("level", targetJob.getJobLevelName());
+            profile.put("industry", "待定");
+            profile.put("city", "待定");
+
+            if (targetJob.getMinSalary() != null && targetJob.getMaxSalary() != null) {
+                profile.put("salary_range_min", targetJob.getMinSalary());
+                profile.put("salary_range_max", targetJob.getMaxSalary());
+            }
+            profile.put("description", targetJob.getJobDescription() != null ? targetJob.getJobDescription() : "");
+
+            // 岗位所需技能
+            List<Map<String, Object>> skills = new ArrayList<>();
+            if (targetJob.getRequiredSkills() != null && !targetJob.getRequiredSkills().equals("[]")) {
+                List<String> skillList = objectMapper.readValue(targetJob.getRequiredSkills(),
+                        objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
+                for (String skill : skillList) {
+                    Map<String, Object> skillMap = new LinkedHashMap<>();
+                    skillMap.put("name", skill);
+                    skillMap.put("level", 3);
+                    skillMap.put("category", "专业技能");
+                    skills.add(skillMap);
+                }
+            }
+            profile.put("skills", skills);
+
+            // 能力权重（默认权重）
+            Map<String, Double> weights = new LinkedHashMap<>();
+            weights.put("professional_skill", 1.5);
+            weights.put("certificate", 1.0);
+            weights.put("innovation", 1.2);
+            weights.put("learning", 1.2);
+            weights.put("resilience", 1.0);
+            weights.put("communication", 1.0);
+            weights.put("internship", 1.3);
+            profile.put("capability_weights", weights);
+
+            return objectMapper.writeValueAsString(profile);
+        } catch (Exception e) {
+            log.error("构建岗位画像失败", e);
+            return "{}";
+        }
+    }
+
+    /**
+     * 构建匹配度摘要 JSON
+     */
+    private String buildMatchSummary(StudentCapabilityProfile profile, JobCategory targetJob) {
+        try {
+            Map<String, Object> summary = new LinkedHashMap<>();
+
+            if (profile == null) {
+                summary.put("score", 0);
+                summary.put("description", "暂无能力画像数据，请重新上传简历");
+                summary.put("tags", new ArrayList<>());
+                summary.put("dimension_scores", new LinkedHashMap<>());
+                return objectMapper.writeValueAsString(summary);
+            }
+
+            // 计算匹配分数（简单平均或加权）
+            int overallScore = profile.getOverallScore();
+            summary.put("score", overallScore);
+
+            // 描述
+            String description;
+            if (targetJob != null) {
+                description = String.format("您与目标岗位【%s】的综合匹配度为 %d 分。",
+                        targetJob.getJobCategoryName(), overallScore);
+            } else {
+                description = String.format("您的综合能力评分为 %d 分。", overallScore);
+            }
+            if (overallScore >= 80) {
+                description += "表现优秀，已具备较强的岗位竞争力。";
+            } else if (overallScore >= 60) {
+                description += "初步具备进入岗位工作的能力，建议继续提升薄弱环节。";
+            } else {
+                description += "建议加强专业技能学习和实践经验的积累。";
+            }
+            summary.put("description", description);
+
+            // 从简历亮点转换为标签
+            List<String> tags = new ArrayList<>();
+            if (profile.getAiEvaluation() != null && !profile.getAiEvaluation().isEmpty()) {
+                tags.add("AI综合评价已生成");
+            }
+            summary.put("tags", tags);
+
+            // 各维度得分
+            Map<String, Object> dimensionScores = new LinkedHashMap<>();
+            if (profile.getCapabilityScores() != null && !profile.getCapabilityScores().equals("{}")) {
+                Map<String, Integer> scores = objectMapper.readValue(profile.getCapabilityScores(),
+                        objectMapper.getTypeFactory().constructMapType(Map.class, String.class, Integer.class));
+                dimensionScores.put("technical", scores.getOrDefault("professional_skill", 0));
+                dimensionScores.put("innovation", scores.getOrDefault("innovation", 0));
+                dimensionScores.put("resilience", scores.getOrDefault("resilience", 0));
+                dimensionScores.put("communication", scores.getOrDefault("communication", 0));
+                dimensionScores.put("learning", scores.getOrDefault("learning", 0));
+                dimensionScores.put("internship", scores.getOrDefault("internship", 0));
+            }
+            summary.put("dimension_scores", dimensionScores);
+
+            return objectMapper.writeValueAsString(summary);
+        } catch (Exception e) {
+            log.error("构建匹配度摘要失败", e);
+            return "{\"score\":0,\"description\":\"数据生成失败\",\"tags\":[],\"dimension_scores\":{}}";
+        }
+    }
+
+    /**
+     * 构建能力雷达 JSON
+     */
+    private String buildSkillRadar(StudentCapabilityProfile profile) {
+        try {
+            Map<String, Object> radar = new LinkedHashMap<>();
+
+            if (profile != null && profile.getCapabilityScores() != null
+                    && !profile.getCapabilityScores().equals("{}")) {
+                Map<String, Integer> scores = objectMapper.readValue(profile.getCapabilityScores(),
+                        objectMapper.getTypeFactory().constructMapType(Map.class, String.class, Integer.class));
+                radar.put("technical", scores.getOrDefault("professional_skill", 0));
+                radar.put("innovation", scores.getOrDefault("innovation", 0));
+                radar.put("resilience", scores.getOrDefault("resilience", 0));
+                radar.put("communication", scores.getOrDefault("communication", 0));
+                radar.put("learning", scores.getOrDefault("learning", 0));
+                radar.put("internship", scores.getOrDefault("internship", 0));
+            } else {
+                radar.put("technical", 0);
+                radar.put("innovation", 0);
+                radar.put("resilience", 0);
+                radar.put("communication", 0);
+                radar.put("learning", 0);
+                radar.put("internship", 0);
+            }
+
+            return objectMapper.writeValueAsString(radar);
+        } catch (Exception e) {
+            log.error("构建能力雷达失败", e);
+            return "{\"technical\":0,\"innovation\":0,\"resilience\":0,\"communication\":0,\"learning\":0,\"internship\":0}";
+        }
+    }
+
+    /**
+     * 构建行动建议 JSON（从 resume_analysis_result.suggestions 转换）
+     */
+    private String buildActions(String suggestionsJson) {
+        try {
+            if (suggestionsJson == null || suggestionsJson.equals("[]")) {
+                return "[]";
+            }
+
+            List<Map<String, Object>> suggestions = objectMapper.readValue(suggestionsJson,
+                    objectMapper.getTypeFactory().constructCollectionType(List.class, Map.class));
+
+            List<Map<String, Object>> actions = new ArrayList<>();
+            int index = 0;
+            for (Map<String, Object> suggestion : suggestions) {
+                Map<String, Object> action = new LinkedHashMap<>();
+                action.put("id", "a_" + String.format("%03d", ++index));
+
+                String type = (String) suggestion.getOrDefault("type", "CONTENT");
+                String content = (String) suggestion.getOrDefault("content", "");
+
+                action.put("title", content.length() > 30 ? content.substring(0, 30) + "..." : content);
+                action.put("desc", content);
+
+                // 根据类型设置图标和优先级
+                if ("SKILL".equals(type)) {
+                    action.put("icon", "school");
+                    action.put("priority", "high");
+                } else if ("LAYOUT".equals(type)) {
+                    action.put("icon", "format");
+                    action.put("priority", "low");
+                } else {
+                    action.put("icon", "info");
+                    action.put("priority", "medium");
+                }
+                action.put("link", "/goals");
+
+                actions.add(action);
+            }
+
+            return objectMapper.writeValueAsString(actions);
+        } catch (Exception e) {
+            log.error("构建行动建议失败", e);
+            return "[]";
+        }
+    }
+
+    /**
+     * 构建默认市场趋势数据
+     */
+    private String buildDefaultMarketTrends(String targetJobName) {
+        try {
+            List<Map<String, Object>> trends = new ArrayList<>();
+            if (targetJobName != null) {
+                Map<String, Object> trend = new LinkedHashMap<>();
+                trend.put("name", targetJobName);
+                trend.put("growth", 0.10);
+                trend.put("value", 75);
+                trend.put("source", "AI 预测");
+                trends.add(trend);
+            }
+            return objectMapper.writeValueAsString(trends);
+        } catch (Exception e) {
+            log.error("构建市场趋势失败", e);
+            return "[]";
+        }
+    }
     private int getIntValue(JsonNode rootNode, String fieldName, int defaultValue) {
         var node = rootNode.get(fieldName);
         if (node != null && node.isNumber()) {
@@ -605,18 +932,52 @@ public class ResumeServiceImpl implements ResumeService {
     }
 
     /**
-     * 调用 AI 进行简历解析
+     * 调用 AI 进行简历解析（结合目标岗位）
      */
-    private String callAiForAnalysis(String resumeContent) {
+    private String callAiForAnalysis(String resumeContent, JobCategory targetJob) {
+        String targetJobInfo = "";
+        if (targetJob != null) {
+            // 获取晋升路径信息（下一级岗位）
+            String promotionPathInfo = buildPromotionPathInfo(targetJob);
+
+            targetJobInfo = """
+
+                    【用户目标岗位信息】
+                    - 岗位名称：%s
+                    - 岗位级别：%s
+                    - 岗位要求技能：%s
+                    - 岗位描述：%s
+                    %s
+
+                    请结合该目标岗位的要求，在 suggestions 字段中给出针对性的优化建议。
+                    建议编写要求：
+                    1. 重点编写用户当前技能与目标岗位要求技能之间的差距，给出具体的学习建议
+                    2. 建议应聚焦于通用技能的学习建议（如编程语言、框架、工具等），不要泛泛而谈
+                    3. 用户已有的技能可以给出进阶学习建议（如从"会使用"到"深入理解原理"）
+                    4. %s
+                    5. 每条建议要具体、可执行，指出学什么、怎么学
+                    """.formatted(
+                    targetJob.getJobCategoryName(),
+                    targetJob.getJobLevelName(),
+                    targetJob.getRequiredSkills(),
+                    targetJob.getJobDescription(),
+                    promotionPathInfo,
+                    promotionPathInfo.isEmpty()
+                            ? "如果存在下一级晋升路径，可以加一两条晋升岗位需要的技能学习建议"
+                            : "已提供下一级晋升路径信息，请结合该信息给出 1-2 条晋升技能学习建议"
+            );
+        }
+
         String userPrompt = """
             请分析以下简历内容：
 
             ===== 简历开始 =====
             %s
             ===== 简历结束 =====
+            %s
 
             请按照要求的 JSON 格式返回分析结果，直接返回 JSON 对象，不要包含任何 markdown 标记或额外说明。
-            """.formatted(resumeContent);
+            """.formatted(resumeContent, targetJobInfo);
 
         ChatResponse response = resumeAnalysisChatClient.prompt()
                 .system(SystemConstants.RESUME_ANALYSIS_PROMPT)
@@ -625,6 +986,219 @@ public class ResumeServiceImpl implements ResumeService {
                 .chatResponse();
 
         return response.getResult().getOutput().getText();
+    }
+
+    /**
+     * 构建晋升路径信息（同一岗位类别的下一级岗位）
+     */
+    private String buildPromotionPathInfo(JobCategory targetJob) {
+        try {
+            // 从 job_category_code 中去掉级别后缀，获取基础类别编码
+            String baseCategoryCode = targetJob.getJobCategoryCode()
+                    .replaceAll("_(INTERNSHIP|JUNIOR|MID|SENIOR)$", "");
+
+            // 查询该类别的所有级别岗位
+            List<JobCategory> allLevels = jobCategoryMapper.selectVerticalPathByCategoryCode(baseCategoryCode);
+
+            if (allLevels == null || allLevels.isEmpty()) {
+                return "";
+            }
+
+            // 找到当前级别的索引，获取下一级
+            List<String> levelOrder = List.of("INTERNSHIP", "JUNIOR", "MID", "SENIOR");
+            int currentIndex = levelOrder.indexOf(targetJob.getJobLevel());
+
+            if (currentIndex >= 0 && currentIndex < levelOrder.size() - 1) {
+                String nextLevel = levelOrder.get(currentIndex + 1);
+                // 找到下一级岗位
+                for (JobCategory job : allLevels) {
+                    if (nextLevel.equals(job.getJobLevel())) {
+                        return String.format("""
+
+                                【下一级晋升路径信息】
+                                - 岗位名称：%s
+                                - 岗位级别：%s
+                                - 要求技能：%s
+                                """,
+                                job.getJobCategoryName(),
+                                job.getJobLevelName(),
+                                job.getRequiredSkills());
+                    }
+                }
+            }
+
+            return "";
+        } catch (Exception e) {
+            log.warn("获取晋升路径信息失败: {}", e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * 匹配用户目标岗位
+     * 1. 先从简历中提取用户技能
+     * 2. 如果 job 表中存在该岗位，根据技能匹配度选择最接近的级别
+     * 3. 如果不存在，将简历向量化后与 job_vector_store 比较，找相似度最高的岗位
+     */
+    private JobCategory matchTargetJob(String vectorStoreId, String resumeContent) {
+        try {
+            // 先从简历中提取用户技能
+            List<String> userSkills = extractSkillsFromResume(resumeContent);
+            log.info("从简历中提取到 {} 个技能: {}", userSkills.size(), userSkills);
+
+            // 先尝试从 AI 解析的简历中提取 target_role
+            String parsedRole = extractTargetRoleFromResume(resumeContent);
+
+            // 策略 1：如果 job 表中存在用户目标岗位，根据技能匹配度选择级别
+            if (parsedRole != null && !parsedRole.isEmpty() && !"null".equals(parsedRole)) {
+                log.info("从简历中提取到目标岗位: {}，尝试在 job 表中查找", parsedRole);
+                List<JobCategory> matchedJobs = jobCategoryMapper.searchByKeyword(parsedRole, 10);
+                if (matchedJobs != null && !matchedJobs.isEmpty()) {
+                    // 根据技能匹配度选择最接近的级别
+                    JobCategory targetJob = selectBestSkillMatchJob(matchedJobs, userSkills);
+                    log.info("在 job 表中找到匹配岗位: {} (id={}, level={})",
+                            targetJob.getJobCategoryName(), targetJob.getId(), targetJob.getJobLevel());
+                    return targetJob;
+                }
+            }
+
+            // 策略 2：job 表不存在，使用向量搜索匹配最相似岗位
+            log.info("job 表中未找到匹配岗位，开始向量相似度搜索");
+
+            // 获取简历的 embedding 向量
+            UserVectorStore userVector = userVectorStoreMapper.selectByVectorStoreId(vectorStoreId);
+            if (userVector != null && userVector.getEmbeddingVector() != null) {
+                String resumeVector = userVector.getEmbeddingVector();
+                List<JobCategory> similarJobs = jobVectorSearchService.searchSimilarJobs(resumeVector, 5);
+
+                if (similarJobs != null && !similarJobs.isEmpty()) {
+                    // 根据技能匹配度选择最接近的级别
+                    JobCategory bestMatch = selectBestSkillMatchJob(similarJobs, userSkills);
+                    log.info("向量搜索找到最相似岗位: {} (id={}, level={})",
+                            bestMatch.getJobCategoryName(), bestMatch.getId(), bestMatch.getJobLevel());
+                    return bestMatch;
+                }
+            }
+
+            log.warn("未能匹配到目标岗位");
+            return null;
+
+        } catch (Exception e) {
+            log.error("匹配目标岗位失败: {}", e.getMessage(), e);
+            return null;
+        }
+    }
+
+    /**
+     * 从简历中提取技能列表（通过 AI）
+     */
+    private List<String> extractSkillsFromResume(String resumeContent) {
+        try {
+            String prompt = """
+                    请从以下简历内容中提取候选人的技能列表。
+                    只返回技能名称，每行一个。如果找不到技能信息，返回 "none"。
+
+                    ===== 简历开始 =====
+                    %s
+                    ===== 简历结束 =====
+                    """.formatted(resumeContent);
+
+            ChatResponse response = resumeAnalysisChatClient.prompt()
+                    .user(prompt)
+                    .call()
+                    .chatResponse();
+
+            String result = response.getResult().getOutput().getText().trim();
+            if ("none".equals(result) || result.isEmpty()) {
+                return Collections.emptyList();
+            }
+
+            return Arrays.stream(result.split("\n"))
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty() && !"none".equals(s.toLowerCase()))
+                    .collect(Collectors.toList());
+
+        } catch (Exception e) {
+            log.warn("提取技能失败: {}", e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * 从多个同名岗位中，根据 required_skills 与用户技能的匹配度选择最接近的级别
+     * 匹配度计算：用户技能与岗位 required_skills 的交集数量 / 岗位要求技能数量
+     */
+    private JobCategory selectBestSkillMatchJob(List<JobCategory> jobs, List<String> userSkills) {
+        if (jobs.isEmpty()) {
+            return null;
+        }
+        if (jobs.size() == 1 || userSkills.isEmpty()) {
+            return jobs.get(0);
+        }
+
+        JobCategory bestJob = null;
+        double bestMatchScore = -1;
+
+        for (JobCategory job : jobs) {
+            if (job.getRequiredSkills() == null || job.getRequiredSkills().equals("[]")) {
+                continue;
+            }
+            try {
+                List<String> requiredSkills = objectMapper.readValue(job.getRequiredSkills(),
+                        objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
+
+                // 计算匹配度：交集 / 要求技能数
+                long matchCount = requiredSkills.stream()
+                        .filter(req -> userSkills.stream()
+                                .anyMatch(user -> user.toLowerCase().contains(req.toLowerCase())
+                                        || req.toLowerCase().contains(user.toLowerCase())))
+                        .count();
+
+                double matchScore = (double) matchCount / requiredSkills.size();
+                log.debug("岗位 {} (level={}) 技能匹配度: {}/{} = {}",
+                        job.getJobCategoryName(), job.getJobLevel(), matchCount, requiredSkills.size(), matchScore);
+
+                if (matchScore > bestMatchScore) {
+                    bestMatchScore = matchScore;
+                    bestJob = job;
+                }
+            } catch (Exception e) {
+                log.warn("解析岗位技能失败: {}", job.getJobCategoryName(), e);
+            }
+        }
+
+        return bestJob != null ? bestJob : jobs.get(0);
+    }
+
+    /**
+     * 从简历内容中提取目标岗位名称（通过 AI 快速解析）
+     */
+    private String extractTargetRoleFromResume(String resumeContent) {
+        try {
+            String prompt = """
+                    请从以下简历内容中提取候选人的求职意向/目标岗位名称。
+                    只返回岗位名称，不要返回其他任何内容。如果找不到目标岗位信息，返回 "null"。
+
+                    ===== 简历开始 =====
+                    %s
+                    ===== 简历结束 =====
+                    """.formatted(resumeContent);
+
+            ChatResponse response = resumeAnalysisChatClient.prompt()
+                    .user(prompt)
+                    .call()
+                    .chatResponse();
+
+            String result = response.getResult().getOutput().getText().trim();
+            if ("null".equals(result) || result.isEmpty()) {
+                return null;
+            }
+            return result;
+
+        } catch (Exception e) {
+            log.warn("提取目标岗位失败: {}", e.getMessage());
+            return null;
+        }
     }
 
     /**

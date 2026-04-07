@@ -1,10 +1,11 @@
 package com.itsheng.service.service;
 
+import com.itsheng.pojo.entity.JobCategory;
 import com.itsheng.pojo.entity.JobEntity;
 import java.util.List;
 
 /**
- * 岗位向量检索 Service 接口（预留）
+ * 岗位向量检索 Service 接口
  */
 public interface JobVectorSearchService {
 
@@ -12,9 +13,9 @@ public interface JobVectorSearchService {
      * 根据简历向量搜索相似岗位
      * @param resumeVector 简历 embedding 向量（格式："[0.1,0.2,...]"）
      * @param limit 返回数量
-     * @return 相似岗位列表
+     * @return 相似岗位分类列表（JobCategory）
      */
-    List<JobEntity> searchSimilarJobs(String resumeVector, Integer limit);
+    List<JobCategory> searchSimilarJobs(String resumeVector, Integer limit);
 
     /**
      * 根据岗位 ID 获取向量
