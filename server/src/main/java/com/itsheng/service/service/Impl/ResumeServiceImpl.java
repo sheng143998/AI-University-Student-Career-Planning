@@ -17,6 +17,7 @@ import com.itsheng.pojo.entity.JobCategory;
 import com.itsheng.pojo.entity.ResumeAnalysisResult;
 import com.itsheng.pojo.entity.StudentCapabilityProfile;
 import com.itsheng.pojo.entity.UserCareerData;
+import com.itsheng.pojo.entity.UserRoadmapSteps;
 import com.itsheng.pojo.entity.UserVectorStore;
 import com.itsheng.pojo.vo.CapabilityProfileVO;
 import com.itsheng.pojo.vo.ResumeAnalysisResultVO;
@@ -26,6 +27,7 @@ import com.itsheng.service.mapper.JobCategoryMapper;
 import com.itsheng.service.mapper.ResumeMapper;
 import com.itsheng.service.mapper.StudentCapabilityProfileMapper;
 import com.itsheng.service.mapper.UserCareerDataMapper;
+import com.itsheng.service.mapper.UserRoadmapStepsMapper;
 import com.itsheng.service.mapper.UserVectorStoreMapper;
 import com.itsheng.service.service.JobVectorSearchService;
 import com.itsheng.service.service.ResumeService;
@@ -78,6 +80,7 @@ public class ResumeServiceImpl implements ResumeService {
     private final JobCategoryMapper jobCategoryMapper;
     private final JobVectorSearchService jobVectorSearchService;
     private final UserCareerDataMapper userCareerDataMapper;
+    private final UserRoadmapStepsMapper userRoadmapStepsMapper;
 
     // 文件类型与 MIME 类型的映射
     private static final Map<String, String> MIME_TYPE_MAP = new HashMap<>();
@@ -512,6 +515,9 @@ public class ResumeServiceImpl implements ResumeService {
                 userCareerDataMapper.insert(careerData);
                 log.info("用户职业数据已创建，userId: {}", userId);
             }
+
+            // 8. 同时生成 user_roadmap_steps（职业发展路径）
+            generateUserRoadmapSteps(userId, targetJob, targetJobId);
         } catch (Exception e) {
             log.error("生成用户职业数据失败，userId: {}", userId, e);
             throw new RuntimeException("生成用户职业数据失败", e);
@@ -735,6 +741,99 @@ public class ResumeServiceImpl implements ResumeService {
         } catch (Exception e) {
             log.error("构建市场趋势失败", e);
             return "[]";
+        }
+    }
+
+    /**
+     * 生成用户职业发展路径（user_roadmap_steps）
+     * 基于目标岗位的垂直晋升路径（同一岗位类别，不同级别）
+     */
+    private void generateUserRoadmapSteps(Long userId, JobCategory targetJob, Long targetJobId) {
+        if (targetJob == null || targetJobId == null) {
+            log.warn("目标岗位为空，跳过生成职业发展路径，userId: {}", userId);
+            return;
+        }
+
+        log.info("开始生成用户职业发展路径，userId: {}, targetJob: {}", userId, targetJob.getJobCategoryName());
+
+        try {
+            // 1. 查询同一 job_category_code 基础类别的所有级别（垂直晋升路径）
+            String baseCategoryCode = targetJob.getJobCategoryCode()
+                    .replaceAll("_(INTERNSHIP|JUNIOR|MID|SENIOR)$", "");
+            List<JobCategory> verticalPath = jobCategoryMapper.selectVerticalPathByCategoryCode(baseCategoryCode);
+
+            if (verticalPath == null || verticalPath.isEmpty()) {
+                log.warn("未找到垂直晋升路径，baseCategoryCode: {}", baseCategoryCode);
+                return;
+            }
+
+            // 2. 构建 steps 列表
+            List<Map<String, Object>> steps = new ArrayList<>();
+            int index = 0;
+            for (JobCategory job : verticalPath) {
+                Map<String, Object> step = new LinkedHashMap<>();
+                step.put("job_id", job.getId());
+                step.put("title", job.getJobCategoryName());
+                step.put("level", job.getJobLevel());
+                step.put("level_name", job.getJobLevelName());
+
+                // 根据级别设置时间目标
+                String timeGoal = switch (job.getJobLevel()) {
+                    case "INTERNSHIP" -> "目标：第 0-1 年";
+                    case "JUNIOR" -> "目标：第 1-3 年";
+                    case "MID" -> "目标：第 3-5 年";
+                    case "SENIOR" -> "目标：第 5-8 年";
+                    default -> "目标：待定";
+                };
+                step.put("time", timeGoal);
+
+                // 图标根据级别设置
+                String icon = switch (job.getJobLevel()) {
+                    case "INTERNSHIP" -> "person";
+                    case "JUNIOR" -> "star";
+                    case "MID" -> "diamond";
+                    case "SENIOR" -> "flag";
+                    default -> "circle";
+                };
+                step.put("icon", icon);
+
+                // 匹配状态和 active 状态
+                if (index == 0) {
+                    step.put("status", "85% 匹配");
+                    step.put("active", true);
+                } else {
+                    step.put("status", "待解锁");
+                    step.put("active", false);
+                }
+
+                steps.add(step);
+                index++;
+            }
+
+            String stepsJson = objectMapper.writeValueAsString(steps);
+
+            // 3. 检查是否已有记录
+            UserRoadmapSteps existing = userRoadmapStepsMapper.selectByUserId(userId);
+
+            UserRoadmapSteps roadmapSteps = UserRoadmapSteps.builder()
+                    .userId(userId)
+                    .jobProfileId(targetJobId)
+                    .currentStepIndex(0)
+                    .steps(stepsJson)
+                    .createTime(LocalDateTime.now())
+                    .updateTime(LocalDateTime.now())
+                    .build();
+
+            if (existing != null) {
+                roadmapSteps.setId(existing.getId());
+                userRoadmapStepsMapper.update(roadmapSteps);
+                log.info("用户职业发展路径已更新，userId: {}", userId);
+            } else {
+                userRoadmapStepsMapper.insert(roadmapSteps);
+                log.info("用户职业发展路径已创建，userId: {}, steps 数量: {}", userId, steps.size());
+            }
+        } catch (Exception e) {
+            log.error("生成用户职业发展路径失败，userId: {}", userId, e);
         }
     }
     private int getIntValue(JsonNode rootNode, String fieldName, int defaultValue) {
