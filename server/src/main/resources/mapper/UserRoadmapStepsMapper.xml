@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.itsheng.service.mapper.UserRoadmapStepsMapper">
+
+    <!-- 结果映射 -->
+    <resultMap id="UserRoadmapStepsResult" type="com.itsheng.pojo.entity.UserRoadmapSteps">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="job_profile_id" property="jobProfileId"/>
+        <result column="current_step_index" property="currentStepIndex"/>
+        <result column="steps" property="steps"/>
+        <result column="create_time" property="createTime" javaType="java.time.LocalDateTime"/>
+        <result column="update_time" property="updateTime" javaType="java.time.LocalDateTime"/>
+    </resultMap>
+
+    <!-- 插入用户职业发展路径 -->
+    <insert id="insert" parameterType="com.itsheng.pojo.entity.UserRoadmapSteps" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ai_career_plan.user_roadmap_steps (
+            user_id,
+            job_profile_id,
+            current_step_index,
+            steps,
+            create_time,
+            update_time
+        ) VALUES (
+            #{userId},
+            #{jobProfileId},
+            #{currentStepIndex},
+            #{steps}::jsonb,
+            #{createTime},
+            #{updateTime}
+        )
+    </insert>
+
+    <!-- 根据用户 ID 查询职业发展路径 -->
+    <select id="selectByUserId" resultMap="UserRoadmapStepsResult">
+        SELECT *
+        FROM ai_career_plan.user_roadmap_steps
+        WHERE user_id = #{userId}
+        ORDER BY create_time DESC
+        LIMIT 1
+    </select>
+
+    <!-- 动态更新用户职业发展路径 -->
+    <update id="update" parameterType="com.itsheng.pojo.entity.UserRoadmapSteps">
+        UPDATE ai_career_plan.user_roadmap_steps
+        <set>
+            <if test="jobProfileId != null">job_profile_id = #{jobProfileId},</if>
+            <if test="currentStepIndex != null">current_step_index = #{currentStepIndex},</if>
+            <if test="steps != null">steps = #{steps}::jsonb,</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+        </set>
+        WHERE user_id = #{userId}
+    </update>
+
+</mapper>

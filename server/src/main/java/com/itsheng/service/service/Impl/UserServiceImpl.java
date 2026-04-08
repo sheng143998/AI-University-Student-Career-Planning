@@ -3,6 +3,7 @@ package com.itsheng.service.service.Impl;
 import com.itsheng.common.constant.MessageConstant;
 import com.itsheng.common.exception.AccountNotFoundException;
 import com.itsheng.common.exception.PasswordErrorException;
+import com.itsheng.common.exception.UsernameExistException;
 import com.itsheng.pojo.dto.UserDTO;
 import com.itsheng.pojo.dto.UserLoginDTO;
 import com.itsheng.pojo.dto.UserRegisterDTO;
@@ -26,8 +27,17 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public UserVO register(UserRegisterDTO userRegisterDTO) {
+        // 获取要注册的用户名
+        String username = userRegisterDTO.getName() != null ? userRegisterDTO.getName() : userRegisterDTO.getUsername();
+
+        // 检查用户名是否已存在
+        User existingUser = userMapper.selectByusername(username);
+        if (existingUser != null) {
+            throw new UsernameExistException(MessageConstant.USERNAME_EXIST);
+        }
+
         User user = User.builder()
-                .username(userRegisterDTO.getName() != null ? userRegisterDTO.getName() : userRegisterDTO.getUsername())
+                .username(username)
                 .password(userRegisterDTO.getPassword())
                 .sex(userRegisterDTO.getSex())
                 .userImage(userRegisterDTO.getUserImage())

@@ -18,7 +18,6 @@
 | user_id | BIGINT | 用户 ID（逻辑外键） |
 | job_profile | JSON | 岗位画像信息（岗位名称、行业、城市等） |
 | match_summary | JSON | 匹配度摘要（分数、描述、标签、各维度得分） |
-| market_trends | JSON | 市场趋势数据（岗位需求、薪资、热门技能） |
 | skill_radar | JSON | 能力雷达图数据（技术/创新/抗压/沟通/学习/实习） |
 | actions | JSON | 行动建议列表 |
 | create_time | DATETIME | 创建时间 |
@@ -409,7 +408,7 @@
 
 ---
 
-## 3.2 获取仪表盘进化路线
+## 3.2 获取用户职业发展路径
 
 ### 3.2.1 基本信息
 
@@ -421,13 +420,14 @@
 
 **数据来源说明**：
 - 后端从 `user_roadmap_steps` 表读取数据
-- 如果 `user_roadmap_steps` 无数据，则触发 AI 服务根据用户能力画像和岗位画像生成职业发展路径
+- 如果 `user_roadmap_steps` 无数据，则自动创建：
+  - 基于用户目标岗位的垂直晋升路径（同一岗位类别，不同级别）
+  - 从 `job` 表查询同一 `job_category_code` 基础类别的所有级别（INTERNSHIP → JUNIOR → MID → SENIOR）
+  - 默认 `current_step_index` 为 0
 
 ---
 
 ### 3.2.2 请求参数
-
-参数说明：
 
 本接口无需请求参数。
 
@@ -445,8 +445,13 @@
 | msg | string | 非必须 | 提示信息 |
 | data | object | 非必须 | 返回的数据 |
 | &#124;- current_step_index | number | 非必须 | 当前所在阶段索引 (从 0 开始) |
+| &#124;- target_job_id | number | 非必须 | 目标岗位 ID（关联 job 表） |
+| &#124;- target_job_name | string | 非必须 | 目标岗位名称 |
 | &#124;- steps | object[] | 非必须 | 职业发展阶段列表 |
+| &#124;- &#124;- job_id | number | 非必须 | 关联 job 表 ID |
 | &#124;- &#124;- title | string | 非必须 | 阶段岗位名称 |
+| &#124;- &#124;- level | string | 非必须 | 岗位级别：INTERNSHIP/JUNIOR/MID/SENIOR |
+| &#124;- &#124;- level_name | string | 非必须 | 岗位级别名称：实习岗/初级岗/中级岗/高级岗 |
 | &#124;- &#124;- time | string | 非必须 | 时间目标描述 |
 | &#124;- &#124;- status | string | 非必须 | 匹配状态文字 |
 | &#124;- &#124;- icon | string | 非必须 | 图标名称 |
@@ -460,26 +465,47 @@
   "msg": "success",
   "data": {
     "current_step_index": 0,
+    "target_job_id": 42,
+    "target_job_name": "Java 工程师",
     "steps": [
       {
-        "title": "初级 UI/视觉设计师",
-        "time": "目标：第 1-2 年",
+        "job_id": 40,
+        "title": "Java 工程师",
+        "level": "INTERNSHIP",
+        "level_name": "实习岗",
+        "time": "目标：第 0-1 年",
         "status": "85% 匹配",
         "icon": "person",
         "active": true
       },
       {
-        "title": "高级 UI 设计师",
-        "time": "目标：第 3-5 年",
+        "job_id": 41,
+        "title": "Java 工程师",
+        "level": "JUNIOR",
+        "level_name": "初级岗",
+        "time": "目标：第 1-3 年",
         "status": "待解锁",
         "icon": "star",
         "active": false
       },
       {
-        "title": "UI 设计专家/设计经理",
-        "time": "目标：第 6-8 年",
+        "job_id": 42,
+        "title": "Java 工程师",
+        "level": "MID",
+        "level_name": "中级岗",
+        "time": "目标：第 3-5 年",
         "status": "待解锁",
         "icon": "diamond",
+        "active": false
+      },
+      {
+        "job_id": 43,
+        "title": "Java 工程师",
+        "level": "SENIOR",
+        "level_name": "高级岗",
+        "time": "目标：第 5-8 年",
+        "status": "待解锁",
+        "icon": "flag",
         "active": false
       }
     ]
@@ -510,9 +536,114 @@
    - 内容："职业发展路径需要根据您的简历和能力画像生成。请先上传简历，我们将为您规划职业发展路线。"
    - 操作按钮："去上传简历" → 跳转到 `/resume/upload` 页面
 
-**数据加载状态**：
+---
 
-当用户刚上传完简历但 Dashboard 数据尚未生成完成时，前端可展示加载状态或骨架屏，等待数据就绪后自动刷新。
+## 3.3 更新用户当前所在阶段
+
+### 3.3.1 基本信息
+
+请求路径：/api/dashboard/roadmap/current-step
+
+请求方式：PUT
+
+接口描述：该接口用于用户编辑自己当前所在的职业发展阶段。用户可在前端查看所有晋升路径选项（同一岗位类别的所有级别岗位），选择符合自己实际情况的级别。
+
+**业务逻辑**：
+- 用户只能修改 `current_step_index`（当前所在阶段索引）
+- 索引范围：0 到 steps 数组长度 - 1
+- 修改后自动更新 `user_roadmap_steps` 表的 `current_step_index` 字段
+- 各 step 的 `active` 状态会根据新的 `current_step_index` 重新计算
+
+---
+
+### 3.3.2 请求参数
+
+参数格式：application/json
+
+| 参数名 | 类型 | 是否必须 | 备注 |
+| :--- | :--- | :--- | :--- |
+| current_step_index | number | 必须 | 当前所在阶段索引（从 0 开始） |
+
+请求参数样例：
+
+```json
+{
+  "current_step_index": 1
+}
+```
+
+---
+
+### 3.3.3 响应数据
+
+参数格式：application/json
+
+参数说明：
+
+| 参数名 | 类型 | 是否必须 | 备注 |
+| :--- | :--- | :--- | :--- |
+| code | number | 必须 | 响应码，1 代表成功，0 代表失败 |
+| msg | string | 非必须 | 提示信息 |
+| data | object[] | 非必须 | 更新后的完整 steps 列表 |
+| &#124;- job_id | number | 非必须 | 关联 job 表 ID |
+| &#124;- title | string | 非必须 | 阶段岗位名称 |
+| &#124;- level | string | 非必须 | 岗位级别 |
+| &#124;- level_name | string | 非必须 | 岗位级别名称 |
+| &#124;- time | string | 非必须 | 时间目标描述 |
+| &#124;- status | string | 非必须 | 匹配状态文字 |
+| &#124;- icon | string | 非必须 | 图标名称 |
+| &#124;- active | boolean | 非必须 | 是否当前阶段 |
+
+响应数据样例：
+
+```json
+{
+  "code": 1,
+  "msg": "success",
+  "data": [
+    {
+      "job_id": 40,
+      "title": "Java 工程师",
+      "level": "INTERNSHIP",
+      "level_name": "实习岗",
+      "time": "目标：第 0-1 年",
+      "status": "已完成",
+      "icon": "check",
+      "active": false
+    },
+    {
+      "job_id": 41,
+      "title": "Java 工程师",
+      "level": "JUNIOR",
+      "level_name": "初级岗",
+      "time": "目标：第 1-3 年",
+      "status": "当前阶段",
+      "icon": "star",
+      "active": true
+    },
+    {
+      "job_id": 42,
+      "title": "Java 工程师",
+      "level": "MID",
+      "level_name": "中级岗",
+      "time": "目标：第 3-5 年",
+      "status": "待解锁",
+      "icon": "diamond",
+      "active": false
+    }
+  ]
+}
+```
+
+---
+
+### 3.3.4 错误响应
+
+| HTTP 状态码 | 场景 | JSON 响应样例 |
+| :--- | :--- | :--- |
+| `401` | 未登录或 token 失效 | `{"code": 401, "msg": "未登录"}` |
+| `400` | 索引越界 | `{"code": 0, "msg": "阶段索引超出有效范围"}` |
+| `404` | 用户尚未上传简历，无 Roadmap 数据 | `{"code": 404, "msg": "请先上传简历以生成职业规划"}` |
 
 ---
 

@@ -42,6 +42,14 @@
       {{ pageError }}
     </div>
 
+    <div v-if="dashboardError" class="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4">
+      {{ dashboardError }}
+    </div>
+
+    <div v-if="roadmapError" class="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4">
+      {{ roadmapError }}
+    </div>
+
     <!-- Bento Grid Layout -->
     <div class="grid grid-cols-1 md:grid-cols-12 gap-6">
       <!-- AI Match Summary Card (Span 8) -->
@@ -74,7 +82,7 @@
                   class="text-primary transition-all duration-1000 ease-out"
                   :style="{
                     strokeDasharray: '351.85',
-                    strokeDashoffset: 351.85 - (351.85 * (profileOverview?.match_score || 0)) / 100
+                    strokeDashoffset: 351.85 - (351.85 * (dashboardSummary?.match_summary?.score || 0)) / 100
                   }"
                 />
               </svg>
@@ -89,7 +97,7 @@
           <div>
             <div class="flex items-center gap-2 mb-3">
               <span class="material-symbols-outlined text-tertiary-fixed-dim bg-tertiary-container p-1 rounded-md text-sm">auto_awesome</span>
-              <h2 class="text-xl font-bold headline-font">{{ profileOverview?.target_role || '目标岗位' }}匹配度</h2>
+              <h2 class="text-xl font-bold headline-font">{{ dashboardSummary?.job_profile?.name || '目标岗位' }}匹配度</h2>
             </div>
             <p class="text-on-surface-variant leading-relaxed text-lg italic">
               “{{ matchSummaryText }}”
@@ -97,7 +105,7 @@
             <div class="mt-6 flex gap-4">
               <div class="bg-primary-fixed/50 px-3 py-1.5 rounded-lg text-xs font-bold text-primary flex items-center gap-2">
                 <span class="material-symbols-outlined text-sm">location_on</span>
-                {{ profileOverview?.location || '未填写城市' }}
+                {{ dashboardSummary?.job_profile?.city || profileOverview?.location || '未填写城市' }}
               </div>
               <div class="bg-primary-fixed/50 px-3 py-1.5 rounded-lg text-xs font-bold text-primary flex items-center gap-2">
                 <span class="material-symbols-outlined text-sm">badge</span>
@@ -115,65 +123,31 @@
           <span class="text-[10px] font-bold bg-tertiary-fixed text-on-tertiary-fixed-variant px-2 py-1 rounded-full uppercase tracking-tighter">战略增长</span>
         </div>
         <div class="space-y-4 flex-1">
-          <div class="p-4 bg-surface-container-lowest rounded-lg">
+          <div v-if="(marketTrends?.length ?? 0) === 0" class="text-sm text-on-surface-variant">暂无市场趋势数据</div>
+          <div v-for="(t, i) in marketTrends" :key="`${t.name || 'trend'}-${i}`" class="p-4 bg-surface-container-lowest rounded-lg">
             <div class="flex justify-between items-center mb-1">
-              <span class="text-sm font-medium">计算机科学</span>
-              <span class="text-xs font-bold text-green-600">+14%</span>
+              <span class="text-sm font-medium">{{ t.name || '—' }}</span>
+              <span class="text-xs font-bold" :class="(t.growth ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'">
+                {{ formatGrowth(t.growth) }}
+              </span>
             </div>
             <div class="h-1.5 w-full bg-surface-container-highest rounded-full overflow-hidden">
-              <div class="h-full bg-primary-container" style="width: 88%"></div>
-            </div>
-          </div>
-          <div class="p-4 bg-surface-container-lowest rounded-lg">
-            <div class="flex justify-between items-center mb-1">
-              <span class="text-sm font-medium">AI 工程</span>
-              <span class="text-xs font-bold text-green-600">+32%</span>
-            </div>
-            <div class="h-1.5 w-full bg-surface-container-highest rounded-full overflow-hidden">
-              <div class="h-full bg-tertiary-container" style="width: 95%"></div>
+              <div class="h-full bg-primary-container" :style="{ width: `${Math.max(0, Math.min(100, t.value ?? 0))}%` }"></div>
             </div>
           </div>
         </div>
         <router-link to="/market" class="w-full mt-6 text-primary text-xs text-center font-bold hover:underline">探索市场</router-link>
       </div>
 
-      <!-- Skill Gap Visualization (Span 6) -->
-      <div class="md:col-span-6 bg-surface-container-lowest rounded-xl p-8 shadow-[0_20px_40px_rgba(25,28,30,0.04)]">
-        <h3 class="text-lg font-bold headline-font mb-8">技能差距可视化</h3>
-        <div class="aspect-square max-w-[300px] mx-auto relative flex items-center justify-center">
-          <div class="absolute inset-0 border border-outline-variant/20 rounded-full scale-100"></div>
-          <div class="absolute inset-0 border border-outline-variant/20 rounded-full scale-[0.75]"></div>
-          <div class="absolute inset-0 border border-outline-variant/20 rounded-full scale-[0.5]"></div>
-          <div class="absolute inset-0 border border-outline-variant/20 rounded-full scale-[0.25]"></div>
-          <svg class="w-full h-full transform -rotate-18 overflow-visible" viewBox="0 0 100 100">
-            <polygon fill="rgba(0, 86, 210, 0.1)" points="50,10 90,50 50,90 10,50" stroke="#0056d2" stroke-width="2"></polygon>
-            <polygon fill="rgba(76, 214, 255, 0.2)" points="50,25 70,50 50,75 30,50" stroke="#004d60" stroke-dasharray="2,2" stroke-width="1.5"></polygon>
-          </svg>
-          <div class="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-4 text-[10px] font-bold text-on-surface-variant uppercase">技术</div>
-          <div class="absolute right-0 top-1/2 translate-x-12 -translate-y-1/2 text-[10px] font-bold text-on-surface-variant uppercase">创新</div>
-          <div class="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-4 text-[10px] font-bold text-on-surface-variant uppercase">韧性</div>
-          <div class="absolute left-0 top-1/2 -translate-x-12 -translate-y-1/2 text-[10px] font-bold text-on-surface-variant uppercase">沟通</div>
-        </div>
-        <div class="mt-8 flex justify-center gap-6">
-          <div class="flex items-center gap-2">
-            <span class="w-3 h-3 bg-primary rounded-full"></span>
-            <span class="text-xs text-on-surface-variant">您的水平</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="w-3 h-3 bg-tertiary-fixed-dim rounded-full"></span>
-            <span class="text-xs text-on-surface-variant">行业前 10%</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Action Items (Span 6) -->
-      <div class="md:col-span-6 bg-surface-container-lowest rounded-xl p-8 shadow-[0_20px_40px_rgba(25,28,30,0.04)]">
+      <!-- Action Items (Span 12) -->
+      <div class="md:col-span-12 bg-surface-container-lowest rounded-xl p-8 shadow-[0_20px_40px_rgba(25,28,30,0.04)]">
         <div class="flex items-center justify-between mb-8">
           <h3 class="text-lg font-bold headline-font">行动指南</h3>
           <span class="material-symbols-outlined text-primary">priority_high</span>
         </div>
-        <div class="space-y-4">
-          <div v-for="(item, index) in actions" :key="index" class="group flex items-center justify-between p-4 bg-surface rounded-xl hover:bg-primary-fixed/30 transition-all cursor-pointer">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div v-if="(actions?.length ?? 0) === 0" class="md:col-span-full text-sm text-on-surface-variant text-center py-8">暂无行动建议</div>
+          <div v-for="(item, index) in actions" :key="item.id || index" class="group flex items-center justify-between p-4 bg-surface rounded-xl hover:bg-primary-fixed/30 transition-all cursor-pointer border border-outline-variant/10" @click="onActionClick(item)">
             <div class="flex items-center gap-4">
               <div class="w-10 h-10 rounded-lg bg-surface-container-highest flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-colors">
                 <span class="material-symbols-outlined">{{ item.icon }}</span>
@@ -194,7 +168,8 @@
         <div class="relative py-12">
           <div class="absolute top-1/2 left-0 w-full h-1 bg-gradient-to-r from-primary/10 via-primary to-primary/10 -translate-y-1/2 hidden md:block"></div>
           <div class="flex flex-col md:flex-row justify-between relative z-10 gap-12 md:gap-4">
-            <div v-for="(node, index) in roadmap" :key="index" class="flex flex-col items-center text-center max-w-[200px]">
+            <div v-if="(roadmap?.length ?? 0) === 0" class="text-sm text-on-surface-variant">暂无职业路径数据</div>
+            <div v-for="(node, index) in roadmap" :key="`${node.title || 'step'}-${index}`" class="flex flex-col items-center text-center max-w-[200px] cursor-pointer" @click="onSelectRoadmapStep(index)">
               <div :class="['w-14 h-14 rounded-full flex items-center justify-center shadow-lg mb-4 border-4 border-white', node.active ? 'bg-primary-container text-white' : 'bg-surface-container-highest text-on-surface group-hover:bg-primary group-hover:text-white transition-all']">
                 <span class="material-symbols-outlined">{{ node.icon }}</span>
               </div>
@@ -392,17 +367,27 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { isApiSuccess } from '@/api/client'
 import * as profileApi from '@/api/userProfile'
 import { updateUserInfo, uploadFile, type UserEditBody } from '@/api/auth'
+import * as dashboardApi from '@/api/dashboard'
 
 const loadingOverview = ref(false)
 const loadingDetail = ref(false)
+const loadingDashboard = ref(false)
+const loadingRoadmap = ref(false)
 const pageError = ref<string | null>(null)
 const detailError = ref<string | null>(null)
+const dashboardError = ref<string | null>(null)
+const roadmapError = ref<string | null>(null)
+
+const router = useRouter()
 
 const profileOverview = ref<profileApi.UserProfileOverview | null>(null)
 const profileDetail = ref<profileApi.UserProfileDetail | null>(null)
+const dashboardSummary = ref<dashboardApi.DashboardSummary | null>(null)
+const dashboardRoadmap = ref<dashboardApi.DashboardRoadmap | null>(null)
 
 const editOpen = ref(false)
 const editName = ref('')
@@ -416,14 +401,14 @@ const saveOk = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 
 const matchScoreText = computed(() => {
-  const s = profileOverview.value?.match_score
+  const s = dashboardSummary.value?.match_summary?.score
   if (typeof s === 'number' && Number.isFinite(s)) return String(Math.round(s))
   return '--'
 })
 
 const headlineText = computed(() => {
-  const target = profileOverview.value?.target_role
-  const loc = profileOverview.value?.location
+  const target = dashboardSummary.value?.job_profile?.name
+  const loc = dashboardSummary.value?.job_profile?.city || profileOverview.value?.location
   const current = profileOverview.value?.current_role
   const bits = [
     target ? `您的目标岗位是「${target}」。` : '请先上传简历获取 AI 分析结果。',
@@ -434,14 +419,24 @@ const headlineText = computed(() => {
 })
 
 const matchSummaryText = computed(() => {
-  const score = profileOverview.value?.match_score
-  const target = profileOverview.value?.target_role
+  const score = dashboardSummary.value?.match_summary?.score
+  const target = dashboardSummary.value?.job_profile?.name
   if (typeof score !== 'number' || !Number.isFinite(score)) return '请先上传简历，生成匹配度分析。'
   if (!target) return `当前匹配分为 ${Math.round(score)}。`
   if (score >= 80) return `您与${target}职位的匹配度很高，建议继续完善项目与技能深度。`
   if (score >= 60) return `您与${target}职位具备一定匹配度，建议补齐关键技能与项目经验。`
   return `您与${target}职位匹配度偏低，建议先从核心技能和基础项目开始提升。`
 })
+
+const actions = computed(() => dashboardSummary.value?.actions ?? [])
+const marketTrends = computed(() => dashboardSummary.value?.market_trends ?? [])
+const roadmap = computed(() => dashboardRoadmap.value?.steps ?? [])
+
+function formatGrowth(growth: number | undefined) {
+  const n = typeof growth === 'number' && Number.isFinite(growth) ? growth : 0
+  const sign = n >= 0 ? '+' : ''
+  return `${sign}${Math.round(n * 100)}%`
+}
 
 async function loadOverview() {
   loadingOverview.value = true
@@ -459,6 +454,54 @@ async function loadOverview() {
     profileOverview.value = null
   } finally {
     loadingOverview.value = false
+  }
+}
+
+async function loadDashboardSummary() {
+  loadingDashboard.value = true
+  dashboardError.value = null
+  try {
+    const r = await dashboardApi.getDashboardSummary()
+    if (r.code === 404) {
+      dashboardSummary.value = null
+      await router.replace({ name: 'resume', query: { from: 'dashboard' } })
+      return
+    }
+    if (!isApiSuccess(r.code)) {
+      dashboardError.value = r.msg || '获取仪表盘汇总失败'
+      dashboardSummary.value = null
+      return
+    }
+    dashboardSummary.value = r.data ?? null
+  } catch (e) {
+    dashboardError.value = e instanceof Error ? e.message : '获取仪表盘汇总失败'
+    dashboardSummary.value = null
+  } finally {
+    loadingDashboard.value = false
+  }
+}
+
+async function loadDashboardRoadmap() {
+  loadingRoadmap.value = true
+  roadmapError.value = null
+  try {
+    const r = await dashboardApi.getDashboardRoadmap()
+    if (r.code === 404) {
+      dashboardRoadmap.value = null
+      await router.replace({ name: 'resume', query: { from: 'dashboard' } })
+      return
+    }
+    if (!isApiSuccess(r.code)) {
+      roadmapError.value = r.msg || '获取职业进化地图失败'
+      dashboardRoadmap.value = null
+      return
+    }
+    dashboardRoadmap.value = r.data ?? null
+  } catch (e) {
+    roadmapError.value = e instanceof Error ? e.message : '获取职业进化地图失败'
+    dashboardRoadmap.value = null
+  } finally {
+    loadingRoadmap.value = false
   }
 }
 
@@ -482,7 +525,39 @@ async function loadDetail() {
 }
 
 async function onReload() {
-  await Promise.all([loadOverview(), loadDetail()])
+  await Promise.all([loadOverview(), loadDetail(), loadDashboardSummary(), loadDashboardRoadmap()])
+}
+
+async function onSelectRoadmapStep(index: number) {
+  if (loadingRoadmap.value) return
+  const steps = dashboardRoadmap.value?.steps
+  if (!steps || index < 0 || index >= steps.length) return
+
+  loadingRoadmap.value = true
+  roadmapError.value = null
+  try {
+    const r = await dashboardApi.updateDashboardCurrentStep({ current_step_index: index })
+    if (!isApiSuccess(r.code)) {
+      roadmapError.value = r.msg || '更新当前阶段失败'
+      return
+    }
+    const updatedSteps = r.data ?? []
+    dashboardRoadmap.value = {
+      ...(dashboardRoadmap.value || {}),
+      current_step_index: index,
+      steps: updatedSteps,
+    }
+  } catch (e) {
+    roadmapError.value = e instanceof Error ? e.message : '更新当前阶段失败'
+  } finally {
+    loadingRoadmap.value = false
+  }
+}
+
+function onActionClick(item: dashboardApi.DashboardAction) {
+  const link = (item?.link || '').trim()
+  if (!link) return
+  void router.push(link)
 }
 
 function openEdit() {
@@ -574,16 +649,4 @@ async function onSave() {
 onMounted(() => {
   void onReload()
 })
-
-const actions = [
-  { title: '完成 React 认证', desc: '弥补关键技术差距', icon: 'school' },
-  { title: '用 UX 案例研究更新简历', desc: '将档案曝光度提高 25%', icon: 'browse_gallery' },
-  { title: '与 3 位资深设计师建立联系', desc: '解锁隐藏的市场机会', icon: 'group' }
-]
-
-const roadmap = [
-  { title: '初级 UI/视觉设计师', time: '目标：第 1-2 年', status: '85% 匹配', icon: 'person', active: true },
-  { title: '资深体验主管', time: '目标：第 4-6 年', status: '弥补差距', icon: 'stars', active: false },
-  { title: '设计总 Director', time: '目标：8 年以上', status: '未来高峰', icon: 'architecture', active: false }
-]
 </script>

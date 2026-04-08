@@ -186,7 +186,7 @@ async function handleRegisterSubmit() {
 
           <label>
             密码
-            <input v-model="form.password" type="password" autocomplete="new-password" placeholder="至少 8 位" />
+            <input v-model="form.password" type="password" autocomplete="new-password" placeholder="请输入密码" />
           </label>
 
           <label>

@@ -30,7 +30,11 @@ export const useAuthStore = defineStore('auth', () => {
     const r = await authApi.login({ username, password })
     if (isApiSuccess(r.code) && r.data?.token) {
       const d = r.data
-      applySession(d.token, d.user ?? null)
+      applySession(d.token, null)
+      const me = await authApi.getUserInfo()
+      if (isApiSuccess(me.code) && me.data) {
+        applySession(d.token, me.data)
+      }
     }
     return r
   }
