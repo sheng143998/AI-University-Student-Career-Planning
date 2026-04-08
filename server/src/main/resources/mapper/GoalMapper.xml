@@ -49,7 +49,7 @@
             success_salary, success_companies, success_cities, long_term_aspirations, ai_advice
         ) VALUES (
             #{userId}, #{title}, #{goalDesc}, #{status}, #{progress}, #{eta}, #{isPrimary},
-            #{successSalary}, #{successCompanies}, #{successCities}, #{longTermAspirations}, #{aiAdvice}
+            #{successSalary}, #{successCompanies}::jsonb, #{successCities}::jsonb, #{longTermAspirations}::jsonb, #{aiAdvice}
         )
     </insert>
 
@@ -62,9 +62,9 @@
             eta = #{eta},
             is_primary = #{isPrimary},
             success_salary = #{successSalary},
-            success_companies = #{successCompanies},
-            success_cities = #{successCities},
-            long_term_aspirations = #{longTermAspirations},
+            success_companies = #{successCompanies}::jsonb,
+            success_cities = #{successCities}::jsonb,
+            long_term_aspirations = #{longTermAspirations}::jsonb,
             ai_advice = #{aiAdvice},
             update_time = CURRENT_TIMESTAMP
         WHERE id = #{id}

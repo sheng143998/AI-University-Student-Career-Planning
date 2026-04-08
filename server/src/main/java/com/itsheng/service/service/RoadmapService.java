@@ -38,4 +38,9 @@ public interface RoadmapService {
      * @return 个性化推荐结果（垂直晋升路径 + 横向换岗路径）
      */
     CareerPathRecommendationVO getPersonalizedRecommendations();
+
+    /**
+     * Clear personalized recommendations cache for current user
+     */
+    void clearPersonalizedRecommendationsCache();
 }
