@@ -15,6 +15,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -77,6 +78,7 @@ public class RoadmapServiceImpl implements RoadmapService {
     }
 
     @Override
+    @Cacheable(cacheNames = "roadmap:graph", key = "(#categoryCode == null || #categoryCode.isEmpty()) ? ('global:' + #mode) : (#categoryCode + ':' + #mode)")
     public RoadmapGraphVO getGraph(String categoryCode, String mode) {
         log.info("获取地图图谱: categoryCode={}, mode={}", categoryCode, mode);
         RoadmapGraphVO graph = new RoadmapGraphVO();
@@ -477,6 +479,7 @@ public class RoadmapServiceImpl implements RoadmapService {
      * 获取个性化职业路径推荐
      */
     @Override
+    @Cacheable(cacheNames = "roadmap:recommendations:personalized", key = "T(com.itsheng.common.context.BaseContext).getUserId()")
     public CareerPathRecommendationVO getPersonalizedRecommendations() {
         Long userId = BaseContext.getUserId();
         log.info("获取用户 {} 的个性化职业路径推荐", userId);
