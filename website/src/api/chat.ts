@@ -104,7 +104,10 @@ export async function getMessages(conversationId: number, cursor?: number, limit
 /** 发送消息（流式响应） */
 export async function sendMessage(conversationId: number, content: string): Promise<Response> {
   const authHeaders = toAxiosHeaders(headersAuth()) as Record<string, string>
-  const response = await fetch('/api/chat/messages', {
+  const baseUrl = apiBase()
+  const url = baseUrl ? `${baseUrl.replace(/\/$/, '')}/api/chat/messages` : '/api/chat/messages'
+  
+  const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

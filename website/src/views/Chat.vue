@@ -551,9 +551,22 @@ function scrollToBottom() {
 
 async function send() {
   const content = draft.value.trim()
-  if (!content || !activeConversationId.value) return
+  if (!content) return
 
-  const conversationId = activeConversationId.value
+  // 如果没有当前会话，先创建一个
+  if (!activeConversationId.value) {
+    try {
+      const conv = await createConversation('新对话')
+      conversations.value = [conv, ...conversations.value]
+      activeConversationId.value = conv.id
+      messagesMap.value[conv.id] = []
+    } catch (e) {
+      console.error('自动创建会话失败', e)
+      return
+    }
+  }
+
+  const conversationId = activeConversationId.value!
   const list = messagesMap.value[conversationId] ?? (messagesMap.value[conversationId] = [])
 
   // 添加用户消息
