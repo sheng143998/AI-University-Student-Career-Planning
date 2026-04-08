@@ -69,15 +69,6 @@
             <line stroke="#0056d2" stroke-width="4" x1="50%" x2="67%" y1="50%" y2="85%"></line>
           </svg>
         </div>
-        <div class="mt-4 flex justify-end">
-          <button
-            @click="router.push({ name: 'roadmap' })"
-            class="px-5 py-2.5 bg-primary text-white rounded-lg font-bold text-sm shadow hover:shadow-md transition-all flex items-center gap-2"
-          >
-            <span class="material-symbols-outlined text-base">map</span>
-            在职业地图中探索
-          </button>
-        </div>
       </section>
 
       <!-- Market Trends (Side Bento Cell) -->
@@ -467,19 +458,61 @@
               </div>
             </div>
 
+            <!-- Company Benefits -->
+            <div v-if="selectedJobDetail.companyBenefits?.length" class="bg-tertiary-container/30 rounded-xl p-5">
+              <h3 class="text-sm font-bold text-on-surface-variant uppercase tracking-wider mb-3 flex items-center gap-2">
+                <span class="material-symbols-outlined text-sm">card_giftcard</span>
+                公司福利
+              </h3>
+              <div class="flex flex-wrap gap-2">
+                <span
+                  v-for="(benefit, idx) in selectedJobDetail.companyBenefits"
+                  :key="idx"
+                  class="px-3 py-1 rounded-full text-xs font-medium bg-surface-container-lowest"
+                >
+                  {{ benefit }}
+                </span>
+              </div>
+            </div>
+
             <!-- Career Path -->
             <div v-if="selectedJobDetail.careerPath" class="bg-surface-container-low rounded-xl p-5">
               <h3 class="text-sm font-bold text-on-surface-variant uppercase tracking-wider mb-4 flex items-center gap-2">
                 <span class="material-symbols-outlined text-sm">route</span>
                 职业路径
               </h3>
-              <button
-                @click="router.push({ name: 'roadmap', query: { jobId: String(selectedJobDetail.id) } })"
-                class="w-full px-4 py-3 bg-surface-container-highest rounded-lg hover:bg-surface-container transition-colors text-sm font-bold text-primary flex items-center justify-center gap-2"
-              >
-                <span class="material-symbols-outlined text-base">map</span>
-                职业地图中查看详细
-              </button>
+              
+              <!-- Vertical Path -->
+              <div v-if="selectedJobDetail.careerPath.vertical?.length" class="mb-4">
+                <h4 class="text-xs font-bold text-on-surface-variant mb-2">纵向晋升路径</h4>
+                <div class="flex items-center gap-2 overflow-x-auto pb-2">
+                  <div
+                    v-for="(step, idx) in selectedJobDetail.careerPath.vertical"
+                    :key="idx"
+                    class="flex items-center gap-2"
+                  >
+                    <div class="flex flex-col items-center p-3 bg-primary-container/30 rounded-lg min-w-[100px]">
+                      <span class="material-symbols-outlined text-primary">{{ idx === 0 ? 'star' : 'arrow_upward' }}</span>
+                      <span class="text-xs font-bold mt-1">{{ step }}</span>
+                    </div>
+                    <span v-if="idx < selectedJobDetail.careerPath.vertical.length - 1" class="material-symbols-outlined text-on-surface-variant">arrow_forward</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Lateral Path -->
+              <div v-if="selectedJobDetail.careerPath.lateral?.length">
+                <h4 class="text-xs font-bold text-on-surface-variant mb-2">横向转岗路径</h4>
+                <div class="flex flex-wrap gap-2">
+                  <span
+                    v-for="(step, idx) in selectedJobDetail.careerPath.lateral"
+                    :key="idx"
+                    class="px-3 py-1 bg-surface-container-highest rounded-lg text-sm"
+                  >
+                    {{ step }}
+                  </span>
+                </div>
+              </div>
             </div>
 
             <!-- Demand Analysis -->

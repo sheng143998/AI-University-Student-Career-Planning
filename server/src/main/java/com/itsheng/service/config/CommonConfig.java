@@ -1,6 +1,7 @@
 package com.itsheng.service.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.itsheng.common.constant.SystemConstants;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
