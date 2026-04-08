@@ -71,6 +71,28 @@
   - `keyword` (string, 可选) 关键词搜索
   - `page` (number, 可选，默认 1) 页码
   - `size` (number, 可选，默认 20) 每页数量
+- **职业画像（岗位画像）字段说明**（`items[]`）：
+  - `id` (BIGINT) 岗位画像 ID
+  - `job_name` (string) 岗位名称
+  - `industry_segment` (string) 行业分段
+  - `city` (string) 默认展示城市（岗位常见城市之一）
+  - `salary_range` (object) 薪资范围
+    - `min`/`max` (number) 最低/最高薪资
+    - `currency` (string) 币种，如 `CNY`
+    - `unit` (string) 单位，如 `month`
+  - `experience_range` (object) 经验范围
+    - `min`/`max` (number) 最低/最高年限
+    - `unit` (string) 单位，如 `years`
+  - `core_skills` (string[]) 专业技能（Top N）
+  - `certificate_requirements` (string[]) 证书要求/加分项
+  - `capability_requirements` (object) 能力画像（0-100 分）
+    - `innovation` 创新能力
+    - `learning` 学习能力
+    - `resilience` 抗压能力
+    - `communication` 沟通能力
+    - `internship` 实习/项目实践能力
+  - `demand_level` (string) 需求强度：`LOW`/`MEDIUM`/`HIGH`/`VERY_HIGH`
+  - `updated_at` (string) 更新时间（ISO8601）
 - **响应示例**:
 ```json
 {
@@ -98,6 +120,14 @@
           "unit": "years"
         },
         "core_skills": ["Figma", "Sketch", "Adobe Creative Suite"],
+        "certificate_requirements": ["Adobe 认证专家（加分项）", "UI/视觉设计相关证书（加分项）"],
+        "capability_requirements": {
+          "innovation": 75,
+          "learning": 80,
+          "resilience": 70,
+          "communication": 80,
+          "internship": 65
+        },
         "demand_level": "HIGH",
         "updated_at": "2026-03-30T09:00:00+08:00"
       },
@@ -118,6 +148,238 @@
           "unit": "years"
         },
         "core_skills": ["Vue", "React", "TypeScript"],
+        "certificate_requirements": ["软考（中级/高级）（加分项）", "前端相关认证（加分项）"],
+        "capability_requirements": {
+          "innovation": 70,
+          "learning": 85,
+          "resilience": 75,
+          "communication": 75,
+          "internship": 70
+        },
+        "demand_level": "HIGH",
+        "updated_at": "2026-03-30T09:00:00+08:00"
+      },
+      {
+        "id": 1003,
+        "job_name": "产品经理",
+        "industry_segment": "互联网/科技",
+        "city": "上海",
+        "salary_range": {
+          "min": 12000,
+          "max": 25000,
+          "currency": "CNY",
+          "unit": "month"
+        },
+        "experience_range": {
+          "min": 1,
+          "max": 5,
+          "unit": "years"
+        },
+        "core_skills": ["需求分析", "原型设计", "数据分析"],
+        "certificate_requirements": ["PMP（加分项）", "NPDP（加分项）"],
+        "capability_requirements": {
+          "innovation": 80,
+          "learning": 75,
+          "resilience": 80,
+          "communication": 90,
+          "internship": 70
+        },
+        "demand_level": "HIGH",
+        "updated_at": "2026-03-30T09:00:00+08:00"
+      },
+      {
+        "id": 1004,
+        "job_name": "数据分析师",
+        "industry_segment": "金融科技",
+        "city": "深圳",
+        "salary_range": {
+          "min": 12000,
+          "max": 22000,
+          "currency": "CNY",
+          "unit": "month"
+        },
+        "experience_range": {
+          "min": 0,
+          "max": 3,
+          "unit": "years"
+        },
+        "core_skills": ["SQL", "Python", "可视化"],
+        "certificate_requirements": ["数据分析相关证书（加分项）", "证券/基金从业（金融方向加分）"],
+        "capability_requirements": {
+          "innovation": 65,
+          "learning": 80,
+          "resilience": 70,
+          "communication": 75,
+          "internship": 75
+        },
+        "demand_level": "HIGH",
+        "updated_at": "2026-03-30T09:00:00+08:00"
+      },
+      {
+        "id": 1005,
+        "job_name": "后端工程师",
+        "industry_segment": "互联网/科技",
+        "city": "北京",
+        "salary_range": {
+          "min": 13000,
+          "max": 26000,
+          "currency": "CNY",
+          "unit": "month"
+        },
+        "experience_range": {
+          "min": 1,
+          "max": 5,
+          "unit": "years"
+        },
+        "core_skills": ["Java", "Spring Boot", "MySQL"],
+        "certificate_requirements": ["软考（加分项）", "云厂商认证（加分项）"],
+        "capability_requirements": {
+          "innovation": 70,
+          "learning": 80,
+          "resilience": 80,
+          "communication": 70,
+          "internship": 70
+        },
+        "demand_level": "HIGH",
+        "updated_at": "2026-03-30T09:00:00+08:00"
+      },
+      {
+        "id": 1006,
+        "job_name": "测试工程师",
+        "industry_segment": "互联网/科技",
+        "city": "广州",
+        "salary_range": {
+          "min": 9000,
+          "max": 18000,
+          "currency": "CNY",
+          "unit": "month"
+        },
+        "experience_range": {
+          "min": 0,
+          "max": 3,
+          "unit": "years"
+        },
+        "core_skills": ["测试用例设计", "自动化测试", "缺陷管理"],
+        "certificate_requirements": ["ISTQB（加分项）", "软件测试相关认证（加分项）"],
+        "capability_requirements": {
+          "innovation": 60,
+          "learning": 75,
+          "resilience": 80,
+          "communication": 75,
+          "internship": 70
+        },
+        "demand_level": "MEDIUM",
+        "updated_at": "2026-03-30T09:00:00+08:00"
+      },
+      {
+        "id": 1007,
+        "job_name": "运营专员",
+        "industry_segment": "互联网/科技",
+        "city": "杭州",
+        "salary_range": {
+          "min": 7000,
+          "max": 14000,
+          "currency": "CNY",
+          "unit": "month"
+        },
+        "experience_range": {
+          "min": 0,
+          "max": 3,
+          "unit": "years"
+        },
+        "core_skills": ["内容运营", "数据复盘", "活动策划"],
+        "certificate_requirements": ["新媒体/运营相关证书（加分项）"],
+        "capability_requirements": {
+          "innovation": 75,
+          "learning": 75,
+          "resilience": 80,
+          "communication": 85,
+          "internship": 70
+        },
+        "demand_level": "MEDIUM",
+        "updated_at": "2026-03-30T09:00:00+08:00"
+      },
+      {
+        "id": 1008,
+        "job_name": "人力资源专员",
+        "industry_segment": "综合/服务",
+        "city": "深圳",
+        "salary_range": {
+          "min": 7000,
+          "max": 13000,
+          "currency": "CNY",
+          "unit": "month"
+        },
+        "experience_range": {
+          "min": 0,
+          "max": 3,
+          "unit": "years"
+        },
+        "core_skills": ["招聘", "员工关系", "组织沟通"],
+        "certificate_requirements": ["人力资源管理师（加分项）"],
+        "capability_requirements": {
+          "innovation": 60,
+          "learning": 70,
+          "resilience": 75,
+          "communication": 90,
+          "internship": 70
+        },
+        "demand_level": "MEDIUM",
+        "updated_at": "2026-03-30T09:00:00+08:00"
+      },
+      {
+        "id": 1009,
+        "job_name": "AI 算法工程师",
+        "industry_segment": "人工智能",
+        "city": "深圳",
+        "salary_range": {
+          "min": 30000,
+          "max": 60000,
+          "currency": "CNY",
+          "unit": "month"
+        },
+        "experience_range": {
+          "min": 1,
+          "max": 5,
+          "unit": "years"
+        },
+        "core_skills": ["Python", "PyTorch", "数学基础"],
+        "certificate_requirements": ["深度学习/机器学习课程证书（加分项）", "云厂商 AI 认证（加分项）"],
+        "capability_requirements": {
+          "innovation": 90,
+          "learning": 90,
+          "resilience": 80,
+          "communication": 70,
+          "internship": 75
+        },
+        "demand_level": "VERY_HIGH",
+        "updated_at": "2026-03-30T09:00:00+08:00"
+      },
+      {
+        "id": 1010,
+        "job_name": "网络安全工程师",
+        "industry_segment": "互联网/科技",
+        "city": "北京",
+        "salary_range": {
+          "min": 15000,
+          "max": 30000,
+          "currency": "CNY",
+          "unit": "month"
+        },
+        "experience_range": {
+          "min": 1,
+          "max": 5,
+          "unit": "years"
+        },
+        "core_skills": ["渗透测试", "安全加固", "日志分析"],
+        "certificate_requirements": ["CISP/CISSP（加分项）", "等保测评相关资格（加分项）"],
+        "capability_requirements": {
+          "innovation": 75,
+          "learning": 80,
+          "resilience": 85,
+          "communication": 70,
+          "internship": 70
+        },
         "demand_level": "HIGH",
         "updated_at": "2026-03-30T09:00:00+08:00"
       }
@@ -126,7 +388,7 @@
 }
 ```
 
-**注**：完整版本应包含不少于 10 个就业岗位画像。
+**注**：示例中 `items` 已包含不少于 10 个就业岗位画像；实际返回数量由 `page/size` 决定。
 
 ---
 

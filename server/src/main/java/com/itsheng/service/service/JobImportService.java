@@ -28,4 +28,12 @@ public interface JobImportService {
      * 若更新后发现与已有记录重复，则合并数据（薪资范围、source_job_ids、skills）并删除原记录。
      */
     void consolidateJobCategoryCodes();
+
+    /**
+     * 为job表中所有岗位生成职业画像
+     * 生成包含 industrySegment、city、coreSkills、certificateRequirements、
+     * capabilityRequirements、demandLevel、highlights 的JSON数据，
+     * 并存储到 job_profile 字段中
+     */
+    void generateJobProfiles();
 }

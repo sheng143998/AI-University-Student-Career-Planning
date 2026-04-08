@@ -82,64 +82,355 @@ public class RoadmapServiceImpl implements RoadmapService {
         RoadmapGraphVO graph = new RoadmapGraphVO();
         graph.setMode(mode);
 
+        // 如果没有指定类别，获取全局视图（所有类别）
         if (categoryCode == null || categoryCode.isEmpty()) {
-            categoryCode = jobCategoryMapper.selectRandomCategoryCode();
-            log.info("随机选择的 categoryCode: {}", categoryCode);
-            if (categoryCode == null || categoryCode.isEmpty()) {
-                log.warn("无法获取有效的 categoryCode，返回空图谱");
-                graph.setNodes(new ArrayList<>());
-                graph.setPaths(new ArrayList<>());
-                return graph;
-            }
+            return getGlobalGraph(mode);
         }
 
-        // 获取垂直晋升路径（同一类别编码的所有级别）
-        List<JobCategory> jobs = jobCategoryMapper.selectVerticalPathByCategoryCode(categoryCode);
-        log.info("查询到 {} 条垂直路径记录, categoryCode={}", jobs.size(), categoryCode);
+        // 获取指定类别的聚焦视图
+        return getFocusedGraph(categoryCode, mode);
+    }
+
+    /**
+     * 获取全局职业地图（所有类别）
+     */
+    private RoadmapGraphVO getGlobalGraph(String mode) {
+        log.info("获取全局职业地图");
+        RoadmapGraphVO graph = new RoadmapGraphVO();
+        graph.setMode(mode);
+        graph.setViewType("global");
+
+        // 获取所有岗位
+        List<JobCategory> allJobs = jobCategoryMapper.selectAll();
+        log.info("查询到 {} 条岗位记录", allJobs.size());
+
+        // 按类别分组
+        Map<String, List<JobCategory>> jobsByCategory = allJobs.stream()
+                .collect(Collectors.groupingBy(j -> extractBaseCategoryCode(j.getJobCategoryCode())));
 
         List<RoadmapNodeVO> nodes = new ArrayList<>();
         List<RoadmapPathVO> paths = new ArrayList<>();
 
-        // 计算节点位置
-        int baseX = 100;
-        int baseY = 50;
-        int stepX = 150;
-        int stepY = 100;
+        // 为每个类别创建一个垂直路径列
+        int categoryIndex = 0;
+        int baseX = 80;
+        int baseY = 80;
+        int categorySpacingX = 200;
+        int levelSpacingY = 120;
 
-        for (int i = 0; i < jobs.size(); i++) {
-            JobCategory job = jobs.get(i);
+        for (Map.Entry<String, List<JobCategory>> entry : jobsByCategory.entrySet()) {
+            String categoryCode = entry.getKey();
+            List<JobCategory> categoryJobs = entry.getValue();
+            
+            // 按级别排序
+            categoryJobs.sort(Comparator.comparingInt(j -> LEVEL_ORDER.indexOf(j.getJobLevel())));
 
-            RoadmapNodeVO node = new RoadmapNodeVO();
-            node.setId(String.valueOf(job.getId()));
-            node.setTitle(job.getJobCategoryName());
-            node.setLabel(job.getJobCategoryName());
-            node.setSubtitle(job.getJobLevelName() != null ? job.getJobLevelName() : "");
-            node.setSubLabel(job.getJobLevelName() != null ? job.getJobLevelName() : "");
-            node.setKind(i == 0 ? "core" : "secondary");
-            node.setVariant(getVariantByLevel(job.getJobLevel()));
-            node.setTags(List.of(job.getJobLevelName() != null ? job.getJobLevelName() : ""));
-            node.setX(baseX + i * stepX);
-            node.setY(baseY + (i % 2) * stepY);
+            // 计算该列的基准位置
+            int colX = baseX + categoryIndex * categorySpacingX;
+            int colY = baseY;
 
-            nodes.add(node);
+            // 为每个级别创建节点
+            for (int i = 0; i < categoryJobs.size(); i++) {
+                JobCategory job = categoryJobs.get(i);
 
-            // 创建与前一个节点的连线（垂直晋升路径）
-            if (i > 0) {
-                RoadmapPathVO path = new RoadmapPathVO();
-                path.setFrom(String.valueOf(jobs.get(i - 1).getId()));
-                path.setTo(String.valueOf(job.getId()));
-                path.setVariant("primary");
-                path.setEdgeType("vertical");
-                path.setDifficulty(2);
-                path.setAvgTimeMonths(24);
-                path.setSuccessRate(0.75);
-                paths.add(path);
+                RoadmapNodeVO node = new RoadmapNodeVO();
+                node.setId(String.valueOf(job.getId()));
+                node.setTitle(job.getJobCategoryName());
+                node.setLabel(job.getJobCategoryName());
+                node.setSubtitle(job.getJobLevelName());
+                node.setSubLabel(job.getJobLevelName());
+                node.setKind(i == 0 ? "core" : "secondary");
+                node.setVariant(getVariantByLevel(job.getJobLevel()));
+                node.setCategoryCode(categoryCode);
+                node.setLevel(job.getJobLevel());
+                
+                // 计算位置 - 垂直排列
+                node.setX(colX);
+                node.setY(colY + i * levelSpacingY);
+
+                nodes.add(node);
+
+                // 创建与前一个节点的连线（垂直晋升路径 - 虚线）
+                if (i > 0) {
+                    RoadmapPathVO path = new RoadmapPathVO();
+                    path.setFrom(String.valueOf(categoryJobs.get(i - 1).getId()));
+                    path.setTo(String.valueOf(job.getId()));
+                    path.setVariant("primary");
+                    path.setEdgeType("vertical");
+                    path.setLineStyle("dashed");  // 垂直路径用虚线
+                    path.setDifficulty(2);
+                    path.setAvgTimeMonths(24);
+                    path.setSuccessRate(0.75);
+                    paths.add(path);
+                }
             }
+
+            categoryIndex++;
         }
+
+        // 添加横向换岗路径（基于技能相似度）
+        addLateralPaths(nodes, paths);
 
         graph.setNodes(nodes);
         graph.setPaths(paths);
         return graph;
+    }
+
+    /**
+     * 获取聚焦视图（指定类别）
+     */
+    private RoadmapGraphVO getFocusedGraph(String categoryCode, String mode) {
+        log.info("获取聚焦视图: categoryCode={}", categoryCode);
+        RoadmapGraphVO graph = new RoadmapGraphVO();
+        graph.setMode(mode);
+        graph.setViewType("focused");
+        graph.setCenterCategoryCode(categoryCode);
+
+        // 获取指定类别的垂直路径
+        List<JobCategory> centerJobs = jobCategoryMapper.selectVerticalPathByCategoryCode(categoryCode);
+        
+        List<RoadmapNodeVO> nodes = new ArrayList<>();
+        List<RoadmapPathVO> paths = new ArrayList<>();
+
+        // 中心位置
+        int centerX = 400;
+        int centerY = 300;
+        int levelSpacingY = 120;
+        int lateralSpacingX = 250;
+
+        // 添加中心类别的节点（垂直排列）
+        int centerLevelCount = centerJobs.size();
+        int startY = centerY - (centerLevelCount - 1) * levelSpacingY / 2;
+
+        for (int i = 0; i < centerJobs.size(); i++) {
+            JobCategory job = centerJobs.get(i);
+            RoadmapNodeVO node = new RoadmapNodeVO();
+            node.setId(String.valueOf(job.getId()));
+            node.setTitle(job.getJobCategoryName());
+            node.setLabel(job.getJobCategoryName());
+            node.setSubtitle(job.getJobLevelName());
+            node.setSubLabel(job.getJobLevelName());
+            node.setKind(i == centerJobs.size() / 2 ? "core" : "secondary");
+            node.setVariant("primary");
+            node.setCategoryCode(categoryCode);
+            node.setLevel(job.getJobLevel());
+            node.setX(centerX);
+            node.setY(startY + i * levelSpacingY);
+            nodes.add(node);
+
+            // 垂直路径（虚线）
+            if (i > 0) {
+                RoadmapPathVO path = new RoadmapPathVO();
+                path.setFrom(String.valueOf(centerJobs.get(i - 1).getId()));
+                path.setTo(String.valueOf(job.getId()));
+                path.setVariant("primary");
+                path.setEdgeType("vertical");
+                path.setLineStyle("dashed");
+                paths.add(path);
+            }
+        }
+
+        // 添加相关的横向换岗路径
+        addRelatedLateralPaths(nodes, paths, centerJobs, lateralSpacingX, levelSpacingY);
+
+        graph.setNodes(nodes);
+        graph.setPaths(paths);
+        return graph;
+    }
+
+    /**
+     * 添加横向换岗路径（全局视图）
+     */
+    private void addLateralPaths(List<RoadmapNodeVO> nodes, List<RoadmapPathVO> paths) {
+        // 基于技能相似度创建横向连接
+        Map<String, RoadmapNodeVO> nodeMap = nodes.stream()
+                .collect(Collectors.toMap(RoadmapNodeVO::getId, n -> n));
+
+        // 获取所有节点对应的岗位数据
+        List<JobCategory> allJobs = jobCategoryMapper.selectAll();
+        Map<Long, JobCategory> jobMap = allJobs.stream()
+                .collect(Collectors.toMap(JobCategory::getId, j -> j));
+
+        // 为中级和高级岗位添加横向连接
+        for (RoadmapNodeVO node : nodes) {
+            if (!"MID".equals(node.getLevel()) && !"SENIOR".equals(node.getLevel())) {
+                continue;
+            }
+
+            JobCategory job = jobMap.get(Long.parseLong(node.getId()));
+            if (job == null) continue;
+
+            List<String> jobSkills = parseJsonToList(job.getRequiredSkills());
+            if (jobSkills.isEmpty()) continue;
+
+            // 寻找技能相似的其他类别节点
+            for (RoadmapNodeVO otherNode : nodes) {
+                if (node.getId().equals(otherNode.getId())) continue;
+                if (node.getCategoryCode().equals(otherNode.getCategoryCode())) continue; // 同一类别不连接
+                if (!"MID".equals(otherNode.getLevel()) && !"SENIOR".equals(otherNode.getLevel())) continue;
+
+                JobCategory otherJob = jobMap.get(Long.parseLong(otherNode.getId()));
+                if (otherJob == null) continue;
+
+                List<String> otherSkills = parseJsonToList(otherJob.getRequiredSkills());
+                if (otherSkills.isEmpty()) continue;
+
+                // 计算技能相似度
+                long matchedSkills = jobSkills.stream()
+                        .filter(s -> otherSkills.stream()
+                                .anyMatch(os -> os.toLowerCase().contains(s.toLowerCase()) 
+                                        || s.toLowerCase().contains(os.toLowerCase())))
+                        .count();
+                
+                double similarity = (double) matchedSkills / Math.max(jobSkills.size(), otherSkills.size());
+                
+                // 相似度超过阈值则添加横向路径
+                if (similarity > 0.3) {
+                    RoadmapPathVO path = new RoadmapPathVO();
+                    path.setFrom(node.getId());
+                    path.setTo(otherNode.getId());
+                    path.setVariant("secondary");
+                    path.setEdgeType("lateral");
+                    path.setLineStyle("solid");  // 横向路径用实线
+                    path.setDifficulty((int) (5 - similarity * 5));  // 相似度越高难度越低
+                    path.setSuccessRate(similarity);
+                    path.setAvgTimeMonths((int) (12 + (1 - similarity) * 12));
+                    
+                    // 检查是否已存在
+                    boolean exists = paths.stream().anyMatch(p -> 
+                        (p.getFrom().equals(path.getFrom()) && p.getTo().equals(path.getTo())) ||
+                        (p.getFrom().equals(path.getTo()) && p.getTo().equals(path.getFrom()))
+                    );
+                    
+                    if (!exists) {
+                        paths.add(path);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 添加相关的横向换岗路径（聚焦视图）
+     */
+    private void addRelatedLateralPaths(List<RoadmapNodeVO> nodes, List<RoadmapPathVO> paths, 
+            List<JobCategory> centerJobs, int lateralSpacingX, int levelSpacingY) {
+        
+        // 获取所有其他类别的岗位
+        List<JobCategory> allOtherJobs = jobCategoryMapper.selectAll().stream()
+                .filter(j -> !extractBaseCategoryCode(j.getJobCategoryCode())
+                        .equals(extractBaseCategoryCode(centerJobs.get(0).getJobCategoryCode())))
+                .collect(Collectors.toList());
+
+        if (allOtherJobs.isEmpty()) return;
+
+        // 为中心岗位的每个级别找到最相似的横向岗位
+        Map<String, List<JobCategory>> otherJobsByCategory = allOtherJobs.stream()
+                .collect(Collectors.groupingBy(j -> extractBaseCategoryCode(j.getJobCategoryCode())));
+
+        int leftOffset = -1;
+        int rightOffset = 1;
+
+        for (JobCategory centerJob : centerJobs) {
+            if (!"MID".equals(centerJob.getJobLevel()) && !"SENIOR".equals(centerJob.getJobLevel())) {
+                continue;
+            }
+
+            List<String> centerSkills = parseJsonToList(centerJob.getRequiredSkills());
+            if (centerSkills.isEmpty()) continue;
+
+            // 找到最相似的类别
+            String bestCategory = null;
+            double bestSimilarity = 0;
+
+            for (Map.Entry<String, List<JobCategory>> entry : otherJobsByCategory.entrySet()) {
+                List<JobCategory> otherJobs = entry.getValue();
+                
+                // 计算平均相似度
+                double totalSim = 0;
+                int count = 0;
+                for (JobCategory other : otherJobs) {
+                    List<String> otherSkills = parseJsonToList(other.getRequiredSkills());
+                    if (otherSkills.isEmpty()) continue;
+                    
+                    long matched = centerSkills.stream()
+                            .filter(s -> otherSkills.stream()
+                                    .anyMatch(os -> os.toLowerCase().contains(s.toLowerCase())
+                                            || s.toLowerCase().contains(os.toLowerCase())))
+                            .count();
+                    
+                    double sim = (double) matched / Math.max(centerSkills.size(), otherSkills.size());
+                    totalSim += sim;
+                    count++;
+                }
+                
+                if (count > 0) {
+                    double avgSim = totalSim / count;
+                    if (avgSim > bestSimilarity && avgSim > 0.2) {
+                        bestSimilarity = avgSim;
+                        bestCategory = entry.getKey();
+                    }
+                }
+            }
+
+            if (bestCategory != null) {
+                List<JobCategory> similarJobs = otherJobsByCategory.get(bestCategory);
+                similarJobs.sort(Comparator.comparingInt(j -> LEVEL_ORDER.indexOf(j.getJobLevel())));
+
+                // 在左侧或右侧添加这些节点
+                int offsetX = (leftOffset < 0 ? leftOffset : rightOffset) * lateralSpacingX;
+                int baseY = nodes.stream()
+                        .filter(n -> String.valueOf(centerJob.getId()).equals(n.getId()))
+                        .findFirst()
+                        .map(RoadmapNodeVO::getY)
+                        .orElse(300);
+
+                for (int i = 0; i < similarJobs.size(); i++) {
+                    JobCategory job = similarJobs.get(i);
+                    
+                    RoadmapNodeVO node = new RoadmapNodeVO();
+                    node.setId(String.valueOf(job.getId()));
+                    node.setTitle(job.getJobCategoryName());
+                    node.setLabel(job.getJobCategoryName());
+                    node.setSubtitle(job.getJobLevelName());
+                    node.setSubLabel(job.getJobLevelName());
+                    node.setKind("secondary");
+                    node.setVariant("neutral");
+                    node.setCategoryCode(bestCategory);
+                    node.setLevel(job.getJobLevel());
+                    node.setX(400 + offsetX);
+                    node.setY(baseY + (i - similarJobs.size() / 2) * levelSpacingY);
+                    nodes.add(node);
+                }
+
+                // 更新偏移
+                if (leftOffset < 0) {
+                    leftOffset = -leftOffset;
+                } else {
+                    rightOffset++;
+                }
+                
+                // 添加横向连接
+                for (RoadmapNodeVO centerNode : nodes) {
+                    if (!String.valueOf(centerJob.getId()).equals(centerNode.getId())) continue;
+                    
+                    for (RoadmapNodeVO lateralNode : nodes) {
+                        if (!bestCategory.equals(lateralNode.getCategoryCode())) continue;
+                        if (!centerNode.getLevel().equals(lateralNode.getLevel())) continue;
+                        
+                        RoadmapPathVO path = new RoadmapPathVO();
+                        path.setFrom(centerNode.getId());
+                        path.setTo(lateralNode.getId());
+                        path.setVariant("secondary");
+                        path.setEdgeType("lateral");
+                        path.setLineStyle("solid");
+                        path.setDifficulty((int) (5 - bestSimilarity * 5));
+                        path.setSuccessRate(bestSimilarity);
+                        paths.add(path);
+                    }
+                }
+            }
+        }
     }
 
     @Override

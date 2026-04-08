@@ -42,6 +42,26 @@
           </div>
         </div>
 
+        <!-- 视图切换按钮 -->
+        <div class="flex items-center gap-2 bg-surface-container-low px-3 py-2 rounded-xl">
+          <button
+            type="button"
+            class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
+            :class="viewType === 'global' ? 'bg-primary text-white' : 'text-on-surface-variant hover:bg-surface-container-high'"
+            @click="switchToGlobalView"
+          >
+            全局视图
+          </button>
+          <button
+            type="button"
+            class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
+            :class="viewType === 'focused' ? 'bg-primary text-white' : 'text-on-surface-variant hover:bg-surface-container-high'"
+            @click="resetFocus"
+          >
+            聚焦视图
+          </button>
+        </div>
+
         <div class="flex items-center gap-2 bg-surface-container-low px-3 py-2 rounded-xl">
           <span class="text-xs font-medium text-on-surface-variant">纵向晋升</span>
           <button
@@ -60,44 +80,180 @@
       </div>
     </header>
 
-    <div class="relative w-full h-[600px] bg-surface-container-low rounded-[2rem] overflow-hidden border border-outline-variant/10 shadow-inner">
-      <svg class="absolute inset-0 w-full h-full pointer-events-none">
-        <path
-          v-for="(p, idx) in visiblePaths"
-          :key="idx"
-          class="opacity-40"
-          :d="p.d"
-          fill="none"
-          :stroke="p.variant === 'primary' ? '#0056d2' : '#c3c6d6'"
-          :stroke-width="p.variant === 'primary' ? 2 : 1"
-          :stroke-dasharray="p.variant === 'primary' ? '4' : '4'"
-        ></path>
+    <div 
+      ref="mapContainer"
+      class="relative w-full h-[600px] bg-gradient-to-br from-surface-container-lowest via-surface-container-low to-surface-container rounded-[2rem] overflow-hidden border border-outline-variant/10 shadow-2xl"
+      @mousedown="onDragStart"
+      @mousemove="onDragMove"
+      @mouseup="onDragEnd"
+      @mouseleave="onDragEnd"
+      @wheel="onWheel"
+    >
+      <!-- Grid Background -->
+      <div class="absolute inset-0 opacity-30 pointer-events-none">
+        <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="currentColor" stroke-width="0.5" class="text-outline-variant"/>
+            </pattern>
+            <radialGradient id="gridFade" cx="50%" cy="50%" r="70%">
+              <stop offset="0%" stop-color="currentColor" stop-opacity="0.4"/>
+              <stop offset="100%" stop-color="currentColor" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#grid)" class="text-outline-variant"/>
+        </svg>
+      </div>
+
+      <!-- SVG Canvas -->
+      <svg 
+        class="absolute w-full h-full"
+        :style="svgTransformStyle"
+        :viewBox="svgViewBox"
+        preserveAspectRatio="xMidYMid meet"
+      >
+        <defs>
+          <!-- Node Gradients -->
+          <linearGradient id="nodeGradientCore" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#6366f1"/>
+            <stop offset="100%" stop-color="#4f46e5"/>
+          </linearGradient>
+          <linearGradient id="nodeGradientSecondary" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#f8fafc"/>
+            <stop offset="100%" stop-color="#e2e8f0"/>
+          </linearGradient>
+          <linearGradient id="nodeGradientActive" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#818cf8"/>
+            <stop offset="100%" stop-color="#6366f1"/>
+          </linearGradient>
+          
+          <!-- Path Gradients -->
+          <linearGradient id="pathGradientVertical" x1="0%" y1="100%" x2="0%" y2="0%">
+            <stop offset="0%" stop-color="#6366f1" stop-opacity="0.3"/>
+            <stop offset="50%" stop-color="#818cf8" stop-opacity="0.8"/>
+            <stop offset="100%" stop-color="#a5b4fc" stop-opacity="0.3"/>
+          </linearGradient>
+          <linearGradient id="pathGradientLateral" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.3"/>
+            <stop offset="50%" stop-color="#22d3ee" stop-opacity="0.8"/>
+            <stop offset="100%" stop-color="#67e8f9" stop-opacity="0.3"/>
+          </linearGradient>
+          
+          <!-- Glow Filters -->
+          <filter id="glowCore" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+            <feMerge>
+              <feMergeNode in="coloredBlur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+          <filter id="glowActive" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
+            <feMerge>
+              <feMergeNode in="coloredBlur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+          <filter id="shadowNode" x="-50%" y="-50%" width="200%" height="200%">
+            <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#1e1b4b" flood-opacity="0.15"/>
+          </filter>
+          
+          <!-- Arrow Markers -->
+          <marker
+            v-for="marker in arrowMarkers"
+            :key="marker.id"
+            :id="marker.id"
+            markerWidth="10"
+            markerHeight="10"
+            refX="9"
+            refY="3"
+            orient="auto"
+            markerUnits="strokeWidth"
+          >
+            <path d="M0,0 L0,6 L9,3 z" :fill="marker.color" />
+          </marker>
+        </defs>
+        
+        <!-- Paths Layer -->
+        <g class="paths-layer">
+          <path
+            v-for="(p, idx) in visiblePaths"
+            :key="idx"
+            class="roadmap-path"
+            :class="pathClass(p)"
+            :d="p.d"
+            fill="none"
+            :stroke="getPathGradient(p)"
+            :stroke-width="p.width"
+            :stroke-dasharray="p.dashArray"
+            :stroke-dashoffset="pathDashOffset"
+            :marker-end="p.showArrow ? `url(#arrow-${p.variant})` : undefined"
+            :opacity="p.opacity"
+          />
+        </g>
       </svg>
 
-      <div class="absolute inset-0 p-10">
+      <!-- Nodes Layer -->
+      <div 
+        class="absolute inset-0 pointer-events-none"
+        :style="nodesTransformStyle"
+      >
         <button
           v-for="n in visibleNodes"
           :key="n.id"
           type="button"
-          class="absolute group"
-          :style="{ left: n.pos.left, top: n.pos.top }"
+          class="absolute group pointer-events-auto cursor-pointer"
+          :class="nodeTransitionClass(n)"
+          :style="nodePositionStyle(n)"
           @click="selectNode(n.id)"
+          @mouseenter="onNodeHover(n.id)"
+          @mouseleave="onNodeLeave"
         >
+          <!-- Glow Ring -->
+          <div 
+            v-if="n.id === activeNodeId || hoveredNodeId === n.id"
+            class="absolute inset-0 rounded-2xl animate-pulse-ring"
+            :style="getGlowStyle(n)"
+          ></div>
+          
+          <!-- Node Card -->
           <div
-            class="flex items-center justify-center shadow-lg transition-all"
-            :class="nodeCardClass(n)"
+            class="relative flex items-center justify-center transition-all duration-300 transform"
+            :class="getNodeCardClass(n)"
+            :style="getNodeCardStyle(n)"
           >
-            <div v-if="n.kind === 'core'" class="flex flex-col items-center justify-center">
-              <span class="material-symbols-outlined text-white text-3xl">{{ n.icon }}</span>
-              <span class="text-[10px] font-bold text-white mt-1">{{ n.levelLabel }}</span>
-            </div>
-            <span v-else class="material-symbols-outlined" :class="n.iconClass">{{ n.icon }}</span>
+            <!-- Core Node Content -->
+            <template v-if="n.kind === 'core'">
+              <div class="flex flex-col items-center justify-center relative z-10">
+                <span class="material-symbols-outlined text-white text-2xl drop-shadow-md">{{ getNodeIcon(n) }}</span>
+                <span class="text-[9px] font-bold text-white/90 mt-0.5 tracking-wider">{{ n.levelLabel }}</span>
+              </div>
+            </template>
+            
+            <!-- Secondary Node Content -->
+            <template v-else>
+              <div class="flex flex-col items-center justify-center relative z-10">
+                <span 
+                  class="material-symbols-outlined transition-colors duration-300" 
+                  :class="n.id === activeNodeId ? 'text-white' : 'text-primary'"
+                >{{ getNodeIcon(n) }}</span>
+              </div>
+            </template>
           </div>
-          <div class="mt-2 text-center min-w-[80px]">
-            <span class="text-xs font-bold" :class="n.id === activeNodeId ? 'text-primary' : 'text-on-surface'">{{ n.label }}</span>
-            <p v-if="n.subLabel" class="text-[10px] text-on-surface-variant">{{ n.subLabel }}</p>
+          
+          <!-- Node Label -->
+          <div 
+            class="absolute left-1/2 -translate-x-1/2 mt-2 text-center min-w-[90px] transition-all duration-300"
+            :class="getLabelClass(n)"
+          >
+            <span 
+              class="block text-[11px] font-semibold leading-tight transition-colors duration-300"
+              :class="n.id === activeNodeId ? 'text-primary' : 'text-on-surface'"
+            >{{ n.label }}</span>
+            <p v-if="n.subLabel" class="text-[9px] text-on-surface-variant mt-0.5 leading-tight">{{ n.subLabel }}</p>
           </div>
         </button>
+      </div>
 
         <div v-if="aiChip" class="absolute top-8 right-8">
           <div class="px-4 py-2 bg-primary-fixed text-primary text-xs font-bold rounded-full shadow-lg flex items-center gap-2">
@@ -105,7 +261,6 @@
             {{ aiChip }}
           </div>
         </div>
-      </div>
 
       <div
         class="absolute top-0 right-0 w-80 h-full bg-surface-variant/70 backdrop-blur-xl p-6 flex flex-col shadow-2xl border-l border-white/20"
@@ -172,71 +327,168 @@
       </div>
     </div>
 
-    <div class="hidden md:flex justify-between items-start gap-6">
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 flex-1">
-        <div class="bg-surface-container-lowest p-6 rounded-[1.5rem] shadow-sm flex flex-col gap-4">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-tertiary uppercase">Market Heat</span>
-            <span class="material-symbols-outlined text-tertiary-fixed-dim">local_fire_department</span>
+
+    <div v-if="showRecommendations && recommendations" class="mt-8 space-y-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-2xl font-bold font-headline text-on-surface flex items-center gap-2">
+            <span class="material-symbols-outlined text-primary">auto_awesome</span>
+            AI 个性化职业推荐
+          </h2>
+          <p class="text-sm text-on-surface-variant mt-1">基于您的简历分析和当前岗位: <span class="font-semibold text-primary">{{ recommendations.currentJob }}</span></p>
+        </div>
+        <button @click="showRecommendations = !showRecommendations" class="p-2 hover:bg-surface-container-high rounded-lg transition-colors">
+          <span class="material-symbols-outlined text-on-surface-variant">{{ showRecommendations ? 'visibility_off' : 'visibility' }}</span>
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="bg-gradient-to-br from-primary/5 to-primary-container/10 p-6 rounded-[1.5rem] border border-primary/20 shadow-sm">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
+              <span class="material-symbols-outlined text-white">trending_up</span>
+            </div>
+            <div>
+              <h3 class="text-lg font-bold text-on-surface">垂直晋升路径</h3>
+              <p class="text-xs text-on-surface-variant">与您当前岗位最匹配的职业晋升路径</p>
+            </div>
+            <div class="ml-auto px-3 py-1 bg-primary/20 rounded-full">
+              <span class="text-sm font-bold text-primary">{{ (recommendations.verticalPath?.similarityScore || 0) * 100 }}% 匹配度</span>
+            </div>
           </div>
-          <div>
-            <p class="text-3xl font-black font-headline">高热度</p>
-            <p class="text-sm text-on-surface-variant mt-1">互联网设计类岗位需求稳步上升</p>
-          </div>
-          <div class="mt-2 h-24 bg-surface-container-low rounded-xl overflow-hidden relative">
-            <div class="absolute bottom-0 left-0 w-full h-1/2 bg-gradient-to-t from-primary/10 to-transparent"></div>
-            <div class="absolute bottom-4 left-4 right-4 flex items-end gap-1 h-12">
-              <div v-for="(h, i) in heatBars" :key="i" class="flex-1 rounded-t" :class="h.class" :style="{ height: h.height }"></div>
+
+          <div v-if="recommendations.verticalPath" class="space-y-3">
+            <div class="flex items-center gap-2 text-sm text-on-surface-variant mb-3">
+              <span class="material-symbols-outlined text-sm">work</span>
+              <span>匹配岗位: <span class="font-semibold text-on-surface">{{ recommendations.verticalPath.matchedJobName }}</span></span>
+            </div>
+
+            <div class="relative">
+              <div class="flex items-center justify-between">
+                <template v-for="(node, idx) in recommendations.verticalPath.nodes" :key="node.id">
+                  <div class="flex flex-col items-center relative" style="flex: 1;">
+                    <div
+                      class="w-16 h-16 rounded-xl flex items-center justify-center shadow-md transition-all cursor-pointer hover:scale-105"
+                      :class="node.isCurrentLevel ? 'bg-primary ring-2 ring-primary ring-offset-2' : (idx < (recommendations.verticalPath?.currentLevelIndex || 0) ? 'bg-outline-variant' : 'bg-white border border-outline-variant')"
+                      @click="viewRecommendationPath(recommendations.verticalPath?.categoryCode || '')"
+                    >
+                      <div class="text-center">
+                        <span class="material-symbols-outlined text-lg" :class="node.isCurrentLevel ? 'text-white' : 'text-on-surface'">{{ node.isCurrentLevel ? 'star' : 'work' }}</span>
+                      </div>
+                    </div>
+                    <div class="mt-2 text-center px-1">
+                      <p class="text-xs font-bold" :class="node.isCurrentLevel ? 'text-primary' : 'text-on-surface'">{{ node.levelName }}</p>
+                      <p class="text-[10px] text-on-surface-variant truncate max-w-[80px]">{{ node.title }}</p>
+                      <p class="text-[10px] text-primary font-semibold">{{ node.salaryRange }}</p>
+                    </div>
+                    <div v-if="node.isCurrentLevel" class="absolute -top-2 -right-1 px-1.5 py-0.5 bg-primary text-white text-[8px] font-bold rounded-full">
+                      当前岗位
+                    </div>
+                  </div>
+                  <div v-if="idx < recommendations.verticalPath.nodes.length - 1" class="flex-1 h-0.5 mx-1 mt-[-24px]"
+                    :class="(idx < (recommendations.verticalPath?.currentLevelIndex || 0)) ? 'bg-outline-variant' : 'bg-primary/40'"></div>
+                </template>
+              </div>
+            </div>
+
+            <div class="mt-4 flex items-center justify-between text-sm">
+              <div class="flex items-center gap-1 text-on-surface-variant">
+                <span class="material-symbols-outlined text-sm">schedule</span>
+                <span>预计 {{ recommendations.verticalPath.estimatedMonthsToNext }} 个月可晋升</span>
+              </div>
+              <button
+                @click="viewRecommendationPath(recommendations.verticalPath?.categoryCode || '')"
+                class="px-4 py-2 bg-primary text-white rounded-lg font-semibold text-sm hover:bg-primary/90 transition-colors flex items-center gap-1"
+              >
+                <span>查看路径</span>
+                <span class="material-symbols-outlined text-sm">arrow_forward</span>
+              </button>
             </div>
           </div>
         </div>
 
-        <div class="md:col-span-2 bg-primary-container p-6 rounded-[1.5rem] shadow-lg text-white relative overflow-hidden">
-          <div class="absolute -right-10 -bottom-10 opacity-10">
-            <span class="material-symbols-outlined text-[12rem]">query_stats</span>
-          </div>
-          <div class="relative z-10 flex flex-col h-full justify-between">
+        <div class="bg-surface-container-lowest p-6 rounded-[1.5rem] border border-outline-variant/20 shadow-sm">
+          <div class="flex items-center gap-3 mb-4">
+            <div class="w-10 h-10 bg-tertiary rounded-xl flex items-center justify-center">
+              <span class="material-symbols-outlined text-white">swap_horiz</span>
+            </div>
             <div>
-              <div class="flex items-center gap-2 mb-4">
-                <span class="px-2 py-1 bg-white/20 rounded-md text-[10px] font-bold">AI PATH INSIGHT</span>
+              <h3 class="text-lg font-bold text-on-surface">横向换岗推荐</h3>
+              <p class="text-xs text-on-surface-variant">AI 推荐的职业转型路径（至少2条）</p>
+            </div>
+          </div>
+
+          <div v-if="recommendations.lateralPaths && recommendations.lateralPaths.length > 0" class="space-y-3">
+            <div
+              v-for="(path, idx) in recommendations.lateralPaths"
+              :key="path.targetJobId"
+              class="p-4 bg-white rounded-xl border border-outline-variant/10 hover:border-primary/30 hover:shadow-md transition-all cursor-pointer"
+              @click="viewRecommendationPath(path.targetCategoryCode)"
+            >
+              <div class="flex items-start justify-between mb-2">
+                <div class="flex-1">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-bold text-on-surface">{{ path.targetJobName }}</span>
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold" :class="getDifficultyClass(path.transitionDifficulty)">
+                      {{ getDifficultyText(path.transitionDifficulty) }}
+                    </span>
+                  </div>
+                  <p class="text-xs text-on-surface-variant mt-1">{{ path.aiRecommendationReason }}</p>
+                </div>
+                <div class="text-right">
+                  <div class="text-sm font-bold text-primary">{{ (path.matchScore || 0) * 100 }}%</div>
+                  <div class="text-[10px] text-on-surface-variant">匹配度</div>
+                </div>
               </div>
-              <h3 class="text-2xl font-bold font-headline mb-2 leading-tight">从 UI 设计师到 产品负责人 的黄金路径</h3>
-              <p class="text-sm text-primary-fixed max-w-md">数据显示，拥有 3 年 UI 经验的从业者，如果增加“用户研究”与“商业逻辑”技能点，转型产品岗的成功率提高 72%。</p>
+
+              <div class="flex items-center gap-4 text-xs text-on-surface-variant">
+                <div class="flex items-center gap-1">
+                  <span class="material-symbols-outlined text-sm">schedule</span>
+                  <span>{{ path.estimatedMonths }} 个月</span>
+                </div>
+                <div v-if="path.requiredSkills && path.requiredSkills.length > 0" class="flex items-center gap-1">
+                  <span class="material-symbols-outlined text-sm">add_circle</span>
+                  <span>需补充 {{ path.requiredSkills.length }} 项技能</span>
+                </div>
+                <div v-if="path.possessedSkills && path.possessedSkills.length > 0" class="flex items-center gap-1">
+                  <span class="material-symbols-outlined text-sm">check_circle</span>
+                  <span>已具备 {{ path.possessedSkills.length }} 项技能</span>
+                </div>
+              </div>
+
+              <div v-if="path.requiredSkills && path.requiredSkills.length > 0" class="mt-3 flex flex-wrap gap-1">
+                <span v-for="skill in path.requiredSkills.slice(0, 4)" :key="skill" class="px-2 py-0.5 bg-tertiary/10 text-tertiary text-[10px] rounded-full">
+                  {{ skill }}
+                </span>
+                <span v-if="path.requiredSkills.length > 4" class="px-2 py-0.5 bg-outline-variant/20 text-on-surface-variant text-[10px] rounded-full">
+                  +{{ path.requiredSkills.length - 4 }} 项
+                </span>
+              </div>
             </div>
-            <div class="mt-6 flex gap-4">
-              <button class="px-6 py-2 bg-white text-primary rounded-lg font-bold text-sm hover:scale-95 transition-all" type="button">查看学习路径</button>
-              <button class="px-6 py-2 border border-white/30 rounded-lg font-bold text-sm hover:bg-white/10 transition-all" type="button">岗位推荐</button>
-            </div>
+          </div>
+
+          <div v-else class="text-center py-8 text-on-surface-variant">
+            <span class="material-symbols-outlined text-4xl mb-2">info</span>
+            <p class="text-sm">暂无横向换岗推荐</p>
           </div>
         </div>
       </div>
+    </div>
 
-      <div class="hidden lg:flex bg-white/80 backdrop-blur-md px-4 py-2 rounded-full shadow-lg border border-outline-variant/30 items-center gap-6 h-fit">
-        <div class="flex items-center gap-2">
-          <div class="w-3 h-3 rounded-full bg-primary-container"></div>
-          <span class="text-[10px] font-bold text-on-surface-variant">核心节点</span>
-        </div>
-        <div class="flex items-center gap-2">
-          <div class="w-3 h-3 rounded-full bg-white border border-outline-variant"></div>
-          <span class="text-[10px] font-bold text-on-surface-variant">次要节点</span>
-        </div>
-        <div class="flex items-center gap-2">
-          <div class="w-6 h-0.5 bg-primary opacity-40 border-t border-dashed"></div>
-          <span class="text-[10px] font-bold text-on-surface-variant">晋升路径</span>
-        </div>
-        <div class="flex items-center gap-2">
-          <div class="w-6 h-0.5 bg-outline-variant border-t border-dashed"></div>
-          <span class="text-[10px] font-bold text-on-surface-variant">转型参考</span>
-        </div>
+    <div v-else-if="recommendationsLoading" class="mt-8 flex items-center justify-center py-12">
+      <div class="flex items-center gap-3 text-on-surface-variant">
+        <span class="material-symbols-outlined animate-spin">progress_activity</span>
+        <span class="text-sm">正在加载个性化推荐...</span>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 
 import { getRoadmapGraph, getRoadmapNodeDetail, isApiSuccess, searchRoadmapNodes, type RoadmapGraph, type RoadmapNodeDetail, type RoadmapSearchItem } from '@/api/roadmap'
+import { getPersonalizedRecommendations, type CareerPathRecommendation, type PathNode } from '@/api/roadmapRecommendation'
 
 type Segment = '互联网' | '金融科技' | '人工智能'
 
@@ -250,20 +502,30 @@ type RoadmapNode = {
   icon: string
   iconClass: string
   levelLabel?: string
-  pos: { left: string; top: string }
+  pos: { left: string; top: string; x: number; y: number }
   searchable: string
   segment: Segment
   tagline: string
   description: string
   skills: Array<{ name: string; value: string }>
   salaryBands: Array<{ label: string; range: string; width: string; barClass: string }>
+  categoryCode?: string
+  opacity?: number
 }
 
 type Path = {
   d: string
+  from: string
+  to: string
   variant: 'primary' | 'secondary'
   mode: 'vertical' | 'lateral'
   segment: Segment
+  color: string
+  width: number
+  dashArray: string
+  showArrow: boolean
+  opacity: number
+  edgeType?: 'vertical' | 'lateral'
 }
 
 const segments: Segment[] = ['互联网', '金融科技', '人工智能']
@@ -279,8 +541,193 @@ let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
 const nodes = ref<RoadmapNode[]>([])
 const paths = ref<Path[]>([])
 
+// 视图类型和动画状态
+const viewType = ref<'global' | 'focused'>('global')
+const currentCategoryCode = ref<string>('')
+const isAnimating = ref(false)
+
+// 视图变换参数
+const viewTransform = ref({
+  x: 0,
+  y: 0,
+  scale: 1,
+  targetX: 0,
+  targetY: 0,
+  targetScale: 1
+})
+
+// SVG视口配置
+const svgViewport = ref({
+  width: 800,
+  height: 600,
+  minX: 0,
+  minY: 0
+})
+
+// 个性化推荐数据
+const recommendations = ref<CareerPathRecommendation | null>(null)
+const recommendationsLoading = ref(false)
+const showRecommendations = ref(true)
+
 const activeNodeId = ref<string | null>(null)
 const currentNodeDetail = ref<RoadmapNodeDetail | null>(null)
+const hoveredNodeId = ref<string | null>(null)
+const mapContainer = ref<HTMLElement | null>(null)
+
+// Drag state
+const isDragging = ref(false)
+const dragStart = ref({ x: 0, y: 0 })
+const dragOffset = ref({ x: 0, y: 0 })
+
+// Path animation offset
+const pathDashOffset = ref(0)
+let pathAnimationId: number | null = null
+
+// Start path animation
+function startPathAnimation() {
+  if (pathAnimationId) return
+  
+  function animate() {
+    pathDashOffset.value = (pathDashOffset.value + 0.5) % 100
+    pathAnimationId = requestAnimationFrame(animate)
+  }
+  pathAnimationId = requestAnimationFrame(animate)
+}
+
+// Stop path animation
+function stopPathAnimation() {
+  if (pathAnimationId) {
+    cancelAnimationFrame(pathAnimationId)
+    pathAnimationId = null
+  }
+}
+
+// Get path gradient URL
+function getPathGradient(p: Path): string {
+  if (p.edgeType === 'vertical') {
+    return 'url(#pathGradientVertical)'
+  }
+  return 'url(#pathGradientLateral)'
+}
+
+// Get node icon based on type
+function getNodeIcon(n: RoadmapNode): string {
+  const icons: Record<string, string> = {
+    'core': 'star',
+    'secondary': 'work'
+  }
+  return n.icon || icons[n.kind] || 'work'
+}
+
+// Get glow style for active/hovered nodes
+function getGlowStyle(n: RoadmapNode): Record<string, string> {
+  const isActive = n.id === activeNodeId.value
+  const isHovered = n.id === hoveredNodeId.value
+  
+  if (isActive || isHovered) {
+    return {
+      background: isActive 
+        ? 'radial-gradient(circle, rgba(99, 102, 241, 0.4) 0%, transparent 70%)' 
+        : 'radial-gradient(circle, rgba(99, 102, 241, 0.2) 0%, transparent 70%)',
+      transform: 'scale(1.5)',
+      filter: 'blur(8px)'
+    }
+  }
+  return {}
+}
+
+// Enhanced node card class
+function getNodeCardClass(n: RoadmapNode): string {
+  const isActive = n.id === activeNodeId.value
+  const isHovered = n.id === hoveredNodeId.value
+  const classes: string[] = []
+  
+  if (n.kind === 'core') {
+    classes.push('w-16', 'h-16', 'rounded-2xl')
+    if (isActive) {
+      classes.push('bg-gradient-to-br', 'from-primary', 'to-primary-container', 'shadow-xl', 'scale-110')
+    } else if (isHovered) {
+      classes.push('bg-gradient-to-br', 'from-primary/90', 'to-primary-container/90', 'shadow-lg', 'scale-105')
+    } else {
+      classes.push('bg-gradient-to-br', 'from-primary', 'to-primary-container', 'shadow-md')
+    }
+  } else {
+    classes.push('w-12', 'h-12', 'rounded-xl')
+    if (isActive) {
+      classes.push('bg-gradient-to-br', 'from-primary', 'to-primary-container', 'shadow-xl', 'scale-110', 'ring-2', 'ring-primary/30')
+    } else if (isHovered) {
+      classes.push('bg-white', 'shadow-lg', 'scale-105', 'border-2', 'border-primary/20')
+    } else {
+      classes.push('bg-white', 'shadow-md', 'border', 'border-outline-variant/50')
+    }
+  }
+  
+  return classes.join(' ')
+}
+
+// Node card inline style
+function getNodeCardStyle(n: RoadmapNode): Record<string, string> {
+  const isActive = n.id === activeNodeId.value
+  return {
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    filter: isActive ? 'url(#glowActive)' : 'url(#shadowNode)'
+  }
+}
+
+// Label class based on node state
+function getLabelClass(n: RoadmapNode): string {
+  const isActive = n.id === activeNodeId.value
+  const isRelated = n.opacity && n.opacity > 0.5
+  
+  if (isActive) {
+    return 'opacity-100 transform scale-105'
+  }
+  if (isRelated) {
+    return 'opacity-100'
+  }
+  return 'opacity-50'
+}
+
+// Node hover handlers
+function onNodeHover(nodeId: string) {
+  hoveredNodeId.value = nodeId
+}
+
+function onNodeLeave() {
+  hoveredNodeId.value = null
+}
+
+// Drag handlers for panning
+function onDragStart(e: MouseEvent) {
+  if (e.button !== 0) return
+  isDragging.value = true
+  dragStart.value = { x: e.clientX, y: e.clientY }
+  dragOffset.value = { x: viewTransform.value.x, y: viewTransform.value.y }
+}
+
+function onDragMove(e: MouseEvent) {
+  if (!isDragging.value) return
+  
+  const dx = e.clientX - dragStart.value.x
+  const dy = e.clientY - dragStart.value.y
+  
+  viewTransform.value.x = dragOffset.value.x + dx
+  viewTransform.value.y = dragOffset.value.y + dy
+}
+
+function onDragEnd() {
+  isDragging.value = false
+}
+
+// Wheel handler for zoom
+function onWheel(e: WheelEvent) {
+  e.preventDefault()
+  
+  const delta = e.deltaY > 0 ? -0.1 : 0.1
+  const newScale = Math.max(0.5, Math.min(3, viewTransform.value.scale + delta))
+  
+  viewTransform.value.scale = newScale
+}
 
 const activeNode = computed(() => {
   if (!activeNodeId.value) return null
@@ -332,13 +779,20 @@ function toRoadmapNode(n: RoadmapGraph['nodes'][number], index: number): Roadmap
     icon,
     iconClass,
     levelLabel,
-    pos: { left: `${n.x}px`, top: `${n.y}px` },
+    pos: { 
+      left: `${n.x}px`, 
+      top: `${n.y}px`,
+      x: n.x,
+      y: n.y
+    },
     searchable: `${n.title} ${n.label} ${n.subtitle}`,
     segment: activeSegment.value,
     tagline: n.subtitle || '',
     description: '',
     skills: [],
-    salaryBands: []
+    salaryBands: [],
+    categoryCode: (n as any).categoryCode,
+    opacity: 1
   }
 }
 
@@ -360,6 +814,11 @@ async function loadGraph() {
     console.log('[Roadmap] API success, nodes:', res.data?.nodes?.length || 0)
 
     const graph = res.data
+    if (!graph) {
+      nodes.value = []
+      paths.value = []
+      return
+    }
     console.log('[Roadmap] graph data:', graph)
     nodes.value = (graph.nodes || []).map((n, idx) => toRoadmapNode(n, idx))
 
@@ -371,11 +830,21 @@ async function loadGraph() {
     paths.value = (graph.paths || []).map((p) => {
       const from = nodeIndex.get(p.from) || { x: 0, y: 0 }
       const to = nodeIndex.get(p.to) || { x: 0, y: 0 }
+      const isLateral = p.edgeType === 'lateral' || p.lineStyle === 'solid'
+      const isDashed = p.lineStyle === 'dashed' || p.edgeType === 'vertical'
       return {
         d: generatePathD(from, to),
+        from: p.from,
+        to: p.to,
         variant: p.variant === 'primary' ? 'primary' : 'secondary',
         mode: verticalMode.value ? 'vertical' : 'lateral',
-        segment: activeSegment.value
+        segment: activeSegment.value,
+        edgeType: p.edgeType || (isLateral ? 'lateral' : 'vertical'),
+        color: p.variant === 'primary' ? '#0056d2' : '#c3c6d6',
+        width: p.variant === 'primary' ? 2 : 1.5,
+        dashArray: isDashed ? '6,4' : '0',
+        showArrow: isLateral,
+        opacity: 0.6
       }
     })
 
@@ -462,11 +931,21 @@ async function loadGraphWithCategory(categoryCode: string) {
       paths.value = (graph.paths || []).map((p) => {
         const from = nodeIndex.get(p.from) || { x: 0, y: 0 }
         const to = nodeIndex.get(p.to) || { x: 0, y: 0 }
+        const isLateral = p.edgeType === 'lateral' || p.lineStyle === 'solid'
+        const isDashed = p.lineStyle === 'dashed' || p.edgeType === 'vertical'
         return {
           d: generatePathD(from, to),
+          from: p.from,
+          to: p.to,
           variant: p.variant === 'primary' ? 'primary' : 'secondary',
           mode: verticalMode.value ? 'vertical' : 'lateral',
-          segment: activeSegment.value
+          segment: activeSegment.value,
+          edgeType: p.edgeType || (isLateral ? 'lateral' : 'vertical'),
+          color: p.variant === 'primary' ? '#0056d2' : '#c3c6d6',
+          width: p.variant === 'primary' ? 2 : 1.5,
+          dashArray: isDashed ? '6,4' : '0',
+          showArrow: isLateral,
+          opacity: 0.6
         }
       })
       
@@ -514,17 +993,34 @@ function selectNode(id: string) {
   activeNodeId.value = id
   getRoadmapNodeDetail(id).then((res) => {
     if (!isApiSuccess(res.code)) return
-    currentNodeDetail.value = res.data
+    currentNodeDetail.value = res.data ?? null
   })
 }
 
 onMounted(async () => {
   await loadGraph()
+  await loadRecommendations()
 })
 
 watch([verticalMode, activeSegment], async () => {
   await loadGraph()
 })
+
+// 加载个性化推荐
+async function loadRecommendations() {
+  recommendationsLoading.value = true
+  try {
+    const res = await getPersonalizedRecommendations()
+    console.log('[Roadmap] recommendations:', res)
+    if (isApiSuccess(res.code) && res.data) {
+      recommendations.value = res.data
+    }
+  } catch (e) {
+    console.error('[Roadmap] loadRecommendations error:', e)
+  } finally {
+    recommendationsLoading.value = false
+  }
+}
 
 function nodeCardClass(n: RoadmapNode) {
   const active = n.id === activeNodeId.value
@@ -550,6 +1046,15 @@ function nodeCardClass(n: RoadmapNode) {
   ].join(' ')
 }
 
+// 查看推荐路径详情
+function viewRecommendationPath(categoryCode: string) {
+  if (categoryCode) {
+    currentCategoryCode.value = categoryCode
+    viewType.value = 'focused'
+    loadGraphWithCategory(categoryCode)
+  }
+}
+
 const heatBars = [
   { height: '33%', class: 'bg-primary-fixed-dim' },
   { height: '50%', class: 'bg-primary-fixed-dim' },
@@ -557,4 +1062,275 @@ const heatBars = [
   { height: '100%', class: 'bg-primary' },
   { height: '83%', class: 'bg-primary-fixed-dim' }
 ]
+
+// 箭头标记定义
+const arrowMarkers = computed(() => [
+  { id: 'arrow-primary', color: '#0056d2' },
+  { id: 'arrow-secondary', color: '#c3c6d6' }
+])
+
+// SVG变换样式
+const svgTransformStyle = computed(() => {
+  const { x, y, scale } = viewTransform.value
+  return {
+    transform: `translate(${x}px, ${y}px) scale(${scale})`
+  }
+})
+
+// SVG视口
+const svgViewBox = computed(() => {
+  const { minX, minY, width, height } = svgViewport.value
+  return `${minX} ${minY} ${width} ${height}`
+})
+
+// 节点层变换样式
+const nodesTransformStyle = computed(() => {
+  const { x, y, scale } = viewTransform.value
+  return {
+    transform: `translate(${x}px, ${y}px) scale(${scale})`
+  }
+})
+
+// 路径类名
+function pathClass(p: Path) {
+  return {
+    'path-vertical': p.edgeType === 'vertical',
+    'path-lateral': p.edgeType === 'lateral',
+    'path-primary': p.variant === 'primary',
+    'path-secondary': p.variant === 'secondary'
+  }
+}
+
+// 节点过渡类名
+function nodeTransitionClass(n: RoadmapNode) {
+  return {
+    'node-active': n.id === activeNodeId.value,
+    'node-faded': n.opacity !== undefined && n.opacity < 0.5
+  }
+}
+
+// 节点位置样式
+function nodePositionStyle(n: RoadmapNode) {
+  return {
+    left: n.pos.left,
+    top: n.pos.top,
+    opacity: n.opacity ?? 1
+  }
+}
+
+// 切换到全局视图
+async function switchToGlobalView() {
+  if (viewType.value === 'global') return
+  viewType.value = 'global'
+  currentCategoryCode.value = ''
+  await loadGraph()
+  resetViewTransform()
+}
+
+// 重置聚焦
+async function resetFocus() {
+  if (!currentCategoryCode.value) {
+    await switchToGlobalView()
+    return
+  }
+  await loadGraphWithCategory(currentCategoryCode.value)
+}
+
+// 重置视图变换
+function resetViewTransform() {
+  viewTransform.value = {
+    x: 0,
+    y: 0,
+    scale: 1,
+    targetX: 0,
+    targetY: 0,
+    targetScale: 1
+  }
+}
+
+// 动画聚焦到节点
+function animateFocusToNode(nodeId: string) {
+  const node = nodes.value.find(n => n.id === nodeId)
+  if (!node) return
+  
+  isAnimating.value = true
+  
+  // 计算目标位置（将节点移到中心）
+  const containerWidth = 800
+  const containerHeight = 600
+  const targetX = containerWidth / 2 - node.pos.x
+  const targetY = containerHeight / 2 - node.pos.y
+  
+  // 设置目标变换
+  viewTransform.value.targetX = targetX
+  viewTransform.value.targetY = targetY
+  viewTransform.value.targetScale = 1.2
+  
+  // 执行动画
+  animateTransform()
+  
+  // 高亮节点
+  activeNodeId.value = nodeId
+  
+  // 降低其他节点透明度
+  nodes.value.forEach(n => {
+    if (n.id === nodeId) {
+      n.opacity = 1
+    } else if (isRelatedNode(n, node)) {
+      n.opacity = 0.7
+    } else {
+      n.opacity = 0.3
+    }
+  })
+}
+
+// 判断是否为相关节点
+function isRelatedNode(n1: RoadmapNode, n2: RoadmapNode): boolean {
+  // 同一类别
+  if (n1.categoryCode && n2.categoryCode && n1.categoryCode === n2.categoryCode) {
+    return true
+  }
+  // 有路径连接
+  return paths.value.some(p => 
+    (p.from === n1.id && p.to === n2.id) || 
+    (p.from === n2.id && p.to === n1.id)
+  )
+}
+
+// 动画执行
+function animateTransform() {
+  const { x, y, scale, targetX, targetY, targetScale } = viewTransform.value
+  
+  // 线性插值
+  const speed = 0.1
+  const newX = x + (targetX - x) * speed
+  const newY = y + (targetY - y) * speed
+  const newScale = scale + (targetScale - scale) * speed
+  
+  viewTransform.value.x = newX
+  viewTransform.value.y = newY
+  viewTransform.value.scale = newScale
+  
+  // 检查是否接近目标
+  const threshold = 0.5
+  if (
+    Math.abs(targetX - newX) > threshold ||
+    Math.abs(targetY - newY) > threshold ||
+    Math.abs(targetScale - newScale) > 0.01
+  ) {
+    requestAnimationFrame(animateTransform)
+  } else {
+    viewTransform.value.x = targetX
+    viewTransform.value.y = targetY
+    viewTransform.value.scale = targetScale
+    isAnimating.value = false
+  }
+}
+
+// 获取难度等级样式
+function getDifficultyClass(difficulty: number): string {
+  if (difficulty <= 2) return 'bg-green-100 text-green-700'
+  if (difficulty <= 3) return 'bg-yellow-100 text-yellow-700'
+  return 'bg-red-100 text-red-700'
+}
+
+// Get difficulty text
+function getDifficultyText(difficulty: number): string {
+  if (difficulty <= 2) return 'Easy'
+  if (difficulty <= 3) return 'Medium'
+  return 'Hard'
+}
+
+// Start animations on mount
+onMounted(async () => {
+  await loadGraph()
+  await loadRecommendations()
+  startPathAnimation()
+})
+
+// Cleanup on unmount
+onUnmounted(() => {
+  stopPathAnimation()
+})
 </script>
+
+<style scoped>
+/* Path animation for dashed lines */
+.roadmap-path {
+  transition: stroke-opacity 0.3s ease, stroke-width 0.3s ease;
+}
+
+.path-vertical {
+  animation: dash-flow 2s linear infinite;
+}
+
+.path-lateral {
+  animation: dash-flow-reverse 3s linear infinite;
+}
+
+@keyframes dash-flow {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+@keyframes dash-flow-reverse {
+  to {
+    stroke-dashoffset: 20;
+  }
+}
+
+/* Pulse ring animation for active nodes */
+.animate-pulse-ring {
+  animation: pulse-ring 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse-ring {
+  0%, 100% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.2);
+  }
+}
+
+/* Node active state */
+.node-active {
+  z-index: 10;
+}
+
+/* Node faded state */
+.node-faded {
+  filter: grayscale(30%);
+}
+
+/* Smooth cursor for dragging */
+.map-container-dragging {
+  cursor: grabbing;
+}
+
+.map-container {
+  cursor: grab;
+}
+
+/* Path hover effect */
+.roadmap-path:hover {
+  stroke-width: 4;
+  stroke-opacity: 1;
+}
+
+/* Glow effect for nodes */
+.glow-effect {
+  filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.5));
+}
+
+/* Gradient text for labels */
+.gradient-text {
+  background: linear-gradient(135deg, #6366f1 0%, #818cf8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+</style>

@@ -59,4 +59,14 @@ public class RoadmapNodeVO {
      * 变体：primary/neutral
      */
     private String variant;
+
+    /**
+     * 类别编码
+     */
+    private String categoryCode;
+
+    /**
+     * 岗位级别
+     */
+    private String level;
 }

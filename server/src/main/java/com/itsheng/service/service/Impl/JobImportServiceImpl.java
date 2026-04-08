@@ -936,10 +936,256 @@ public class JobImportServiceImpl implements JobImportService {
         }
     }
 
+    @Override
+    public void generateJobProfiles() {
+        log.info("开始为所有岗位生成职业画像");
+        
+        List<JobCategory> allJobs = jobCategoryMapper.selectAll();
+        log.info("找到 {} 个岗位需要生成画像", allJobs.size());
+        
+        int updated = 0;
+        for (JobCategory job : allJobs) {
+            try {
+                Map<String, Object> profile = buildJobProfile(job);
+                String profileJson = objectMapper.writeValueAsString(profile);
+                
+                JobCategory updateEntity = JobCategory.builder()
+                        .id(job.getId())
+                        .jobProfile(profileJson)
+                        .updatedAt(LocalDateTime.now())
+                        .build();
+                jobCategoryMapper.update(updateEntity);
+                updated++;
+                
+                if (updated % 50 == 0) {
+                    log.info("已为 {} 个岗位生成画像", updated);
+                }
+            } catch (Exception e) {
+                log.error("为岗位 {} 生成画像失败: {}", job.getId(), e.getMessage());
+            }
+        }
+        
+        log.info("岗位画像生成完成。已更新 {} 个岗位", updated);
+    }
+    
     /**
-     * 检查编码是否已有级别后缀
-     * @param code 岗位类别编码
-     * @return true-已有后缀，false-无后缀
+     * 根据岗位数据构建画像Map
+     */
+    private Map<String, Object> buildJobProfile(JobCategory job) {
+        Map<String, Object> profile = new LinkedHashMap<>();
+        
+        // 根据类别编码推导行业领域
+        profile.put("industrySegment", deriveIndustrySegment(job.getJobCategoryCode()));
+        
+        // 城市（占位符 - 如需要可从 source_job_ids 推导）
+        profile.put("city", deriveCity(job));
+        
+        // 从 requiredSkills JSON 获取核心技能
+        List<String> coreSkills = parseSkillsAsList(job.getRequiredSkills());
+        profile.put("coreSkills", coreSkills);
+        
+        // 根据岗位类型推导证书要求
+        profile.put("certificateRequirements", deriveCertificates(job.getJobCategoryCode()));
+        
+        // 能力需求（创新、学习、抗压、沟通、实习）
+        Map<String, Integer> capabilities = deriveCapabilities(job);
+        profile.put("capabilityRequirements", capabilities);
+        
+        // 根据源岗位数量计算需求等级
+        profile.put("demandLevel", deriveDemandLevel(job.getSourceJobCount()));
+        
+        // 热门岗位亮点
+        List<String> highlights = deriveHighlights(job);
+        profile.put("highlights", highlights);
+        
+        return profile;
+    }
+    
+    /**
+     * 根据类别编码推导行业领域
+     */
+    private String deriveIndustrySegment(String categoryCode) {
+        if (categoryCode == null) return "技术";
+        String code = categoryCode.toUpperCase();
+        if (code.contains("JAVA") || code.contains("BACKEND") || code.contains("SPRING")) {
+            return "后端开发";
+        }
+        if (code.contains("FRONTEND") || code.contains("WEB") || code.contains("VUE") || code.contains("REACT")) {
+            return "前端开发";
+        }
+        if (code.contains("DATA") || code.contains("BIGDATA") || code.contains("ETL")) {
+            return "数据工程";
+        }
+        if (code.contains("AI") || code.contains("ML") || code.contains("MACHINE") || code.contains("ALGORITHM")) {
+            return "AI/机器学习";
+        }
+        if (code.contains("DEVOPS") || code.contains("OPS") || code.contains("SRE")) {
+            return "DevOps";
+        }
+        if (code.contains("MOBILE") || code.contains("ANDROID") || code.contains("IOS") || code.contains("FLUTTER")) {
+            return "移动开发";
+        }
+        if (code.contains("TEST") || code.contains("QA")) {
+            return "质量保障";
+        }
+        if (code.contains("PRODUCT") || code.contains("PM")) {
+            return "产品管理";
+        }
+        if (code.contains("DESIGN") || code.contains("UI") || code.contains("UX")) {
+            return "设计";
+        }
+        if (code.contains("SECURITY")) {
+            return "安全";
+        }
+        if (code.contains("EMBEDDED") || code.contains("HARDWARE")) {
+            return "嵌入式系统";
+        }
+        return "技术";
+    }
+    
+    /**
+     * 推导城市
+     */
+    private String deriveCity(JobCategory job) {
+        // 根据岗位特征推导默认城市
+        if (job.getSourceJobCount() != null && job.getSourceJobCount() > 50) {
+            return "北京/上海/深圳";
+        }
+        return "北京";
+    }
+    
+    /**
+     * 解析技能JSON为列表
+     */
+    private List<String> parseSkillsAsList(String skillsJson) {
+        if (skillsJson == null || skillsJson.isEmpty()) {
+            return new ArrayList<>();
+        }
+        try {
+            return objectMapper.readValue(skillsJson, new com.fasterxml.jackson.core.type.TypeReference<List<String>>() {});
+        } catch (Exception e) {
+            log.warn("解析技能JSON失败: {}", skillsJson);
+            return new ArrayList<>();
+        }
+    }
+    
+    /**
+     * 根据类别编码推导证书要求
+     */
+    private List<String> deriveCertificates(String categoryCode) {
+        List<String> certs = new ArrayList<>();
+        if (categoryCode == null) {
+            certs.add("英语四级及以上");
+            return certs;
+        }
+        String code = categoryCode.toUpperCase();
+        if (code.contains("JAVA")) {
+            certs.add("Oracle认证Java程序员");
+            certs.add("Spring专业认证");
+        } else if (code.contains("FRONTEND") || code.contains("WEB")) {
+            certs.add("AWS认证开发者");
+        } else if (code.contains("DATA")) {
+            certs.add("AWS认证数据分析");
+            certs.add("CDMP（认证数据管理专业人员）");
+        } else if (code.contains("AI") || code.contains("ML")) {
+            certs.add("TensorFlow开发者证书");
+            certs.add("AWS机器学习专项认证");
+        } else if (code.contains("DEVOPS")) {
+            certs.add("AWS DevOps工程师");
+            certs.add("Kubernetes管理员(CKA)");
+        } else if (code.contains("SECURITY")) {
+            certs.add("CISSP");
+            certs.add("CEH（认证道德黑客）");
+        } else if (code.contains("PRODUCT")) {
+            certs.add("PMP");
+            certs.add("CSPO（认证Scrum产品负责人）");
+        }
+        certs.add("英语四级及以上");
+        return certs;
+    }
+    
+    /**
+     * 推导能力需求分数
+     */
+    private Map<String, Integer> deriveCapabilities(JobCategory job) {
+        Map<String, Integer> caps = new LinkedHashMap<>();
+        String level = job.getJobLevel();
+        int baseScore;
+        
+        if ("SENIOR".equals(level)) {
+            baseScore = 75;
+        } else if ("MID".equals(level)) {
+            baseScore = 65;
+        } else if ("JUNIOR".equals(level)) {
+            baseScore = 55;
+        } else {
+            baseScore = 50;
+        }
+        
+        // 根据岗位类型添加一些变化
+        String code = job.getJobCategoryCode() != null ? job.getJobCategoryCode().toUpperCase() : "";
+        int innovationBonus = code.contains("AI") || code.contains("DESIGN") ? 10 : 5;
+        int learningBonus = code.contains("AI") || code.contains("DATA") ? 10 : 5;
+        int communicationBonus = code.contains("PRODUCT") || code.contains("PM") ? 10 : 5;
+        int internshipBonus = code.contains("JUNIOR") || code.contains("INTERNSHIP") ? 10 : 5;
+        
+        caps.put("innovation", Math.min(100, baseScore + innovationBonus));
+        caps.put("learning", Math.min(100, baseScore + learningBonus));
+        caps.put("resilience", baseScore + 5);
+        caps.put("communication", Math.min(100, baseScore + communicationBonus));
+        caps.put("internship", Math.min(100, baseScore + internshipBonus));
+        
+        return caps;
+    }
+    
+    /**
+     * 根据源岗位数量推导需求等级
+     */
+    private String deriveDemandLevel(Integer sourceJobCount) {
+        if (sourceJobCount == null || sourceJobCount < 10) {
+            return "低";
+        } else if (sourceJobCount < 30) {
+            return "中";
+        } else if (sourceJobCount < 60) {
+            return "高";
+        } else {
+            return "极高";
+        }
+    }
+    
+    /**
+     * 推导岗位亮点
+     */
+    private List<String> deriveHighlights(JobCategory job) {
+        List<String> highlights = new ArrayList<>();
+        
+        if (job.getSourceJobCount() != null && job.getSourceJobCount() > 50) {
+            highlights.add("市场需求旺盛");
+        }
+        if (job.getMaxSalary() != null && job.getMaxSalary().compareTo(new BigDecimal("30000")) > 0) {
+            highlights.add("薪资竞争力强");
+        }
+        if (job.getAiConfidenceScore() != null && job.getAiConfidenceScore().compareTo(new BigDecimal("0.9")) > 0) {
+            highlights.add("AI分类置信度高");
+        }
+        
+        String code = job.getJobCategoryCode() != null ? job.getJobCategoryCode().toUpperCase() : "";
+        if (code.contains("AI") || code.contains("ML")) {
+            highlights.add("新兴技术领域");
+        }
+        if (code.contains("SENIOR")) {
+            highlights.add("高级岗位机会");
+        }
+        
+        if (highlights.isEmpty()) {
+            highlights.add("稳定职业路径");
+        }
+        
+        return highlights;
+    }
+    
+    /**
+     * 检查类别编码是否已有级别后缀
      */
     private boolean hasLevelSuffix(String code) {
         if (code == null || code.trim().isEmpty()) {

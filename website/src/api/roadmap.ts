@@ -351,6 +351,7 @@ export interface RoadmapGraphPath {
   to: string
   variant: 'primary' | 'secondary'
   edgeType: 'vertical' | 'lateral'
+  lineStyle?: 'dashed' | 'solid'
   difficulty: number
   avgTimeMonths: number
   successRate: number
@@ -359,6 +360,8 @@ export interface RoadmapGraphPath {
 /** 职业地图图谱 */
 export interface RoadmapGraph {
   mode: 'vertical' | 'lateral'
+  viewType?: 'global' | 'focused'
+  centerCategoryCode?: string
   nodes: RoadmapGraphNode[]
   paths: RoadmapGraphPath[]
 }

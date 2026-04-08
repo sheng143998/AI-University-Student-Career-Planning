@@ -85,4 +85,23 @@ public class JobImportController {
 
         return Result.success("岗位类别编码整合完成");
     }
+
+    /**
+     * 为所有岗位生成职业画像
+     * @return 生成结果
+     */
+    @PostMapping("/generate-profiles")
+    @Operation(
+            summary = "生成岗位画像",
+            description = "为job表中所有岗位生成职业画像JSON数据。" +
+                    "每个画像包含 industrySegment、city、coreSkills、certificateRequirements、" +
+                    "capabilityRequirements、demandLevel 和 highlights。"
+    )
+    public Result<String> generateJobProfiles() {
+        log.info("开始生成岗位画像" );
+
+        jobImportService.generateJobProfiles();
+
+        return Result.success("岗位画像生成完成" );
+    }
 }

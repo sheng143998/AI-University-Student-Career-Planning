@@ -18,6 +18,7 @@
         <result column="required_experience_years" property="requiredExperienceYears"/>
         <result column="required_skills" property="requiredSkills"/>
         <result column="job_description" property="jobDescription"/>
+        <result column="job_profile" property="jobProfile"/>
         <result column="ai_confidence_score" property="aiConfidenceScore"/>
         <result column="analysis_prompt_used" property="analysisPromptUsed"/>
         <result column="created_at" property="createdAt" javaType="java.time.LocalDateTime"/>
@@ -39,6 +40,7 @@
             required_experience_years,
             required_skills,
             job_description,
+            job_profile,
             ai_confidence_score,
             analysis_prompt_used,
             created_at,
@@ -56,6 +58,7 @@
             #{requiredExperienceYears},
             #{requiredSkills}::jsonb,
             #{jobDescription},
+            #{jobProfile}::jsonb,
             #{aiConfidenceScore},
             #{analysisPromptUsed},
             #{createdAt},
@@ -78,6 +81,7 @@
             required_experience_years,
             required_skills,
             job_description,
+            job_profile,
             ai_confidence_score,
             analysis_prompt_used,
             created_at,
@@ -97,6 +101,7 @@
                 #{job.requiredExperienceYears},
                 #{job.requiredSkills}::jsonb,
                 #{job.jobDescription},
+                #{job.jobProfile}::jsonb,
                 #{job.aiConfidenceScore},
                 #{job.analysisPromptUsed},
                 #{job.createdAt},
@@ -199,6 +204,7 @@
             <if test="requiredExperienceYears != null">required_experience_years = #{requiredExperienceYears},</if>
             <if test="requiredSkills != null">required_skills = #{requiredSkills}::jsonb,</if>
             <if test="jobDescription != null">job_description = #{jobDescription},</if>
+            <if test="jobProfile != null">job_profile = #{jobProfile}::jsonb,</if>
             <if test="aiConfidenceScore != null">ai_confidence_score = #{aiConfidenceScore},</if>
             <if test="analysisPromptUsed != null">analysis_prompt_used = #{analysisPromptUsed},</if>
             <if test="updatedAt != null">updated_at = #{updatedAt},</if>

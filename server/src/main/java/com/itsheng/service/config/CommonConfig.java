@@ -1,7 +1,6 @@
 package com.itsheng.service.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.itsheng.common.constant.SystemConstants;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
@@ -16,6 +15,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.AsyncConfigurer;
 import org.springframework.scheduling.annotation.EnableAsync;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.cache.CacheManager;
@@ -33,6 +33,7 @@ import static org.springframework.ai.vectorstore.pgvector.PgVectorStore.PgIndexT
 @Configuration
 @EnableAsync
 @EnableCaching
+@EnableScheduling
 public class CommonConfig implements AsyncConfigurer {
 
     @Bean

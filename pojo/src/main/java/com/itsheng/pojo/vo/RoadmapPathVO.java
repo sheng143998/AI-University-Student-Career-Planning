@@ -29,6 +29,11 @@ public class RoadmapPathVO {
     private String edgeType;
 
     /**
+     * 线条样式：dashed/solid
+     */
+    private String lineStyle;
+
+    /**
      * 转换难度（1-5）
      */
     private Integer difficulty;

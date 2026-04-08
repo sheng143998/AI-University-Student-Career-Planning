@@ -84,6 +84,13 @@ public class JobCategory {
     private String jobDescription;
 
     /**
+     * Job profile data (JSON string format)
+     * Contains: industrySegment, city, coreSkills, certificateRequirements,
+     * capabilityRequirements, demandLevel, highlights, etc.
+     */
+    private String jobProfile;
+
+    /**
      * AI 置信度 (0.00-1.00)
      */
     private BigDecimal aiConfidenceScore;
