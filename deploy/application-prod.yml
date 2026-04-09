@@ -1,0 +1,39 @@
+# AI Career Planning - Production Configuration
+# Copy to: /opt/app/config/application-prod.yml
+
+server:
+  port: 8081
+
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/ai_career_plan?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: YOUR_DB_PASSWORD_HERE
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+  
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: YOUR_REDIS_PASSWORD_HERE
+      timeout: 10000
+      
+  ai:
+    openai:
+      api-key: YOUR_OPENAI_API_KEY
+      base-url: https://api.openai.com
+
+logging:
+  file:
+    path: /opt/app/logs
+    name: app.log
+  level:
+    com.itsheng: INFO
+    org.springframework: WARN
+
+# JWT Configuration
+jwt:
+  secret: YOUR_JWT_SECRET_KEY_HERE_AT_LEAST_256_BITS
