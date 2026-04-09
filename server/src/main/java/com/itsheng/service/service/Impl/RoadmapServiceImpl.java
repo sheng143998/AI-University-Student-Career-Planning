@@ -15,6 +15,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -77,6 +79,7 @@ public class RoadmapServiceImpl implements RoadmapService {
     }
 
     @Override
+    @Cacheable(cacheNames = "roadmap:graph", key = "(#categoryCode == null || #categoryCode.isEmpty()) ? ('global:' + #mode) : (#categoryCode + ':' + #mode)")
     public RoadmapGraphVO getGraph(String categoryCode, String mode) {
         log.info("获取地图图谱: categoryCode={}, mode={}", categoryCode, mode);
         RoadmapGraphVO graph = new RoadmapGraphVO();
@@ -477,6 +480,7 @@ public class RoadmapServiceImpl implements RoadmapService {
      * 获取个性化职业路径推荐
      */
     @Override
+    @Cacheable(cacheNames = "roadmap:recommendations:personalized", key = "T(com.itsheng.common.context.BaseContext).getUserId()")
     public CareerPathRecommendationVO getPersonalizedRecommendations() {
         Long userId = BaseContext.getUserId();
         log.info("获取用户 {} 的个性化职业路径推荐", userId);
@@ -509,6 +513,12 @@ public class RoadmapServiceImpl implements RoadmapService {
                 .build();
     }
 
+    @Override
+    @CacheEvict(cacheNames = "roadmap:recommendations:personalized", key = "T(com.itsheng.common.context.BaseContext).getUserId()")
+    public void clearPersonalizedRecommendationsCache() {
+        log.info("Clearing personalized recommendations cache for user: {}", BaseContext.getUserId());
+    }
+
     /**
      * 获取用户简历解析数据
      */
@@ -525,16 +535,16 @@ public class RoadmapServiceImpl implements RoadmapService {
     }
 
     /**
-     * 找到最匹配的垂直晋升路径
+     * Find the best matching vertical career path
      */
     private CareerPathRecommendationVO.VerticalPathRecommendationVO findBestMatchingVerticalPath(
             String currentJob, List<String> userSkills, List<JobCategory> allJobs) {
 
-        // 按类别编码分组
+        // Group by category code
         Map<String, List<JobCategory>> jobsByCategory = allJobs.stream()
                 .collect(Collectors.groupingBy(j -> extractBaseCategoryCode(j.getJobCategoryCode())));
 
-        // 计算每个类别与用户当前岗位的相似度
+        // Calculate similarity for each category
         Map<String, BigDecimal> similarityScores = new HashMap<>();
         Map<String, JobCategory> bestMatchJobByCategory = new HashMap<>();
 
@@ -557,19 +567,33 @@ public class RoadmapServiceImpl implements RoadmapService {
             bestMatchJobByCategory.put(categoryCode, bestMatch);
         }
 
-        // 找到相似度最高的类别
+        // Find category with highest similarity - always use the best match, no random fallback
         String bestCategory = similarityScores.entrySet().stream()
                 .max(Map.Entry.comparingByValue())
                 .map(Map.Entry::getKey)
                 .orElse("");
 
-        if (bestCategory.isEmpty() || similarityScores.get(bestCategory).compareTo(new BigDecimal("0.1")) < 0) {
-            // 如果没有找到匹配的，返回随机一个
+        if (bestCategory.isEmpty() && !jobsByCategory.isEmpty()) {
+            // Only fallback if no categories at all (should not happen)
             bestCategory = jobsByCategory.keySet().iterator().next();
+            if (!bestMatchJobByCategory.containsKey(bestCategory)) {
+                List<JobCategory> categoryJobs = jobsByCategory.get(bestCategory);
+                if (categoryJobs != null && !categoryJobs.isEmpty()) {
+                    bestMatchJobByCategory.put(bestCategory, categoryJobs.get(0));
+                }
+            }
         }
 
-        // 构建垂直路径节点
+        // Build vertical path nodes
         List<JobCategory> verticalJobs = jobsByCategory.get(bestCategory);
+        if (verticalJobs == null || verticalJobs.isEmpty()) {
+            bestCategory = jobsByCategory.keySet().iterator().next();
+            verticalJobs = jobsByCategory.get(bestCategory);
+            if (!bestMatchJobByCategory.containsKey(bestCategory) && verticalJobs != null && !verticalJobs.isEmpty()) {
+                bestMatchJobByCategory.put(bestCategory, verticalJobs.get(0));
+            }
+        }
+
         verticalJobs.sort(Comparator.comparingInt(j -> LEVEL_ORDER.indexOf(j.getJobLevel())));
 
         List<CareerPathRecommendationVO.PathNodeVO> nodes = new ArrayList<>();
@@ -592,10 +616,18 @@ public class RoadmapServiceImpl implements RoadmapService {
                     .build());
         }
 
+        // Safe access to bestMatchJobByCategory with null check
+        JobCategory matchedJob = bestMatchJobByCategory.get(bestCategory);
+        String matchedJobName = matchedJob != null ? matchedJob.getJobCategoryName() : "Unknown Position";
+        BigDecimal similarityScore = similarityScores.get(bestCategory);
+        if (similarityScore == null) {
+            similarityScore = BigDecimal.ZERO;
+        }
+
         return CareerPathRecommendationVO.VerticalPathRecommendationVO.builder()
                 .categoryCode(bestCategory)
-                .matchedJobName(bestMatchJobByCategory.get(bestCategory).getJobCategoryName())
-                .similarityScore(similarityScores.get(bestCategory).setScale(2, RoundingMode.HALF_UP))
+                .matchedJobName(matchedJobName)
+                .similarityScore(similarityScore.setScale(2, RoundingMode.HALF_UP))
                 .nodes(nodes)
                 .currentLevelIndex(currentLevelIndex >= 0 ? currentLevelIndex : 0)
                 .estimatedMonthsToNext(calculateEstimatedMonths(currentLevelIndex, verticalJobs.size()))
@@ -603,30 +635,38 @@ public class RoadmapServiceImpl implements RoadmapService {
     }
 
     /**
-     * 计算岗位相似度
+     * Calculate job similarity - improved algorithm with keyword matching
      */
     private BigDecimal calculateJobSimilarity(String currentJob, List<String> userSkills, JobCategory job) {
         double score = 0.0;
 
-        // 1. 名称匹配（权重 0.6）
+        // 1. Name matching (weight 0.6)
         String jobName = job.getJobCategoryName().toLowerCase();
         String current = currentJob.toLowerCase();
 
-        if (jobName.contains(current) || current.contains(jobName)) {
+        // Exact or contains match
+        if (jobName.equals(current) || jobName.contains(current) || current.contains(jobName)) {
             score += 0.6;
         } else {
-            // 部分匹配
-            String[] currentWords = current.split("\\s+|_");
-            for (String word : currentWords) {
-                if (word.length() > 2 && jobName.contains(word)) {
-                    score += 0.15;
-                }
+            // Keyword matching - extract important keywords
+            List<String> currentKeywords = extractJobKeywords(current);
+            List<String> jobKeywords = extractJobKeywords(jobName);
+
+            // Calculate keyword overlap
+            long matchedKeywords = currentKeywords.stream()
+                    .filter(kw -> jobKeywords.stream()
+                            .anyMatch(jkw -> jkw.contains(kw) || kw.contains(jkw)))
+                    .count();
+
+            if (!currentKeywords.isEmpty()) {
+                double keywordScore = (double) matchedKeywords / currentKeywords.size() * 0.5;
+                score += keywordScore;
             }
         }
 
-        // 2. 技能匹配（权重 0.4）
+        // 2. Skill matching (weight 0.4)
         List<String> jobSkills = parseJsonToList(job.getRequiredSkills());
-        if (!userSkills.isEmpty() && !jobSkills.isEmpty()) {
+        if (userSkills != null && !userSkills.isEmpty() && !jobSkills.isEmpty()) {
             long matchedSkills = userSkills.stream()
                     .filter(userSkill -> jobSkills.stream()
                             .anyMatch(jobSkill -> jobSkill.toLowerCase().contains(userSkill.toLowerCase())
@@ -640,7 +680,43 @@ public class RoadmapServiceImpl implements RoadmapService {
     }
 
     /**
-     * 判断是否为当前岗位
+     * Extract important keywords from job name for matching
+     */
+    private List<String> extractJobKeywords(String jobName) {
+        Set<String> techKeywords = Set.of(
+                "java", "python", "javascript", "js", "ts", "typescript", "c++", "c#", "go", "rust",
+                "frontend", "backend", "fullstack", "full-stack", "full stack",
+                "web", "mobile", "ios", "android", "flutter", "react", "vue", "angular",
+                "spring", "django", "node", "express",
+                "data", "ai", "ml", "machine learning", "algorithm",
+                "devops", "cloud", "aws", "azure", "kubernetes",
+                "engineer", "developer", "programmer", "architect",
+                "manager", "director", "lead", "senior", "junior", "intern",
+                "analyst", "designer", "product", "operation", "marketing",
+                "test", "qa", "security", "database", "dba"
+        );
+
+        String lowerName = jobName.toLowerCase();
+        List<String> keywords = new ArrayList<>();
+
+        for (String keyword : techKeywords) {
+            if (lowerName.contains(keyword)) {
+                keywords.add(keyword);
+            }
+        }
+
+        String[] words = lowerName.split("[\\s_\\-/]+");
+        for (String word : words) {
+            if (word.length() >= 2 && !keywords.contains(word)) {
+                keywords.add(word);
+            }
+        }
+
+        return keywords;
+    }
+
+    /**
+     * Check if job matches current job
      */
     private boolean isJobMatch(String currentJob, JobCategory job) {
         String jobName = job.getJobCategoryName().toLowerCase();

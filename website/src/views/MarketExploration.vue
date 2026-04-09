@@ -69,6 +69,17 @@
             <line stroke="#0056d2" stroke-width="4" x1="50%" x2="67%" y1="50%" y2="85%"></line>
           </svg>
         </div>
+
+        <div class="mt-6 flex justify-end">
+          <button
+            type="button"
+            class="px-5 py-2.5 bg-primary text-white rounded-xl font-bold text-sm shadow-md hover:opacity-90 transition-all flex items-center gap-2"
+            @click="exploreRoadmapFromGraph"
+          >
+            <span class="material-symbols-outlined text-sm">travel_explore</span>
+            在职业地图中探索
+          </button>
+        </div>
       </section>
 
       <!-- Market Trends (Side Bento Cell) -->
@@ -458,30 +469,23 @@
               </div>
             </div>
 
-            <!-- Company Benefits -->
-            <div v-if="selectedJobDetail.companyBenefits?.length" class="bg-tertiary-container/30 rounded-xl p-5">
-              <h3 class="text-sm font-bold text-on-surface-variant uppercase tracking-wider mb-3 flex items-center gap-2">
-                <span class="material-symbols-outlined text-sm">card_giftcard</span>
-                公司福利
-              </h3>
-              <div class="flex flex-wrap gap-2">
-                <span
-                  v-for="(benefit, idx) in selectedJobDetail.companyBenefits"
-                  :key="idx"
-                  class="px-3 py-1 rounded-full text-xs font-medium bg-surface-container-lowest"
-                >
-                  {{ benefit }}
-                </span>
-              </div>
-            </div>
-
             <!-- Career Path -->
             <div v-if="selectedJobDetail.careerPath" class="bg-surface-container-low rounded-xl p-5">
-              <h3 class="text-sm font-bold text-on-surface-variant uppercase tracking-wider mb-4 flex items-center gap-2">
-                <span class="material-symbols-outlined text-sm">route</span>
-                职业路径
-              </h3>
-              
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-sm font-bold text-on-surface-variant uppercase tracking-wider flex items-center gap-2">
+                  <span class="material-symbols-outlined text-sm">route</span>
+                  职业路径
+                </h3>
+                <button
+                  type="button"
+                  class="px-3 py-1.5 rounded-lg bg-surface-container-highest hover:bg-primary-fixed/30 text-xs font-bold transition-colors flex items-center gap-1"
+                  @click="goToRoadmapFromDetail"
+                >
+                  <span class="material-symbols-outlined text-[14px]">open_in_new</span>
+                  在职业地图中查看详细
+                </button>
+              </div>
+
               <!-- Vertical Path -->
               <div v-if="selectedJobDetail.careerPath.vertical?.length" class="mb-4">
                 <h4 class="text-xs font-bold text-on-surface-variant mb-2">纵向晋升路径</h4>
@@ -613,6 +617,22 @@ function handleGraphNodeClick(node: typeof graphNodes[0]) {
       })
     }
   }
+}
+
+function exploreRoadmapFromGraph() {
+  const jobId = hotJobs.value[0]?.id
+  router.push({
+    name: 'roadmap',
+    query: jobId ? { jobId: String(jobId) } : undefined,
+  })
+}
+
+function goToRoadmapFromDetail() {
+  const jobId = selectedJobDetail.value?.id
+  router.push({
+    name: 'roadmap',
+    query: jobId ? { jobId: String(jobId) } : undefined,
+  })
 }
 
 // 计算属性：AI洞察文本

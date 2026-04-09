@@ -69,4 +69,15 @@ public class RoadmapController {
         log.info("获取个性化职业路径推荐");
         return Result.success(roadmapService.getPersonalizedRecommendations());
     }
+
+    /**
+     * Clear personalized recommendations cache
+     */
+    @DeleteMapping("/recommendations/personalized/cache")
+    @Operation(summary = "Clear recommendations cache", description = "Clear the cached personalized recommendations for current user")
+    public Result<String> clearPersonalizedRecommendationsCache() {
+        log.info("Clearing personalized recommendations cache");
+        roadmapService.clearPersonalizedRecommendationsCache();
+        return Result.success("Cache cleared successfully");
+    }
 }
