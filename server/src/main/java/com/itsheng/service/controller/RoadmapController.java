@@ -1,9 +1,13 @@
 package com.itsheng.service.controller;
 
 import com.itsheng.pojo.vo.CareerPathRecommendationVO;
+import com.itsheng.pojo.vo.JobDetailVO;
+import com.itsheng.pojo.vo.JobSearchResultVO;
+import com.itsheng.pojo.vo.JobVerticalPathDetailVO;
 import com.itsheng.pojo.vo.RoadmapGraphVO;
 import com.itsheng.pojo.vo.RoadmapNodeDetailVO;
 import com.itsheng.pojo.vo.RoadmapSearchResultVO;
+import com.itsheng.pojo.vo.UserTransitionRecommendationVO;
 import com.itsheng.service.service.RoadmapService;
 import com.itsheng.common.result.Result;
 import io.swagger.v3.oas.annotations.Operation;
@@ -38,6 +42,18 @@ public class RoadmapController {
     }
 
     /**
+     * 搜索岗位（对齐前端 /api/roadmap/jobs/search）
+     */
+    @GetMapping("/jobs/search")
+    @Operation(summary = "搜索岗位", description = "根据关键字搜索岗位（用于职业地图中心岗位定位）")
+    public Result<java.util.List<JobSearchResultVO>> searchJobs(
+            @Parameter(description = "搜索关键字") @RequestParam String q,
+            @Parameter(description = "限制数量") @RequestParam(defaultValue = "10") Integer limit) {
+        log.info("搜索岗位: q={}, limit={}", q, limit);
+        return Result.success(roadmapService.searchJobs(q, limit));
+    }
+
+    /**
      * 获取地图图谱（垂直晋升路径）
      */
     @GetMapping("/graph")
@@ -58,6 +74,41 @@ public class RoadmapController {
             @Parameter(description = "节点ID") @PathVariable Long id) {
         log.info("获取节点详情: id={}", id);
         return Result.success(roadmapService.getNodeDetail(id));
+    }
+
+    /**
+     * 根据岗位名称获取晋升路径（对齐前端 /api/roadmap/map/path-by-name）
+     */
+    @GetMapping("/map/path-by-name")
+    @Operation(summary = "按岗位名称获取晋升路径", description = "根据岗位名称和级别返回垂直晋升路径")
+    public Result<JobVerticalPathDetailVO> getVerticalPathByJobName(
+            @Parameter(description = "岗位名称") @RequestParam String jobName,
+            @Parameter(description = "岗位级别") @RequestParam(required = false) String level) {
+        log.info("按岗位名称获取晋升路径: jobName={}, level={}", jobName, level);
+        return Result.success(roadmapService.getVerticalPathByJobNameAndLevel(jobName, level));
+    }
+
+    /**
+     * 根据岗位名称获取换岗推荐（对齐前端 /api/roadmap/recommend/transition/by-job）
+     */
+    @PostMapping("/recommend/transition/by-job")
+    @Operation(summary = "按岗位名称获取换岗推荐", description = "根据岗位名称和级别返回换岗推荐列表")
+    public Result<UserTransitionRecommendationVO> recommendTransitionByJob(
+            @Parameter(description = "岗位名称") @RequestParam String jobName,
+            @Parameter(description = "岗位级别") @RequestParam(required = false) String level) {
+        log.info("按岗位名称获取换岗推荐: jobName={}, level={}", jobName, level);
+        return Result.success(roadmapService.recommendTransitionByJobNameAndLevel(jobName, level));
+    }
+
+    /**
+     * 获取岗位详情（对齐前端 /api/roadmap/map/job-detail/{id}）
+     */
+    @GetMapping("/map/job-detail/{id}")
+    @Operation(summary = "获取岗位详情", description = "根据岗位ID返回岗位详情")
+    public Result<JobDetailVO> getJobDetail(
+            @Parameter(description = "岗位ID") @PathVariable Long id) {
+        log.info("获取岗位详情: id={}", id);
+        return Result.success(roadmapService.getJobDetail(id));
     }
 
     /**

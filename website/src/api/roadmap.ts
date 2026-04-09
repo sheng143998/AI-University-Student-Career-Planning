@@ -10,9 +10,13 @@ import type { ApiResult } from '@/api/types'
 export interface PathStep {
   step: number
   jobName: string
+  jobLevel?: string
+  jobLevelName?: string
   skills: string[]
   avgTimeMonths: number
   difficulty: number
+  salaryRange?: string
+  jobId?: number
 }
 
 export interface JobVerticalPath {
@@ -252,8 +256,9 @@ export async function recommendTransitionPaths(): Promise<ApiResult<UserTransiti
 }
 
 /** RAG 推荐用户换岗路径（手动指定岗位） */
-export async function recommendTransitionPathsByJobName(jobName: string): Promise<ApiResult<UserTransitionRecommendation>> {
-  const res = await fetch(`${apiBase()}/api/roadmap/recommend/transition/by-job?jobName=${encodeURIComponent(jobName)}`, {
+export async function recommendTransitionPathsByJobName(jobName: string, level?: string): Promise<ApiResult<UserTransitionRecommendation>> {
+  const levelParam = level ? `&level=${encodeURIComponent(level)}` : ''
+  const res = await fetch(`${apiBase()}/api/roadmap/recommend/transition/by-job?jobName=${encodeURIComponent(jobName)}${levelParam}`, {
     method: 'POST',
     headers: headersJson(),
     credentials: 'include',
@@ -432,8 +437,9 @@ export async function getJobDetail(jobId: number): Promise<ApiResult<JobDetail>>
 }
 
 /** 根据岗位名称获取晋升路径 */
-export async function getVerticalPathByJobName(jobName: string): Promise<ApiResult<JobVerticalPathDetail>> {
-  const res = await fetch(`${apiBase()}/api/roadmap/map/path-by-name?jobName=${encodeURIComponent(jobName)}`, {
+export async function getVerticalPathByJobName(jobName: string, level?: string): Promise<ApiResult<JobVerticalPathDetail>> {
+  const levelParam = level ? `&level=${encodeURIComponent(level)}` : ''
+  const res = await fetch(`${apiBase()}/api/roadmap/map/path-by-name?jobName=${encodeURIComponent(jobName)}${levelParam}`, {
     method: 'GET',
     headers: headersAuth(),
     credentials: 'include',
