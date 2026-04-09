@@ -17,6 +17,8 @@
         <java.version>17</java.version>
         <mybatis.spring>4.0.1</mybatis.spring>
         <aliyun.oss.version>3.17.4</aliyun.oss.version>
+        <commons-io.version>2.16.1</commons-io.version>
+        <commons-compress.version>1.27.1</commons-compress.version>
     </properties>
     <dependencies>
 
@@ -80,6 +82,18 @@
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-tika-document-reader</artifactId>
+        </dependency>
+        <!-- Commons IO - 覆盖旧版本的传递依赖 -->
+        <dependency>
+            <groupId>commons-io</groupId>
+            <artifactId>commons-io</artifactId>
+            <version>${commons-io.version}</version>
+        </dependency>
+        <!-- Commons Compress - Tika 3.x 需要 1.26+ -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-compress</artifactId>
+            <version>${commons-compress.version}</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.ai</groupId>

@@ -51,7 +51,7 @@
               <span class="material-symbols-outlined text-primary text-3xl">cloud_upload</span>
             </div>
             <h3 class="text-xl font-bold mb-2">上传简历</h3>
-            <p class="text-on-surface-variant text-sm mb-4">支持 PDF、DOCX、PPTX、HTML、TXT，最大 20MB</p>
+            <p class="text-on-surface-variant text-sm mb-4">支持 PDF、DOC、DOCX、PPTX、HTML、HTM、TXT，最大 20MB</p>
             <button
               class="px-8 py-3 bg-primary text-on-primary rounded-xl font-bold shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-50"
               type="button"

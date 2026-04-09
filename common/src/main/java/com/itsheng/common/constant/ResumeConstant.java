@@ -13,7 +13,7 @@ public class ResumeConstant {
      * 允许上传的文件类型
      */
     public static final Set<String> ALLOWED_FILE_TYPES = new HashSet<>(Arrays.asList(
-            "pdf", "docx", "pptx", "html", "txt"
+            "pdf", "doc", "docx", "pptx", "html", "htm", "txt"
     ));
 
     /**
