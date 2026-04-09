@@ -162,6 +162,37 @@
         </div>
       </div>
 
+      <div v-if="actionDialogOpen" class="fixed inset-0 z-50">
+        <div class="absolute inset-0 bg-black/40" @click="closeActionDialog"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-6">
+          <div class="w-full max-w-2xl bg-surface rounded-2xl shadow-2xl border border-outline-variant/20 overflow-hidden">
+            <div class="p-6 bg-gradient-to-r from-primary-fixed/40 to-surface-container-low">
+              <div class="flex items-start justify-between gap-6">
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2 text-primary mb-2">
+                    <span class="material-symbols-outlined text-[18px]">lightbulb</span>
+                    <span class="text-xs font-bold tracking-widest uppercase">Action Guide</span>
+                  </div>
+                  <h4 class="text-2xl md:text-3xl font-black headline-font text-on-surface break-words whitespace-normal leading-snug">
+                    {{ selectedAction?.title || '行动建议' }}
+                  </h4>
+                  <p class="mt-3 text-sm text-on-surface-variant">点击空白区域可关闭</p>
+                </div>
+                <button type="button" class="shrink-0 w-10 h-10 rounded-xl bg-white/70 hover:bg-white transition-colors flex items-center justify-center" @click="closeActionDialog">
+                  <span class="material-symbols-outlined">close</span>
+                </button>
+              </div>
+            </div>
+            <div class="p-6 max-h-[60vh] overflow-auto">
+              <p class="text-lg leading-relaxed text-on-surface whitespace-pre-wrap break-words">{{ selectedActionText }}</p>
+            </div>
+            <div class="p-4 bg-surface-container-low flex justify-end">
+              <button type="button" class="px-4 py-2 rounded-xl bg-primary-container text-white font-bold hover:opacity-95 transition-opacity" @click="closeActionDialog">知道了</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Career Path Roadmap (Span 12) -->
       <div class="md:col-span-12 bg-surface-container-low rounded-2xl p-8 mt-4">
         <h3 class="text-xl font-extrabold headline-font mb-10 text-center md:text-left">您的职业进化地图</h3>
@@ -169,13 +200,13 @@
           <div class="absolute top-1/2 left-0 w-full h-1 bg-gradient-to-r from-primary/10 via-primary to-primary/10 -translate-y-1/2 hidden md:block"></div>
           <div class="flex flex-col md:flex-row justify-between relative z-10 gap-12 md:gap-4">
             <div v-if="(roadmap?.length ?? 0) === 0" class="text-sm text-on-surface-variant">暂无职业路径数据</div>
-            <div v-for="(node, index) in roadmap" :key="`${node.title || 'step'}-${index}`" class="flex flex-col items-center text-center max-w-[200px] cursor-pointer" @click="onSelectRoadmapStep(index)">
-              <div :class="['w-14 h-14 rounded-full flex items-center justify-center shadow-lg mb-4 border-4 border-white', node.active ? 'bg-primary-container text-white' : 'bg-surface-container-highest text-on-surface group-hover:bg-primary group-hover:text-white transition-all']">
-                <span class="material-symbols-outlined">{{ node.icon }}</span>
+            <div v-for="(node, index) in roadmapView" :key="`${node.title || 'step'}-${index}`" class="flex flex-col items-center text-center max-w-[200px] cursor-pointer group" @click="onSelectRoadmapStep(index)">
+              <div :class="['w-14 h-14 rounded-full flex items-center justify-center shadow-lg mb-4 border-4 border-white transition-all duration-300 group-hover:scale-110', node.active ? 'bg-primary text-white scale-110 ring-4 ring-primary/20' : 'bg-surface-container-highest text-on-surface group-hover:bg-primary-container group-hover:text-white']">
+                <span class="material-symbols-outlined text-2xl">{{ node.icon }}</span>
               </div>
-              <h4 class="font-bold text-sm">{{ node.title }}</h4>
+              <h4 :class="['font-bold text-sm transition-colors', node.active ? 'text-primary' : 'text-on-surface']">{{ node.title }}</h4>
               <p class="text-[10px] text-on-surface-variant mt-1 uppercase">{{ node.time }}</p>
-              <div :class="['mt-4 px-3 py-1 bg-white/50 rounded-full text-[9px] font-bold', node.active ? 'text-primary' : 'text-on-surface-variant']">{{ node.status }}</div>
+              <div :class="['mt-4 px-3 py-1 rounded-full text-[9px] font-bold transition-all', node.active ? 'bg-primary text-white' : 'bg-surface-container-highest text-on-surface-variant group-hover:bg-primary-container/20']">{{ node.status }}</div>
             </div>
           </div>
         </div>
@@ -389,6 +420,8 @@ const profileDetail = ref<profileApi.UserProfileDetail | null>(null)
 const dashboardSummary = ref<dashboardApi.DashboardSummary | null>(null)
 const dashboardRoadmap = ref<dashboardApi.DashboardRoadmap | null>(null)
 
+const roadmapOriginalIcons = ref<Record<string, string>>({})
+
 const editOpen = ref(false)
 const editName = ref('')
 const editAvatar = ref('')
@@ -431,6 +464,49 @@ const matchSummaryText = computed(() => {
 const actions = computed(() => dashboardSummary.value?.actions ?? [])
 const marketTrends = computed(() => dashboardSummary.value?.market_trends ?? [])
 const roadmap = computed(() => dashboardRoadmap.value?.steps ?? [])
+
+function stepKey(step: dashboardApi.DashboardRoadmapStep, index: number): string {
+  if (typeof step.job_id === 'number') return `job_${step.job_id}`
+  const title = (step.title || '').trim()
+  if (title) return `title_${title}`
+  return `idx_${index}`
+}
+
+function ensureOriginalIcons(steps: dashboardApi.DashboardRoadmapStep[]) {
+  const map = { ...roadmapOriginalIcons.value }
+  steps.forEach((s, i) => {
+    const k = stepKey(s, i)
+    if (!map[k] && s.icon) {
+      map[k] = s.icon
+    }
+  })
+  roadmapOriginalIcons.value = map
+}
+
+const roadmapView = computed(() => {
+  const steps = dashboardRoadmap.value?.steps ?? []
+  const current = dashboardRoadmap.value?.current_step_index
+  const currentIndex = typeof current === 'number' && Number.isFinite(current) ? current : -1
+
+  return steps.map((s, i) => {
+    const k = stepKey(s, i)
+    const originalIcon = roadmapOriginalIcons.value[k] || s.icon || 'flag'
+    const icon = currentIndex >= 0 && i < currentIndex ? 'check' : originalIcon
+    return {
+      ...s,
+      icon,
+      active: i === currentIndex,
+    }
+  })
+})
+
+const actionDialogOpen = ref(false)
+const selectedAction = ref<dashboardApi.DashboardAction | null>(null)
+
+const selectedActionText = computed(() => {
+  const d = (selectedAction.value?.desc || '').trim()
+  return d || '暂无详细说明'
+})
 
 function formatGrowth(growth: number | undefined) {
   const n = typeof growth === 'number' && Number.isFinite(growth) ? growth : 0
@@ -496,7 +572,11 @@ async function loadDashboardRoadmap() {
       dashboardRoadmap.value = null
       return
     }
-    dashboardRoadmap.value = r.data ?? null
+    const data = r.data ?? null
+    if (data?.steps) {
+      ensureOriginalIcons(data.steps)
+    }
+    dashboardRoadmap.value = data
   } catch (e) {
     roadmapError.value = e instanceof Error ? e.message : '获取职业进化地图失败'
     dashboardRoadmap.value = null
@@ -529,25 +609,36 @@ async function onReload() {
 }
 
 async function onSelectRoadmapStep(index: number) {
-  if (loadingRoadmap.value) return
+  console.log('Roadmap step clicked:', index)
+  if (loadingRoadmap.value) {
+    console.warn('Roadmap is already loading, skipping click')
+    return
+  }
   const steps = dashboardRoadmap.value?.steps
-  if (!steps || index < 0 || index >= steps.length) return
+  if (!steps || index < 0 || index >= steps.length) {
+    console.error('Invalid step index or steps data:', { index, steps })
+    return
+  }
 
   loadingRoadmap.value = true
   roadmapError.value = null
   try {
+    console.log('Updating current step via API:', index)
     const r = await dashboardApi.updateDashboardCurrentStep({ current_step_index: index })
+    console.log('API response:', r)
     if (!isApiSuccess(r.code)) {
       roadmapError.value = r.msg || '更新当前阶段失败'
       return
     }
     const updatedSteps = r.data ?? []
+    ensureOriginalIcons(updatedSteps)
     dashboardRoadmap.value = {
       ...(dashboardRoadmap.value || {}),
       current_step_index: index,
       steps: updatedSteps,
     }
   } catch (e) {
+    console.error('Error updating roadmap step:', e)
     roadmapError.value = e instanceof Error ? e.message : '更新当前阶段失败'
   } finally {
     loadingRoadmap.value = false
@@ -555,9 +646,13 @@ async function onSelectRoadmapStep(index: number) {
 }
 
 function onActionClick(item: dashboardApi.DashboardAction) {
-  const link = (item?.link || '').trim()
-  if (!link) return
-  void router.push(link)
+  selectedAction.value = item ?? null
+  actionDialogOpen.value = true
+}
+
+function closeActionDialog() {
+  actionDialogOpen.value = false
+  selectedAction.value = null
 }
 
 function openEdit() {

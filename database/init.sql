@@ -9,6 +9,7 @@ SET search_path TO ai_career_plan, public;
 -- =============================================================================
 -- 清理旧表（按依赖关系倒序删除）
 -- =============================================================================
+DROP TABLE IF EXISTS ai_career_plan.career_reports CASCADE;
 DROP TABLE IF EXISTS ai_career_plan.user_roadmap_steps CASCADE;
 DROP TABLE IF EXISTS ai_career_plan.user_career_data CASCADE;
 DROP TABLE IF EXISTS ai_career_plan.student_capability_profile CASCADE;
@@ -249,6 +250,50 @@ CREATE TABLE ai_career_plan.user_career_data (
 );
 
 -- =============================================================================
+-- 15. career_reports 表（职业生涯发展报告表 - Reports 模块）
+-- =============================================================================
+CREATE TABLE ai_career_plan.career_reports (
+    id BIGSERIAL PRIMARY KEY,
+    report_no VARCHAR(50) NOT NULL UNIQUE,
+    user_id BIGINT NOT NULL,
+    student_capability_id BIGINT,
+    target_job_profile_id BIGINT,
+    match_score INT,
+    match_details JSONB DEFAULT '{}',
+    self_discovery JSONB DEFAULT '{}',
+    target_job JSONB DEFAULT '{}',
+    development_path JSONB DEFAULT '{}',
+    action_plan JSONB DEFAULT '{}',
+    ai_suggestions TEXT,
+    status VARCHAR(20) DEFAULT 'DRAFT',
+    is_editable BOOLEAN DEFAULT TRUE,
+    pdf_file_path VARCHAR(500),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE ai_career_plan.career_reports IS '职业生涯发展报告表';
+COMMENT ON COLUMN ai_career_plan.career_reports.id IS '主键';
+COMMENT ON COLUMN ai_career_plan.career_reports.report_no IS '报告编号（唯一）';
+COMMENT ON COLUMN ai_career_plan.career_reports.user_id IS '用户 ID';
+COMMENT ON COLUMN ai_career_plan.career_reports.student_capability_id IS '关联学生能力画像 ID';
+COMMENT ON COLUMN ai_career_plan.career_reports.target_job_profile_id IS '目标岗位画像 ID';
+COMMENT ON COLUMN ai_career_plan.career_reports.match_score IS '人岗匹配总分 (0-100)';
+COMMENT ON COLUMN ai_career_plan.career_reports.match_details IS '匹配详情（各维度得分）';
+COMMENT ON COLUMN ai_career_plan.career_reports.self_discovery IS '自我认知模块内容';
+COMMENT ON COLUMN ai_career_plan.career_reports.target_job IS '职业目标设定';
+COMMENT ON COLUMN ai_career_plan.career_reports.development_path IS '职业发展路径';
+COMMENT ON COLUMN ai_career_plan.career_reports.action_plan IS '行动计划';
+COMMENT ON COLUMN ai_career_plan.career_reports.ai_suggestions IS 'AI 建议';
+COMMENT ON COLUMN ai_career_plan.career_reports.status IS '状态：DRAFT/COMPLETED/ARCHIVED';
+COMMENT ON COLUMN ai_career_plan.career_reports.is_editable IS '是否允许编辑';
+COMMENT ON COLUMN ai_career_plan.career_reports.pdf_file_path IS '生成 PDF 的 OSS 路径';
+
+CREATE INDEX idx_career_reports_user_id ON ai_career_plan.career_reports(user_id);
+CREATE INDEX idx_career_reports_report_no ON ai_career_plan.career_reports(report_no);
+CREATE INDEX idx_career_reports_status ON ai_career_plan.career_reports(status);
+
+-- =============================================================================
 -- 14. user_roadmap_steps 表（用户职业发展路径表 - Dashboard/Roadmap 模块）
 -- =============================================================================
 CREATE TABLE ai_career_plan.user_roadmap_steps (
@@ -485,7 +530,8 @@ users (用户表)
     ├── (1:N) → goal (目标表)
     ├── (1:N) → goal_milestone (里程碑表)
     ├── (1:N) → user_career_data (职业数据表)
-    └── (1:N) → user_roadmap_steps (职业发展路径表)
+    ├── (1:N) → user_roadmap_steps (职业发展路径表)
+    └── (1:N) → career_reports (职业生涯发展报告表)
 
 user_vector_store (向量存储表)
     └── (1:1) → resume_analysis_result (简历分析结果表)

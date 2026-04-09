@@ -46,5 +46,15 @@ public class CommonController {
         }
     }
 
+    /**
+     * 从 OSS 下载文件
+     * @param fileUrl 文件 URL
+     * @return 文件字节数组
+     */
+    public byte[] download(String fileUrl) {
+        log.info("从 OSS 下载文件: {}", fileUrl);
+        return aliOssUtil.download(fileUrl);
+    }
+
 
 }

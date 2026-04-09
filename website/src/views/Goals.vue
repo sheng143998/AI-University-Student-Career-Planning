@@ -521,7 +521,9 @@ async function loadOverview() {
   try {
     const result = await getGoalsOverview()
     if (isApiSuccess(result.code)) {
-      overview.value = result.data
+      if (result.data) {
+        overview.value = result.data
+      }
     } else {
       console.error('获取目标总览失败:', result.msg)
     }
@@ -608,6 +610,11 @@ async function submitCreateGoal() {
     const goalResult = await createGoal(goalBody)
     if (!isApiSuccess(goalResult.code)) {
       alert(goalResult.msg || '创建目标失败')
+      return
+    }
+
+    if (!goalResult.data) {
+      alert('创建目标失败')
       return
     }
 

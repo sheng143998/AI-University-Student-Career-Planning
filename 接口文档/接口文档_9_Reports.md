@@ -21,11 +21,11 @@
 | match_score | INT | 人岗匹配总分 (0-100) |
 | match_details | JSONB | 匹配详情（各维度得分） |
 | self_discovery | JSONB | 自我认知模块内容 |
-| career_goal | JSONB | 职业目标设定 |
-| development_path | JSONB | 职业发展路径 |
-| action_plan | JSONB | 行动计划 |
-| ai_suggestions | TEXT | AI 建议 |
-| status | VARCHAR(20) | 状态：DRAFT/COMPLETED/ARCHIVED |
+| target_job | JSONB | 职业目标设定(从user_career_job中获取target_job) |
+| development_path | JSONB | 职业发展路径（从user_career_date中获取用户更新时间距离当前时间最近的列，然后获取target_job字段，然后再从job表中获取job_category_name与target_job相同，但是job_level不同的，（由INTERNSHIP -> JUNIOR -> MID -> SENIOR）(如果存在的话） |
+| action_plan | JSONB | 行动计划(从goal表中获取) |
+| ai_suggestions | TEXT | AI 建议(从resume_analysis_result表中suggestions字段获取即可) |
+| status | VARCHAR(20) | 状态：DRAFT/PROCESSING/COMPLETED/ARCHIVED/FAILED |
 | is_editable | BOOLEAN | 是否允许编辑 |
 | pdf_file_path | VARCHAR(500) | 生成 PDF 的 OSS 路径 |
 | created_at | DATETIME | 创建时间 |
@@ -204,9 +204,11 @@
 | 接口名 | 方法 | 路径 | 说明 |
 | :--- | :--- | :--- | :--- |
 | 生成职业报告 | POST | `/api/reports/generate` | 异步生成报告 |
-| 获取最新报告 | GET | `/api/reports/latest` | 报告页默认 |
+| 获取最新报告 | GET | `/api/reports/latest` | 获取用户最新报告概览 |
+| 获取报告列表 | GET | `/api/reports` | 获取用户历史报告列表（默认最近 20 条） |
 | 获取报告详情 | GET | `/api/reports/{id}` | 按 id 获取 |
 | 更新报告内容 | PUT | `/api/reports/{id}` | 编辑报告内容 |
+| 重新生成报告 | POST | `/api/reports/{id}/regenerate` | 基于既有报告参数重新生成（异步） |
 | 下载报告 PDF | GET | `/api/reports/{id}/download` | 二进制流 |
 | 删除报告 | DELETE | `/api/reports/{id}` | 删除报告 |
 
@@ -248,6 +250,7 @@
 - 报告生成为异步过程，前端需轮询 `/api/reports/{id}` 获取状态
 - 预计生成时间约 60 秒
 - 生成完成后状态变为 `COMPLETED`
+- 若生成失败，推荐后端将 `status` 置为 `FAILED` 并返回失败原因（或使用 `4xx/5xx` 直接返回错误）
 
 ---
 
@@ -273,6 +276,40 @@
   }
 }
 ```
+
+---
+
+### 9.2.1 获取报告列表
+
+- **请求方法**: `GET`
+- **请求路径**: `/api/reports`
+- **鉴权**: 需要
+- **Query 参数**:
+  - `limit`：可选，默认 `20`
+  - `status`：可选，按状态过滤（`DRAFT`/`PROCESSING`/`COMPLETED`/`ARCHIVED`/`FAILED`）
+- **响应示例**:
+```json
+{
+  "code": 200,
+  "msg": "success",
+  "data": {
+    "items": [
+      {
+        "id": 1,
+        "title": "职业生涯发展报告",
+        "status": "COMPLETED",
+        "match_score": 85,
+        "target_job": "UI/视觉设计师",
+        "generated_at": "2026-03-30T10:30:00+08:00"
+      }
+    ]
+  }
+}
+```
+
+**说明**：
+- 默认返回最近 `limit` 条报告（按创建时间倒序）
+- 列表用于前端历史切换，不返回完整 `sections`
 
 ---
 
@@ -311,7 +348,7 @@
         "key": "self_discovery",
         "title": "自我认知",
         "content": {
-          "capability_summary": "你具备扎实的专业技能和较强的学习能力，在创新和沟通方面表现突出...",
+          "capability_summary": "你具备扎实的专业技能和较强的学习能力...",
           "radar_chart": {
             "professional_skill": 85,
             "certificate": 70,
@@ -471,6 +508,42 @@
 
 ---
 
+### 9.3.1 重新生成报告
+
+- **请求方法**: `POST`
+- **请求路径**: `/api/reports/{id}/regenerate`
+- **鉴权**: 需要
+- **请求体**（可选覆盖参数，不传则沿用原报告生成参数/默认策略）:
+```json
+{
+  "target_job_profile_id": 1001,
+  "career_preference": {
+    "preferred_city": "深圳",
+    "expected_salary": "15-25k",
+    "career_direction": "技术路线"
+  }
+}
+```
+- **响应示例（异步）**:
+```json
+{
+  "code": 200,
+  "msg": "报告生成中，请稍后查看",
+  "data": {
+    "report_id": "rpt_20260330_002",
+    "report_no": "CR202603300002",
+    "status": "PROCESSING",
+    "estimated_time": 60
+  }
+}
+```
+
+**说明**：
+- 与 `POST /api/reports/generate` 一样为异步过程，前端轮询 `GET /api/reports/{id}`
+- 推荐用于“重新生成/优化生成”入口
+
+---
+
 ### 9.4 更新报告内容
 
 - **请求方法**: `PUT`
@@ -516,8 +589,9 @@
 
 **说明**：
 - 支持部分更新，仅传递需要修改的字段
-- 可修改 `career_goal`、`development_path`、`action_plan` 等内容
+- 可修改 `target_job`、`development_path`、`action_plan` 等内容
 - `self_discovery` 和 `match_analysis` 基于 AI 分析结果，不支持修改
+- 当 `is_editable=false` 时，推荐返回 `403` 或 `409`
 
 ---
 
@@ -580,9 +654,11 @@ Reports-AI 服务：
 | 接口编号 | 接口名 | 方法 | 路径 | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
 | 9.1 | 生成职业报告 | POST | /api/reports/generate | 异步生成职业生涯发展报告 |
+| 9.2.1 | 获取报告列表 | GET | /api/reports | 获取用户历史报告列表（默认最近 20 条） |
 | 9.2 | 获取最新报告 | GET | /api/reports/latest | 获取用户最新报告概览 |
 | 9.3 | 获取报告详情 | GET | /api/reports/{id} | 获取报告完整内容（含 5 个模块） |
 | 9.4 | 更新报告内容 | PUT | /api/reports/{id} | 编辑报告内容（支持手动调整） |
+| 9.3.1 | 重新生成报告 | POST | /api/reports/{id}/regenerate | 基于既有报告参数重新生成（异步） |
 | 9.5 | 下载职业报告 PDF | GET | /api/reports/{id}/download | 下载 PDF 格式报告 |
 | 9.6 | 删除报告 | DELETE | /api/reports/{id} | 删除报告记录 |
 

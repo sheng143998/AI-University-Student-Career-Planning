@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.itsheng.service.mapper.CareerReportMapper">
+
+    <resultMap id="CareerReportMap" type="com.itsheng.pojo.entity.CareerReport">
+        <id column="id" property="id"/>
+        <result column="report_no" property="reportNo"/>
+        <result column="user_id" property="userId"/>
+        <result column="student_capability_id" property="studentCapabilityId"/>
+        <result column="target_job_profile_id" property="targetJobProfileId"/>
+        <result column="match_score" property="matchScore"/>
+        <result column="match_details" property="matchDetails"/>
+        <result column="self_discovery" property="selfDiscovery"/>
+        <result column="target_job" property="targetJob"/>
+        <result column="development_path" property="developmentPath"/>
+        <result column="action_plan" property="actionPlan"/>
+        <result column="ai_suggestions" property="aiSuggestions"/>
+        <result column="status" property="status"/>
+        <result column="is_editable" property="isEditable"/>
+        <result column="pdf_file_path" property="pdfFilePath"/>
+        <result column="created_at" property="createdAt" javaType="java.time.LocalDateTime"/>
+        <result column="updated_at" property="updatedAt" javaType="java.time.LocalDateTime"/>
+    </resultMap>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO ai_career_plan.career_reports (
+            report_no, user_id, student_capability_id, target_job_profile_id,
+            match_score, match_details, self_discovery, target_job,
+            development_path, action_plan, ai_suggestions,
+            status, is_editable
+        ) VALUES (
+            #{reportNo}, #{userId}, #{studentCapabilityId}, #{targetJobProfileId},
+            #{matchScore}, #{matchDetails}::jsonb, #{selfDiscovery}::jsonb, #{targetJob},
+            #{developmentPath}::jsonb, #{actionPlan}::jsonb, #{aiSuggestions},
+            #{status}, #{isEditable}
+        )
+    </insert>
+
+    <select id="selectById" resultMap="CareerReportMap">
+        SELECT id, report_no, user_id, student_capability_id, target_job_profile_id,
+               match_score, match_details, self_discovery, target_job,
+               development_path, action_plan, ai_suggestions,
+               status, is_editable, pdf_file_path,
+               created_at::timestamp, updated_at::timestamp
+        FROM ai_career_plan.career_reports
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectLatestByUserId" resultMap="CareerReportMap">
+        SELECT id, report_no, user_id, student_capability_id, target_job_profile_id,
+               match_score, match_details, self_discovery, target_job,
+               development_path, action_plan, ai_suggestions,
+               status, is_editable, pdf_file_path,
+               created_at::timestamp, updated_at::timestamp
+        FROM ai_career_plan.career_reports
+        WHERE user_id = #{userId}
+        ORDER BY created_at DESC
+        LIMIT 1
+    </select>
+
+    <select id="selectByUserId" resultMap="CareerReportMap">
+        SELECT id, report_no, user_id, student_capability_id, target_job_profile_id,
+               match_score, match_details, self_discovery, target_job,
+               development_path, action_plan, ai_suggestions,
+               status, is_editable, pdf_file_path,
+               created_at::timestamp, updated_at::timestamp
+        FROM ai_career_plan.career_reports
+        WHERE user_id = #{userId}
+        ORDER BY created_at DESC
+    </select>
+
+    <update id="update">
+        UPDATE ai_career_plan.career_reports
+        <set>
+            <if test="matchScore != null">match_score = #{matchScore},</if>
+            <if test="matchDetails != null">match_details = #{matchDetails}::jsonb,</if>
+            <if test="selfDiscovery != null">self_discovery = #{selfDiscovery}::jsonb,</if>
+            <if test="targetJob != null">target_job = #{targetJob},</if>
+            <if test="developmentPath != null">development_path = #{developmentPath}::jsonb,</if>
+            <if test="actionPlan != null">action_plan = #{actionPlan}::jsonb,</if>
+            <if test="aiSuggestions != null">ai_suggestions = #{aiSuggestions},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="isEditable != null">is_editable = #{isEditable},</if>
+            <if test="pdfFilePath != null">pdf_file_path = #{pdfFilePath},</if>
+            updated_at = NOW()
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM ai_career_plan.career_reports
+        WHERE id = #{id}
+    </delete>
+
+</mapper>
