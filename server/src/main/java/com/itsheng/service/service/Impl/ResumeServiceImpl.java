@@ -126,8 +126,14 @@ public class ResumeServiceImpl implements ResumeService {
             byte[] fileBytes = file.getBytes();
             List<Document> documents = parseResume(fileBytes, fileType, userId, fileUrl);
 
-            // 将简历内容添加到向量存储（每页作为一个独立的 Document）
-            pgVectorStore.add(documents);
+            // 将简历内容分批添加到向量存储（通义千问限制 batch size 最大为 10）
+            int batchSize = 10;
+            int totalDocuments = documents.size();
+            for (int i = 0; i < totalDocuments; i += batchSize) {
+                List<Document> batch = documents.subList(i, Math.min(i + batchSize, totalDocuments));
+                pgVectorStore.add(batch);
+                log.info("已添加第 {} 批文档向量 ({}-{} / {})", (i / batchSize) + 1, i + 1, Math.min(i + batchSize, totalDocuments), totalDocuments);
+            }
             log.info("简历向量已成功添加到向量存储，共{}个文档片段", documents.size());
 
             // 使用 Mapper 批量更新 user_id 和 resume_file_path 到数据库
