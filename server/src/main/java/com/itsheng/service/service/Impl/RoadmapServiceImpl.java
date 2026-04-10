@@ -17,6 +17,7 @@ import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -39,6 +40,9 @@ public class RoadmapServiceImpl implements RoadmapService {
     private final UserProfileMapper userProfileMapper;
     private final ResumeMapper resumeMapper;
     private final ChatClient chatClient;
+    private final StringRedisTemplate redisTemplate;
+
+    private static final String REDIS_KEY_PREFIX = "roadmap:user:current_job:";
 
     /**
      * 级别排序映射
@@ -487,26 +491,30 @@ public class RoadmapServiceImpl implements RoadmapService {
 
         // 1. 获取用户简历分析结果
         ResumeParsedData resumeData = getUserResumeData(userId);
-        String currentJob = resumeData != null ? resumeData.getCurrentRole() : "";
         List<String> userSkills = resumeData != null ? resumeData.getSkills() : new ArrayList<>();
 
-        if (currentJob == null || currentJob.isEmpty()) {
-            currentJob = "未设置当前岗位";
+        // 2. 优先使用 Redis 中保存的岗位，如果没有则使用简历中的岗位
+        String effectiveCurrentJob = getUserCurrentJob();
+        if (effectiveCurrentJob == null || effectiveCurrentJob.isEmpty()) {
+            effectiveCurrentJob = resumeData != null ? resumeData.getCurrentRole() : "";
+        }
+        if (effectiveCurrentJob == null || effectiveCurrentJob.isEmpty()) {
+            effectiveCurrentJob = "未设置当前岗位";
         }
 
-        // 2. 获取所有岗位数据用于匹配
+        // 3. 获取所有岗位数据用于匹配
         List<JobCategory> allJobs = jobCategoryMapper.selectAll();
 
-        // 3. 找到与用户当前岗位最匹配的垂直晋升路径
+        // 4. 找到与用户当前岗位最匹配的垂直晋升路径
         CareerPathRecommendationVO.VerticalPathRecommendationVO verticalPath =
-                findBestMatchingVerticalPath(currentJob, userSkills, allJobs);
+                findBestMatchingVerticalPath(effectiveCurrentJob, userSkills, allJobs);
 
-        // 4. 调用大模型RAG生成横向换岗推荐（不少于2条）
+        // 5. 调用大模型RAG生成横向换岗推荐（10条）
         List<CareerPathRecommendationVO.LateralPathRecommendationVO> lateralPaths =
-                generateLateralPathRecommendationsRAG(currentJob, userSkills, resumeData, allJobs);
+                generateLateralPathRecommendationsRAG(effectiveCurrentJob, userSkills, resumeData, allJobs);
 
         return CareerPathRecommendationVO.builder()
-                .currentJob(currentJob)
+                .currentJob(effectiveCurrentJob)
                 .verticalPath(verticalPath)
                 .lateralPaths(lateralPaths)
                 .generatedAt(LocalDateTime.now().format(DateTimeFormatter.ISO_DATE_TIME))
@@ -517,6 +525,32 @@ public class RoadmapServiceImpl implements RoadmapService {
     @CacheEvict(cacheNames = "roadmap:recommendations:personalized", key = "T(com.itsheng.common.context.BaseContext).getUserId()")
     public void clearPersonalizedRecommendationsCache() {
         log.info("Clearing personalized recommendations cache for user: {}", BaseContext.getUserId());
+    }
+
+    @Override
+    public void saveUserCurrentJob(String currentJob) {
+        Long userId = BaseContext.getUserId();
+        String redisKey = REDIS_KEY_PREFIX + userId;
+        try {
+            redisTemplate.opsForValue().set(redisKey, currentJob);
+            log.info("Saved user {} current job to Redis: {}", userId, currentJob);
+        } catch (Exception e) {
+            log.error("Failed to save user current job to Redis: {}", e.getMessage());
+        }
+    }
+
+    @Override
+    public String getUserCurrentJob() {
+        Long userId = BaseContext.getUserId();
+        String redisKey = REDIS_KEY_PREFIX + userId;
+        try {
+            String currentJob = redisTemplate.opsForValue().get(redisKey);
+            log.info("Retrieved user {} current job from Redis: {}", userId, currentJob);
+            return currentJob;
+        } catch (Exception e) {
+            log.error("Failed to get user current job from Redis: {}", e.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -557,6 +591,7 @@ public class RoadmapServiceImpl implements RoadmapService {
 
             for (JobCategory job : categoryJobs) {
                 BigDecimal similarity = calculateJobSimilarity(currentJob, userSkills, job);
+                log.info("岗位 {} 与 {} 的相似度: {}", job.getJobCategoryName(), currentJob, similarity);
                 if (similarity.compareTo(maxSimilarity) > 0) {
                     maxSimilarity = similarity;
                     bestMatch = job;
@@ -565,6 +600,7 @@ public class RoadmapServiceImpl implements RoadmapService {
 
             similarityScores.put(categoryCode, maxSimilarity);
             bestMatchJobByCategory.put(categoryCode, bestMatch);
+            log.info("类别 {} 的最高相似度: {}, 匹配岗位: {}", categoryCode, maxSimilarity, bestMatch != null ? bestMatch.getJobCategoryName() : "null");
         }
 
         // Find category with highest similarity - always use the best match, no random fallback
@@ -572,6 +608,8 @@ public class RoadmapServiceImpl implements RoadmapService {
                 .max(Map.Entry.comparingByValue())
                 .map(Map.Entry::getKey)
                 .orElse("");
+
+        log.info("最终选择的类别: {}, 相似度: {}", bestCategory, similarityScores.get(bestCategory));
 
         if (bestCategory.isEmpty() && !jobsByCategory.isEmpty()) {
             // Only fallback if no categories at all (should not happen)
@@ -640,31 +678,36 @@ public class RoadmapServiceImpl implements RoadmapService {
     private BigDecimal calculateJobSimilarity(String currentJob, List<String> userSkills, JobCategory job) {
         double score = 0.0;
 
-        // 1. Name matching (weight 0.6)
+        // 1. Name matching (weight 0.7)
         String jobName = job.getJobCategoryName().toLowerCase();
         String current = currentJob.toLowerCase();
 
         // Exact or contains match
         if (jobName.equals(current) || jobName.contains(current) || current.contains(jobName)) {
-            score += 0.6;
+            score += 0.7;
         } else {
             // Keyword matching - extract important keywords
             List<String> currentKeywords = extractJobKeywords(current);
             List<String> jobKeywords = extractJobKeywords(jobName);
 
-            // Calculate keyword overlap
+            // Calculate keyword overlap - require at least one meaningful keyword match
             long matchedKeywords = currentKeywords.stream()
                     .filter(kw -> jobKeywords.stream()
-                            .anyMatch(jkw -> jkw.contains(kw) || kw.contains(jkw)))
+                            .anyMatch(jkw -> jkw.equals(kw) || jkw.contains(kw) || kw.contains(jkw)))
                     .count();
 
             if (!currentKeywords.isEmpty()) {
-                double keywordScore = (double) matchedKeywords / currentKeywords.size() * 0.5;
+                double keywordScore = (double) matchedKeywords / currentKeywords.size() * 0.6;
                 score += keywordScore;
+            }
+
+            // 如果没有匹配到任何有意义的关键词，大幅降低分数
+            if (matchedKeywords == 0) {
+                score = score * 0.05; // 降权到5%
             }
         }
 
-        // 2. Skill matching (weight 0.4)
+        // 2. Skill matching (weight 0.3)
         List<String> jobSkills = parseJsonToList(job.getRequiredSkills());
         if (userSkills != null && !userSkills.isEmpty() && !jobSkills.isEmpty()) {
             long matchedSkills = userSkills.stream()
@@ -672,7 +715,7 @@ public class RoadmapServiceImpl implements RoadmapService {
                             .anyMatch(jobSkill -> jobSkill.toLowerCase().contains(userSkill.toLowerCase())
                                     || userSkill.toLowerCase().contains(jobSkill.toLowerCase())))
                     .count();
-            double skillScore = (double) matchedSkills / jobSkills.size() * 0.4;
+            double skillScore = (double) matchedSkills / jobSkills.size() * 0.3;
             score += skillScore;
         }
 
@@ -690,10 +733,16 @@ public class RoadmapServiceImpl implements RoadmapService {
                 "spring", "django", "node", "express",
                 "data", "ai", "ml", "machine learning", "algorithm",
                 "devops", "cloud", "aws", "azure", "kubernetes",
-                "engineer", "developer", "programmer", "architect",
+                "semiconductor", "chip", "hardware", "embedded",
                 "manager", "director", "lead", "senior", "junior", "intern",
                 "analyst", "designer", "product", "operation", "marketing",
-                "test", "qa", "security", "database", "dba"
+                "test", "qa", "security", "database", "dba",
+                "前端", "后端", "全栈", "移动端", "安卓",
+                "数据", "人工智能", "机器学习", "算法",
+                "运维", "云", "半导体", "芯片", "硬件", "嵌入式",
+                "经理", "总监", "主管", "高级", "初级", "实习生",
+                "分析师", "设计师", "产品", "运营", "市场",
+                "测试", "安全", "数据库"
         );
 
         String lowerName = jobName.toLowerCase();
@@ -791,15 +840,15 @@ public class RoadmapServiceImpl implements RoadmapService {
                     resumeData != null && resumeData.getTargetRole() != null ? resumeData.getTargetRole() : "未设置");
 
             String systemPrompt = """
-                    你是一位资深的职业规划顾问。基于提供的职业数据库和用户画像，为用户推荐2-3条可行的横向换岗（转型）路径。
-                    
+                    你是一位资深的职业规划顾问。基于提供的职业数据库和用户画像，为用户推荐10条可行的横向换岗（转型）路径。
+
                     要求：
                     1. 推荐的路径必须来自提供的职业数据库
                     2. 考虑用户当前技能与目标岗位的匹配度
                     3. 评估转型难度（1-5分，5分最难）
                     4. 列出需要补充的技能
                     5. 给出AI推荐理由
-                    
+
                     请严格按以下JSON格式返回，不要包含任何markdown标记：
                     {
                         "recommendations": [

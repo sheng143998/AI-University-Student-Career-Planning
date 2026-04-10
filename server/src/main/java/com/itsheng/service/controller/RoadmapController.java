@@ -17,6 +17,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
+
 /**
  * 职业地图控制器
  */
@@ -130,5 +132,28 @@ public class RoadmapController {
         log.info("Clearing personalized recommendations cache");
         roadmapService.clearPersonalizedRecommendationsCache();
         return Result.success("Cache cleared successfully");
+    }
+
+    /**
+     * 保存用户手动设置的当前岗位
+     */
+    @PostMapping("/user/current-job")
+    @Operation(summary = "保存当前岗位", description = "保存用户手动设置的当前岗位到 Redis")
+    public Result<String> saveUserCurrentJob(@RequestBody Map<String, String> request) {
+        String currentJob = request.get("currentJob");
+        log.info("保存用户当前岗位: {}", currentJob);
+        roadmapService.saveUserCurrentJob(currentJob);
+        return Result.success("当前岗位保存成功");
+    }
+
+    /**
+     * 获取用户手动设置的当前岗位
+     */
+    @GetMapping("/user/current-job")
+    @Operation(summary = "获取当前岗位", description = "获取用户手动设置的当前岗位")
+    public Result<String> getUserCurrentJob() {
+        String currentJob = roadmapService.getUserCurrentJob();
+        log.info("获取用户当前岗位: {}", currentJob);
+        return Result.success(currentJob);
     }
 }

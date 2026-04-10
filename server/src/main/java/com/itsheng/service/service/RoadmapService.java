@@ -71,6 +71,18 @@ public interface RoadmapService {
     void clearPersonalizedRecommendationsCache();
 
     /**
+     * 保存用户手动设置的当前岗位
+     * @param currentJob 当前岗位
+     */
+    void saveUserCurrentJob(String currentJob);
+
+    /**
+     * 获取用户手动设置的当前岗位
+     * @return 当前岗位，如果未设置则返回null
+     */
+    String getUserCurrentJob();
+
+    /**
      * Get vertical path by job name and level
      */
     JobVerticalPathDetailVO getVerticalPathByJobNameAndLevel(String jobName, String level);

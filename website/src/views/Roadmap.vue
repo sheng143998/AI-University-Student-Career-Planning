@@ -676,11 +676,89 @@
 
         </div>
 
-        <button @click="showRecommendations = !showRecommendations" class="p-2 hover:bg-surface-container-high rounded-lg transition-colors">
+        <div class="flex items-center gap-2">
 
-          <span class="material-symbols-outlined text-on-surface-variant">{{ showRecommendations ? 'visibility_off' : 'visibility' }}</span>
+          <button @click="showJobInput = !showJobInput" class="p-2 hover:bg-surface-container-high rounded-lg transition-colors" title="设置当前岗位">
 
-        </button>
+            <span class="material-symbols-outlined text-on-surface-variant">edit</span>
+
+          </button>
+
+          <button @click="showRecommendations = !showRecommendations" class="p-2 hover:bg-surface-container-high rounded-lg transition-colors">
+
+            <span class="material-symbols-outlined text-on-surface-variant">{{ showRecommendations ? 'visibility_off' : 'visibility' }}</span>
+
+          </button>
+
+        </div>
+
+      </div>
+
+      <!-- 设置当前岗位输入框 -->
+
+      <div v-if="showJobInput" class="bg-surface-container-highest p-4 rounded-xl space-y-3">
+
+        <div class="flex items-center gap-3">
+
+          <input
+
+            v-model="manualCurrentJob"
+
+            @keyup.enter="setCurrentJob"
+
+            class="flex-1 px-4 py-2 bg-surface border border-outline-variant rounded-lg text-sm outline-none focus:ring-2 focus:ring-primary"
+
+            placeholder="请输入您的当前岗位，例如：前端工程师"
+
+            type="text"
+
+          />
+
+          <button
+
+            @click="setCurrentJob"
+
+            :disabled="!manualCurrentJob.trim() || isSettingJob"
+
+            class="px-4 py-2 bg-primary text-white rounded-lg font-semibold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+
+          >
+
+            {{ isSettingJob ? '生成中...' : '确定' }}
+
+          </button>
+
+          <button
+
+            @click="cancelSetJob"
+
+            :disabled="isSettingJob"
+
+            class="px-4 py-2 bg-surface-container-high text-on-surface rounded-lg font-semibold text-sm hover:bg-surface-container-highest transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+
+          >
+
+            取消
+
+          </button>
+
+        </div>
+
+        <!-- 进度条 -->
+        <div v-if="isSettingJob" class="mt-3">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs text-on-surface-variant">正在重新生成职业推荐...</span>
+            <span class="text-xs font-semibold text-primary">{{ Math.round(settingJobProgress) }}%</span>
+          </div>
+          <div class="h-2 bg-surface-container-highest rounded-full overflow-hidden">
+            <div
+              class="h-full bg-primary transition-all duration-300 ease-out"
+              :style="{ width: settingJobProgress + '%' }"
+            ></div>
+          </div>
+        </div>
+
+        <p class="text-xs text-on-surface-variant">手动设置当前岗位后，系统将基于此岗位为您推荐职业路径</p>
 
       </div>
 
@@ -830,7 +908,7 @@
 
               <h3 class="text-lg font-bold text-on-surface">横向换岗推荐</h3>
 
-              <p class="text-xs text-on-surface-variant">AI 推荐的职业转型路径（至少2条）</p>
+              <p class="text-xs text-on-surface-variant">AI 推荐的职业转型路径（共 {{ recommendations.lateralPaths?.length || 0 }} 条）</p>
 
             </div>
 
@@ -842,7 +920,7 @@
 
             <div
 
-              v-for="(path, idx) in recommendations.lateralPaths"
+              v-for="(path, idx) in paginatedLateralPaths"
 
               :key="path.targetJobId"
 
@@ -934,7 +1012,41 @@
 
           </div>
 
+          <!-- 分页控件 -->
 
+          <div v-if="lateralPathTotalPages > 1" class="flex items-center justify-center gap-2 mt-4 pt-4 border-t border-outline-variant/20">
+
+            <button
+
+              @click="changeLateralPathPage(lateralPathPage - 1)"
+
+              :disabled="lateralPathPage === 1"
+
+              class="p-2 hover:bg-surface-container-high rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+
+            >
+
+              <span class="material-symbols-outlined text-on-surface-variant">chevron_left</span>
+
+            </button>
+
+            <span class="text-sm text-on-surface-variant">{{ lateralPathPage }} / {{ lateralPathTotalPages }}</span>
+
+            <button
+
+              @click="changeLateralPathPage(lateralPathPage + 1)"
+
+              :disabled="lateralPathPage === lateralPathTotalPages"
+
+              class="p-2 hover:bg-surface-container-high rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+
+            >
+
+              <span class="material-symbols-outlined text-on-surface-variant">chevron_right</span>
+
+            </button>
+
+          </div>
 
           <div v-else class="text-center py-8 text-on-surface-variant">
 
@@ -979,7 +1091,7 @@ const router = useRouter()
 
 import { getRoadmapGraph, getRoadmapNodeDetail, isApiSuccess, searchRoadmapNodes, type RoadmapGraph, type RoadmapNodeDetail, type RoadmapSearchItem } from '@/api/roadmap'
 
-import { getPersonalizedRecommendations, type CareerPathRecommendation, type PathNode } from '@/api/roadmapRecommendation'
+import { getPersonalizedRecommendations, clearPersonalizedRecommendationsCache, saveUserCurrentJob, getUserCurrentJob, type CareerPathRecommendation, type PathNode } from '@/api/roadmapRecommendation'
 
 
 
@@ -1138,6 +1250,16 @@ const recommendations = ref<CareerPathRecommendation | null>(null)
 const recommendationsLoading = ref(false)
 
 const showRecommendations = ref(true)
+
+// 手动设置当前岗位
+const manualCurrentJob = ref('')
+const showJobInput = ref(false)
+const settingJobProgress = ref(0)
+const isSettingJob = ref(false)
+
+// 换岗路径分页
+const lateralPathPage = ref(1)
+const lateralPathPageSize = ref(2)
 
 
 
@@ -2001,6 +2123,16 @@ onMounted(async () => {
 
   await loadGraph()
 
+  // 加载用户手动设置的当前岗位
+  try {
+    const res = await getUserCurrentJob()
+    if (isApiSuccess(res.code) && res.data) {
+      manualCurrentJob.value = res.data
+    }
+  } catch (e) {
+    console.error('[Roadmap] 获取保存的当前岗位失败:', e)
+  }
+
   await loadRecommendations()
 
 })
@@ -2040,6 +2172,114 @@ async function loadRecommendations() {
   } finally {
 
     recommendationsLoading.value = false
+
+  }
+
+}
+
+// 设置当前岗位并重新加载推荐
+
+async function setCurrentJob() {
+
+  if (!manualCurrentJob.value.trim()) {
+
+    return
+
+  }
+
+  lateralPathPage.value = 1 // 重置分页
+
+  isSettingJob.value = true
+  settingJobProgress.value = 0
+
+  // 进度条跳动动画
+  const progressInterval = setInterval(() => {
+    if (settingJobProgress.value < 90) {
+      settingJobProgress.value += Math.random() * 10
+      if (settingJobProgress.value > 90) {
+        settingJobProgress.value = 90
+      }
+    }
+  }, 200)
+
+  try {
+
+    // 保存当前岗位到 Redis
+    await saveUserCurrentJob(manualCurrentJob.value)
+
+    // 清空缓存
+    await clearPersonalizedRecommendationsCache()
+
+    await loadRecommendations()
+
+  } catch (e) {
+
+    console.error('[Roadmap] 设置岗位失败:', e)
+
+  } finally {
+
+    clearInterval(progressInterval)
+    settingJobProgress.value = 100
+
+    setTimeout(() => {
+      isSettingJob.value = false
+      settingJobProgress.value = 0
+      showJobInput.value = false
+    }, 500)
+
+  }
+
+}
+
+// 取消设置岗位
+
+function cancelSetJob() {
+
+  manualCurrentJob.value = ''
+
+  showJobInput.value = false
+
+}
+
+// 换岗路径分页计算
+
+const paginatedLateralPaths = computed(() => {
+
+  if (!recommendations.value || !recommendations.value.lateralPaths) {
+
+    return []
+
+  }
+
+  const start = (lateralPathPage.value - 1) * lateralPathPageSize.value
+
+  const end = start + lateralPathPageSize.value
+
+  return recommendations.value.lateralPaths.slice(start, end)
+
+})
+
+// 换岗路径总页数
+
+const lateralPathTotalPages = computed(() => {
+
+  if (!recommendations.value || !recommendations.value.lateralPaths) {
+
+    return 0
+
+  }
+
+  return Math.ceil(recommendations.value.lateralPaths.length / lateralPathPageSize.value)
+
+})
+
+// 换岗路径分页控制
+
+function changeLateralPathPage(page: number) {
+
+  if (page >= 1 && page <= lateralPathTotalPages.value) {
+
+    lateralPathPage.value = page
 
   }
 
