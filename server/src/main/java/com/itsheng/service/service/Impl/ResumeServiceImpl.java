@@ -94,10 +94,11 @@ public class ResumeServiceImpl implements ResumeService {
         MIME_TYPE_MAP.put("html", "text/html");
         MIME_TYPE_MAP.put("htm", "text/html");
         MIME_TYPE_MAP.put("txt", "text/plain");
+        MIME_TYPE_MAP.put("md", "text/plain; charset=UTF-8");
     }
 
     // 支持内联预览的文件类型
-    private static final Set<String> INLINE_PREVIEW_TYPES = Set.of("pdf", "html", "htm", "txt");
+    private static final Set<String> INLINE_PREVIEW_TYPES = Set.of("pdf", "html", "htm", "txt", "md");
 
     @Override
     @Transactional
@@ -948,7 +949,7 @@ public class ResumeServiceImpl implements ResumeService {
 
         String fileType = getFileExtension(originalFilename);
         if (!ResumeConstant.ALLOWED_FILE_TYPES.contains(fileType.toLowerCase())) {
-            throw new IllegalArgumentException("UNSUPPORTED_FILE_TYPE: 不支持的文件类型：" + fileType + "，请上传 PDF、DOCX、PPTX、HTML 或 TXT 格式文件");
+            throw new IllegalArgumentException("UNSUPPORTED_FILE_TYPE: 不支持的文件类型：" + fileType + "，请上传 PDF、DOCX、TXT 或 MD 格式文件");
         }
     }
 

@@ -17,8 +17,8 @@ import com.itsheng.service.mapper.ChatMessageMapper;
 import com.itsheng.service.mapper.UserProfileMapper;
 import com.itsheng.service.service.ChatService;
 import com.fasterxml.jackson.databind.JsonNode;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.cache.annotation.Cacheable;
@@ -30,25 +30,44 @@ import reactor.core.publisher.Flux;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 聊天服务实现类
  */
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class ChatServiceImpl implements ChatService {
 
     private final ChatConversationMapper conversationMapper;
     private final ChatMessageMapper messageMapper;
     private final UserProfileMapper userProfileMapper;
     private final ChatClient chatClient;
+    @Qualifier("resumeAnalysisChatClient")
+    private final ChatClient statelessChatClient;
     private final CommonController commonController;
     private final ObjectMapper objectMapper;
 
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final int DEFAULT_LIMIT = 20;
+
+    public ChatServiceImpl(ChatConversationMapper conversationMapper,
+                           ChatMessageMapper messageMapper,
+                           UserProfileMapper userProfileMapper,
+                           @Qualifier("chatClient") ChatClient chatClient,
+                           @Qualifier("resumeAnalysisChatClient") ChatClient statelessChatClient,
+                           CommonController commonController,
+                           ObjectMapper objectMapper) {
+        this.conversationMapper = conversationMapper;
+        this.messageMapper = messageMapper;
+        this.userProfileMapper = userProfileMapper;
+        this.chatClient = chatClient;
+        this.statelessChatClient = statelessChatClient;
+        this.commonController = commonController;
+        this.objectMapper = objectMapper;
+    }
 
     @Override
     @Transactional
@@ -112,6 +131,7 @@ public class ChatServiceImpl implements ChatService {
     @Transactional
     public Flux<String> sendMessage(ChatSendMessageDTO dto) {
         Long userId = BaseContext.getUserId();
+        log.info("sendMessage 接收到的参数: conversationId={}, resumeId={}, content={}", dto.getConversationId(), dto.getResumeId(), dto.getContent());
 
         // 验证会话归属
         ChatConversation conversation = conversationMapper.selectById(dto.getConversationId());
@@ -133,33 +153,44 @@ public class ChatServiceImpl implements ChatService {
         // 更新会话最后消息时间
         conversationMapper.updateLastMessageAt(dto.getConversationId(), now);
 
-        // 调用 AI 流式响应
+        // 调用 AI
         String chatId = String.valueOf(dto.getConversationId());
-        StringBuilder assistantContent = new StringBuilder();
+        Map<String, Object> toolContext = new HashMap<>();
+        toolContext.put("userId", userId);
+        if (dto.getResumeId() != null) {
+            toolContext.put("resumeId", dto.getResumeId());
+            log.info("sendMessage 传递 resumeId: {}", dto.getResumeId());
+        }
 
-        return chatClient.prompt()
+        // 使用非流式调用，避免 Spring AI 流式聚合器在工具调用时 toolName=null 的问题
+        // （流式模式下工具调用参数分片到达，MessageAggregator 聚合时 toolName 可能为 null）
+        String responseContent = chatClient.prompt()
                 .user(dto.getContent())
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, chatId))
-                .stream()
-                .content()
-                .doOnNext(chunk -> assistantContent.append(chunk))
-                .doOnComplete(() -> {
-                    // 流结束后保存 AI 响应
-                    ChatMessage assistantMessage = ChatMessage.builder()
-                            .conversationId(dto.getConversationId())
-                            .userId(userId)
-                            .role("assistant")
-                            .content(assistantContent.toString())
-                            .createTime(LocalDateTime.now())
-                            .build();
-                    messageMapper.insert(assistantMessage);
-                    conversationMapper.updateLastMessageAt(dto.getConversationId(), LocalDateTime.now());
-                    
-                    // 如果标题是默认的"新对话"，根据用户消息生成新标题
-                    if ("新对话".equals(conversation.getTitle())) {
-                        generateAndUpdateTitle(dto.getConversationId(), dto.getContent());
-                    }
-                });
+                .toolContext(toolContext)
+                .call()
+                .content();
+
+        String finalContent = responseContent != null ? responseContent : "";
+
+        // 保存 AI 响应
+        ChatMessage assistantMessage = ChatMessage.builder()
+                .conversationId(dto.getConversationId())
+                .userId(userId)
+                .role("assistant")
+                .content(finalContent)
+                .createTime(LocalDateTime.now())
+                .build();
+        messageMapper.insert(assistantMessage);
+        conversationMapper.updateLastMessageAt(dto.getConversationId(), LocalDateTime.now());
+
+        // 如果标题是默认的"新对话"，根据用户消息生成新标题
+        if ("新对话".equals(conversation.getTitle())) {
+            generateAndUpdateTitle(dto.getConversationId(), dto.getContent());
+        }
+
+        // 将完整响应拆分为字符逐个推送，模拟流式打字机效果
+        return Flux.fromArray(finalContent.split(""));
     }
     
     /**
@@ -168,7 +199,7 @@ public class ChatServiceImpl implements ChatService {
     private void generateAndUpdateTitle(Long conversationId, String userMessage) {
         try {
             String prompt = "请根据以下用户问题，生成一个简短的对话标题（不超过15个字，只返回标题文字，不要加引号或其他符号）：\n\n" + userMessage;
-            String title = chatClient.prompt()
+            String title = statelessChatClient.prompt()
                     .user(prompt)
                     .call()
                     .content();
@@ -229,7 +260,7 @@ public class ChatServiceImpl implements ChatService {
         String prompt = buildDailySuggestionsPrompt(parsedDataJson);
 
         try {
-            String aiResponse = chatClient.prompt()
+            String aiResponse = statelessChatClient.prompt()
                     .user(prompt)
                     .call()
                     .content();

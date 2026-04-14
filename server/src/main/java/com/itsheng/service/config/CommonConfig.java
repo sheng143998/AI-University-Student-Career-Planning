@@ -1,7 +1,9 @@
 package com.itsheng.service.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.itsheng.common.constant.SystemConstants;
+import com.itsheng.service.tool.CareerPlanningTools;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
@@ -43,7 +45,7 @@ public class CommonConfig implements AsyncConfigurer {
     }
 
     @Bean
-    public ChatClient chatClient(OpenAiChatModel model , ChatMemory chatMemory) {
+    public ChatClient chatClient(OpenAiChatModel model , ChatMemory chatMemory, CareerPlanningTools careerPlanningTools) {
         return ChatClient
                 .builder(model)
                 .defaultSystem("你是由 root 团队微调过的 AI 系统，用以帮助用户进行职业规划，你的名字是职引")
@@ -51,6 +53,7 @@ public class CommonConfig implements AsyncConfigurer {
                         new SimpleLoggerAdvisor(),
                         MessageChatMemoryAdvisor.builder(chatMemory).build()
                 )
+                .defaultTools(careerPlanningTools)
                 .build();
     }
 
@@ -83,7 +86,9 @@ public class CommonConfig implements AsyncConfigurer {
      */
     @Bean
     public ObjectMapper objectMapper() {
-        return new ObjectMapper();
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.registerModule(new JavaTimeModule());
+        return mapper;
     }
 
     /**

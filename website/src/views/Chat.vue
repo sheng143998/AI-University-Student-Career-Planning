@@ -344,17 +344,25 @@ function renderMarkdown(text: string): string {
   
   // 6. 斜体 *text*
   html = html.replace(/\*([^*]+)\*/g, '<em class="msg-em">$1</em>')
-  
-  // 7. 无序列表 - item
+
+  // 7. URL 自动转可点击链接（在列表之前，避免破坏已生成的标签）
+  // 匹配 https?:// 后的所有非空白字符，末尾去除标点
+  html = html.replace(/(https?:\/\/\S+)/g, (match) => {
+    const cleanUrl = match.replace(/[.,;:!?'")\]>]+$/, '')
+    const hrefUrl = cleanUrl.replace(/&amp;/g, '&')
+    return `<a href="${hrefUrl}" target="_blank" rel="noopener noreferrer" class="msg-link">${cleanUrl}</a>`
+  })
+
+  // 8. 无序列表 - item
   html = html.replace(/^- (.+)$/gm, '<li class="msg-li">$1</li>')
   // 包裹连续的 li
   html = html.replace(/(<li class="msg-li">.*<\/li>\n?)+/g, '<ul class="msg-ul">$&</ul>')
   
-  // 8. 有序列表 1. item
+  // 9. 有序列表 1. item
   html = html.replace(/^\d+\. (.+)$/gm, '<li class="msg-li-ol">$1</li>')
   html = html.replace(/(<li class="msg-li-ol">.*<\/li>\n?)+/g, '<ol class="msg-ol">$&</ol>')
   
-  // 9. 段落：连续非标签行包裹为 <p>
+  // 10. 段落：连续非标签行包裹为 <p>
   const lines = html.split('\n')
   const result: string[] = []
   let paragraph: string[] = []
@@ -579,7 +587,7 @@ async function send() {
   void nextTick(() => scrollToBottom())
 
   try {
-    const response = await sendMessage(conversationId, content)
+    const response = await sendMessage(conversationId, content, selectedResumeId.value ?? undefined)
     if (!response.body) {
       list[list.length - 1].content = '抱歉，发生了错误，请重试。'
       return
@@ -736,6 +744,16 @@ function formatTime(dateStr: string | null): string {
 .message-content :deep(.msg-em) {
   font-style: italic;
   color: theme('colors.on-surface-variant');
+}
+
+.message-content :deep(.msg-link) {
+  color: theme('colors.primary');
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+.message-content :deep(.msg-link:hover) {
+  color: theme('colors.on-primary-container');
 }
 
 .message-content :deep(.msg-ul),

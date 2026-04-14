@@ -25,7 +25,6 @@
             <if test="resumeContent != null">content = #{resumeContent},</if>
             <if test="resumeFilePath != null">resume_file_path = #{resumeFilePath},</if>
             <if test="vectorType != null">vector_type = #{vectorType},</if>
-            <if test="embeddingVector != null">embedding = #{embeddingVector},</if>
             <if test="metadata != null">metadata = #{metadata},</if>
             <if test="updateTime != null">update_time = #{updateTime},</if>
         </set>

@@ -61,6 +61,15 @@
         WHERE vector_store_id = #{vectorStoreId}
     </select>
 
+    <!-- 按分析记录ID + 用户ID查询 -->
+    <select id="selectByIdAndUserId" resultMap="ResumeMap">
+        SELECT *
+        FROM ai_career_plan.resume_analysis_result
+        WHERE id = #{id}
+          AND user_id = #{userId}
+        LIMIT 1
+    </select>
+
     <!-- 根据 userId 查询分析结果列表（游标分页） -->
     <select id="selectByUserId" resultMap="ResumeMap">
         SELECT *

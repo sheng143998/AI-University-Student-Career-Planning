@@ -33,7 +33,7 @@
             ref="fileInputEl"
             class="hidden"
             type="file"
-            accept=".pdf,.doc,.docx,.pptx,.html,.htm,.txt"
+            accept=".pdf,.doc,.docx,.txt,.md"
             :disabled="uploading || polling"
             @change="onFileChange"
           />
@@ -51,7 +51,7 @@
               <span class="material-symbols-outlined text-primary text-3xl">cloud_upload</span>
             </div>
             <h3 class="text-xl font-bold mb-2">上传简历</h3>
-            <p class="text-on-surface-variant text-sm mb-4">支持 PDF、DOC、DOCX、PPTX、HTML、HTM、TXT，最大 20MB</p>
+            <p class="text-on-surface-variant text-sm mb-4">支持 PDF、DOC、DOCX、TXT、MD，最大 20MB</p>
             <button
               class="px-8 py-3 bg-primary text-on-primary rounded-xl font-bold shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-50"
               type="button"
@@ -129,7 +129,8 @@
             </div>
             <p v-if="historyPreviewLoading" class="mt-4 text-sm text-on-surface-variant">正在加载预览…</p>
             <p v-else-if="historyPreviewHint" class="mt-4 text-sm text-amber-800 dark:text-amber-200">{{ historyPreviewHint }}</p>
-            <div v-if="historyPreviewBlobUrl" class="mt-4 overflow-hidden rounded-lg border border-outline-variant/60 bg-surface-container-highest">
+            <div v-if="historyMdHtml" class="mt-4 overflow-auto rounded-lg border border-outline-variant/60 bg-surface-container-highest p-6 min-h-[28rem] max-h-[70vh] prose prose-sm max-w-none dark:prose-invert" v-html="historyMdHtml" />
+            <div v-else-if="historyPreviewBlobUrl" class="mt-4 overflow-hidden rounded-lg border border-outline-variant/60 bg-surface-container-highest">
               <iframe :src="historyPreviewBlobUrl" title="历史简历预览" class="w-full min-h-[28rem] h-[70vh] max-h-[56rem]" />
             </div>
           </div>
@@ -451,6 +452,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { marked } from 'marked'
 import { isApiSuccess } from '@/api/client'
 import {
   fetchResumeAnalysisPreview,
@@ -522,6 +524,8 @@ const capabilityProfileError = ref('')
 
 /** 历史记录：经 fetch + Blob 预览（iframe 无法带 token 头，不能直链 /preview） */
 const historyPreviewBlobUrl = ref<string | null>(null)
+/** md 文件渲染后的 HTML */
+const historyMdHtml = ref<string | null>(null)
 const historyPreviewLoading = ref(false)
 const historyPreviewHint = ref('')
 let historyPreviewSeq = 0
@@ -543,14 +547,15 @@ function revokeHistoryPreviewBlob() {
     URL.revokeObjectURL(historyPreviewBlobUrl.value)
     historyPreviewBlobUrl.value = null
   }
+  historyMdHtml.value = null
 }
 
 /** 与后端 ResumePreviewServiceImpl.INLINE_PREVIEW_TYPES 一致 */
 function isInlinePreviewSupportedByBackend(name: string, fileType?: string): boolean {
   const ft = (fileType || '').trim().toLowerCase()
-  if (['pdf', 'html', 'htm', 'txt'].includes(ft)) return true
+  if (['pdf', 'txt', 'md'].includes(ft)) return true
   const n = name.toLowerCase()
-  return n.endsWith('.pdf') || n.endsWith('.html') || n.endsWith('.htm') || n.endsWith('.txt')
+  return n.endsWith('.pdf') || n.endsWith('.txt') || n.endsWith('.md')
 }
 
 watch(
@@ -561,7 +566,7 @@ watch(
     if (!id || !panel) return
     if (!isInlinePreviewSupportedByBackend(panel.name, panel.fileType)) {
       historyPreviewHint.value =
-        '该格式暂不支持内嵌预览（后端仅支持 PDF / HTML / TXT），请使用「下载原件」或 OSS 链接。'
+        '该格式暂不支持内嵌预览（后端仅支持 PDF / TXT / MD），请使用「下载原件」或 OSS 链接。'
       return
     }
     const seq = ++historyPreviewSeq
@@ -570,7 +575,14 @@ watch(
       const r = await fetchResumeAnalysisPreview(id, 'inline')
       if (seq !== historyPreviewSeq) return
       if (r.ok) {
-        historyPreviewBlobUrl.value = URL.createObjectURL(r.blob)
+        const ft = (panel.fileType || '').toLowerCase()
+        const isMd = ft === 'md' || panel.name.toLowerCase().endsWith('.md')
+        if (isMd) {
+          const text = await r.blob.text()
+          historyMdHtml.value = await marked.parse(text)
+        } else {
+          historyPreviewBlobUrl.value = URL.createObjectURL(r.blob)
+        }
         historyPreviewHint.value = ''
       } else if (r.status === 415) {
         historyPreviewHint.value = '服务器不支持预览该文件类型。'
@@ -599,8 +611,7 @@ const resumeFileIcon = computed(() => {
   const t = file.type
   if (t === 'application/pdf') return 'picture_as_pdf'
   if (t.includes('wordprocessing') || t.includes('msword') || file.name.toLowerCase().endsWith('.docx')) return 'article'
-  if (t.includes('presentation') || file.name.toLowerCase().match(/\.pptx?$/)) return 'slideshow'
-  if (t.includes('html') || file.name.toLowerCase().endsWith('.html') || file.name.toLowerCase().endsWith('.htm')) return 'html'
+  if (file.name.toLowerCase().endsWith('.md')) return 'notes'
   if (t.startsWith('text/')) return 'notes'
   return 'description'
 })
@@ -610,8 +621,7 @@ const resumeFileKindLabel = computed(() => {
   if (!file) return ''
   if (file.type === 'application/pdf') return 'PDF'
   if (file.name.toLowerCase().match(/\.docx?$/)) return 'Word'
-  if (file.name.toLowerCase().match(/\.pptx?$/)) return 'PPT'
-  if (file.name.toLowerCase().match(/\.html?$/)) return 'HTML'
+  if (file.name.toLowerCase().endsWith('.md')) return 'Markdown'
   if (file.name.toLowerCase().endsWith('.txt') || file.type.startsWith('text/')) return '文本'
   return file.type || '文件'
 })
@@ -623,8 +633,7 @@ const historyFileIcon = computed(() => {
   const ft = (h.fileType || '').toLowerCase()
   if (ft === 'pdf' || n.endsWith('.pdf')) return 'picture_as_pdf'
   if (ft.includes('word') || n.endsWith('.docx') || n.endsWith('.doc')) return 'article'
-  if (ft.includes('ppt') || n.match(/\.pptx?$/)) return 'slideshow'
-  if (n.endsWith('.html') || n.endsWith('.htm')) return 'html'
+  if (n.endsWith('.md')) return 'notes'
   if (n.endsWith('.txt')) return 'notes'
   return 'description'
 })
@@ -635,8 +644,7 @@ const historyFileKindLabel = computed(() => {
   const ft = (h.fileType || '').toLowerCase()
   if (ft === 'pdf') return 'PDF'
   if (ft.includes('doc')) return 'Word'
-  if (ft.includes('ppt')) return 'PPT'
-  if (ft.includes('html')) return 'HTML'
+  if (ft.includes('md') || h.name.toLowerCase().endsWith('.md')) return 'Markdown'
   if (ft === 'txt') return '文本'
   if (h.fileType) return h.fileType
   return '简历附件'

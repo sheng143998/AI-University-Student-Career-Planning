@@ -102,10 +102,15 @@ export async function getMessages(conversationId: number, cursor?: number, limit
 }
 
 /** 发送消息（流式响应） */
-export async function sendMessage(conversationId: number, content: string): Promise<Response> {
+export async function sendMessage(conversationId: number, content: string, resumeId?: number): Promise<Response> {
   const authHeaders = toAxiosHeaders(headersAuth()) as Record<string, string>
   const baseUrl = apiBase()
   const url = baseUrl ? `${baseUrl.replace(/\/$/, '')}/api/chat/messages` : '/api/chat/messages'
+  const body: Record<string, unknown> = { conversationId, content }
+  // 只有 resumeId 有效（非 null 且 > 0）时才传递
+  if (resumeId != null && resumeId > 0) {
+    body.resumeId = resumeId
+  }
   
   const response = await fetch(url, {
     method: 'POST',
@@ -113,7 +118,7 @@ export async function sendMessage(conversationId: number, content: string): Prom
       'Content-Type': 'application/json',
       ...(authHeaders || {}),
     },
-    body: JSON.stringify({ conversationId, content })
+    body: JSON.stringify(body)
   })
   return response
 }
