@@ -55,6 +55,31 @@ public class ResumeConstant {
     public static final String METADATA_KEY_PAGE_NUMBER = "page_number";
     public static final String METADATA_KEY_CHUNK_NUMBER = "chunk_number";
 
+    /**
+     * 可直接编辑的简历文件格式（docx 因 XML 结构复杂不支持自动编辑）
+     */
+    public static final java.util.Set<String> EDITABLE_RESUME_FILE_TYPES = java.util.Set.of("txt", "md");
+
+    /**
+     * 技能区块识别关键词
+     */
+    public static final java.util.Set<String> SKILL_SECTION_KEYWORDS = java.util.Set.of(
+            "专业技能", "个人技能", "技能清单", "技术栈", "掌握技能"
+    );
+
+    /**
+     * 下一个区块的标题关键词（遇到这些则停止收集技能段落）
+     */
+    public static final java.util.Set<String> NEXT_SECTION_KEYWORDS = java.util.Set.of(
+            "教育经历", "工作经历", "项目经历", "实习经历", "自我评价",
+            "获奖情况", "语言能力", "自我介绍", "个人简介", "荣誉奖项"
+    );
+
+    /**
+     * 当没有标题匹配时，回退密度算法的最小匹配数
+     */
+    public static final int MIN_SKILL_MATCH_THRESHOLD = 2;
+
     private ResumeConstant() {
         // 私有构造器，防止实例化
     }

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.itsheng.common.constant.ResumeConstant;
 import com.itsheng.common.constant.ToolConstant;
 import com.itsheng.common.context.BaseContext;
 import com.itsheng.common.utils.AliOssUtil;
@@ -115,7 +116,12 @@ public class CareerPlanningTools {
             if (fileUrl != null && !fileUrl.isBlank()) {
                 try {
                     resumeFileRaw = resumeFileEditService.readResumeFileRaw(fileUrl);
-                } catch (Exception ignored) {}
+                    if (resumeFileRaw == null) {
+                        log.debug("getUserResumeData: 文件读取返回空，可能是格式不支持, url={}", fileUrl);
+                    }
+                } catch (Exception e) {
+                    log.warn("getUserResumeData: 读取简历文件原文失败, url={}", fileUrl);
+                }
             }
 
             Map<String, Object> payload = new LinkedHashMap<>();
@@ -170,10 +176,14 @@ public class CareerPlanningTools {
         try {
             int safeLimit = limit == null || limit <= 0 ? ToolConstant.DEFAULT_JOB_LIMIT : Math.min(limit, 20);
             String normalizedLevel = normalizeLevel(level);
+            log.debug("searchJobs: skill={}, level={}, limit={}", skill, normalizedLevel, safeLimit);
 
             List<JobCategory> jobs = new ArrayList<>(jobCategoryMapper.searchByKeyword(skill, safeLimit * 3));
+            log.debug("searchJobs: keyword search found {} jobs", jobs.size());
             if (jobs.isEmpty()) {
+                log.debug("searchJobs: 关键词搜索无结果，尝试向量搜索");
                 jobs = new ArrayList<>(jobVectorSearchService.searchSimilarJobs(buildEmbeddingVector(skill), safeLimit * 3));
+                log.debug("searchJobs: 向量搜索返回 {} 个岗位", jobs.size());
             }
 
             List<JobCategory> filtered = jobs.stream()
@@ -182,6 +192,10 @@ public class CareerPlanningTools {
                     .distinct()
                     .limit(safeLimit)
                     .toList();
+
+            if (filtered.isEmpty()) {
+                log.warn("searchJobs: 过滤后无匹配岗位, skill={}, level={}", skill, normalizedLevel);
+            }
 
             List<Map<String, Object>> results = filtered.stream()
                     .map(job -> {
@@ -218,10 +232,13 @@ public class CareerPlanningTools {
     public String getUserRoadmap(@Nullable ToolContext toolContext) {
         try {
             Long userId = requireUserId(toolContext);
+            log.debug("getUserRoadmap: userId={}", userId);
             UserRoadmapSteps roadmap = userRoadmapStepsMapper.selectByUserId(userId);
             if (roadmap == null) {
+                log.warn("getUserRoadmap: 用户尚未生成职业发展路径, userId={}", userId);
                 return failure("当前用户尚未生成职业发展路径");
             }
+            log.debug("getUserRoadmap: currentStepIndex={}, jobProfileId={}", roadmap.getCurrentStepIndex(), roadmap.getJobProfileId());
 
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("success", true);
@@ -248,8 +265,18 @@ public class CareerPlanningTools {
             @Nullable ToolContext toolContext) {
         try {
             Long userId = requireUserId(toolContext);
+            log.debug("generateResumePdf: userId={}", userId);
             ObjectNode parsedDataNode = parseEditableJson(resumeData);
+            if (parsedDataNode.isEmpty()) {
+                log.warn("generateResumePdf: 传入的 resumeData 为空或无效");
+                return failure("简历数据不能为空");
+            }
             String pdfUrl = generateResumePdfInternal(userId, parsedDataNode);
+            if (pdfUrl == null || pdfUrl.isBlank()) {
+                log.warn("generateResumePdf: PDF 生成成功但返回 URL 为空, userId={}", userId);
+                return failure("PDF 生成成功但返回 URL 异常");
+            }
+            log.debug("generateResumePdf: PDF 生成成功, url={}", pdfUrl);
 
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("success", true);
@@ -306,12 +333,18 @@ public class CareerPlanningTools {
         try {
             Long userId = requireUserId(toolContext);
             String normalizedStatus = normalizeGoalStatusFilter(status);
+            log.debug("getUserGoals: userId={}, goalId={}, status={}", userId, goalId, normalizedStatus);
 
             List<Goal> goals = loadUserGoals(userId, goalId);
+            log.debug("getUserGoals: 加载到 {} 个目标", goals.size());
+            if (goals.isEmpty()) {
+                log.warn("getUserGoals: 用户无任何目标, userId={}", userId);
+            }
             if (normalizedStatus != null) {
                 goals = goals.stream()
                         .filter(goal -> matchesGoalStatusFilter(goal.getStatus(), normalizedStatus))
                         .toList();
+                log.debug("getUserGoals: 按状态 {} 过滤后剩余 {} 个目标", normalizedStatus, goals.size());
             }
 
             List<Map<String, Object>> goalItems = goals.stream()
@@ -363,34 +396,44 @@ public class CareerPlanningTools {
         try {
             Long userId = requireUserId(toolContext);
             String normalizedAction = normalizeGoalAction(action);
+            log.debug("updateGoal: userId={}, action={}, goalId={}, title={}, isPrimary={}",
+                    userId, normalizedAction, goalId, title, isPrimary);
             if (normalizedAction == null) {
+                log.warn("updateGoal: 不支持的操作, action={}", action);
                 return failure("不支持的目标操作: " + action + "，可选值为 create/update/complete/delete");
             }
 
             List<Map<String, Object>> milestoneSpecs = parseMilestoneSpecs(milestones);
+            log.debug("updateGoal: 解析到 {} 个里程碑配置", milestoneSpecs.size());
             Goal targetGoal;
             String message;
 
             switch (normalizedAction) {
                 case "create" -> {
                     if (title == null || title.isBlank()) {
+                        log.warn("updateGoal: 创建目标时 title 为空");
                         return failure("创建目标时 title 不能为空");
                     }
                     if (isPrimary == null) {
+                        log.warn("updateGoal: 创建目标前未确认 isPrimary");
                         return failure("创建目标前必须先确认该目标是主目标还是副目标");
                     }
                     targetGoal = createGoalRecord(userId, title.trim(), deadline, isPrimary);
+                    log.debug("updateGoal: 目标创建成功, goalId={}, isPrimary={}", targetGoal.getId(), isPrimary);
                     if (Boolean.TRUE.equals(isPrimary)) {
                         replaceMilestones(userId, targetGoal.getId(), milestoneSpecs);
+                        log.debug("updateGoal: 里程碑写入成功, count={}", milestoneSpecs.size());
                     }
                     message = "目标创建成功";
                 }
                 case "update" -> {
                     if (goalId == null || goalId <= 0) {
+                        log.warn("updateGoal: 更新目标时 goalId 为空或无效");
                         return failure("更新目标时 goalId 不能为空");
                     }
                     targetGoal = goalMapper.findByIdAndUserId(goalId, userId);
                     if (targetGoal == null) {
+                        log.warn("updateGoal: 未找到对应目标, goalId={}, userId={}", goalId, userId);
                         return failure("未找到对应目标");
                     }
                     boolean changed = false;
@@ -404,36 +447,46 @@ public class CareerPlanningTools {
                     }
                     if (changed) {
                         goalMapper.update(targetGoal);
+                        log.debug("updateGoal: 目标更新写入数据库");
+                    } else {
+                        log.debug("updateGoal: 无字段变更，跳过数据库更新");
                     }
                     if (milestones != null && Boolean.TRUE.equals(targetGoal.getIsPrimary())) {
                         replaceMilestones(userId, targetGoal.getId(), milestoneSpecs);
+                        log.debug("updateGoal: 主目标里程碑替换成功");
                     }
                     message = "目标更新成功";
                 }
                 case "complete" -> {
                     if (goalId == null || goalId <= 0) {
+                        log.warn("updateGoal: 完成目标时 goalId 为空或无效");
                         return failure("完成目标时 goalId 不能为空");
                     }
                     targetGoal = goalMapper.findByIdAndUserId(goalId, userId);
                     if (targetGoal == null) {
+                        log.warn("updateGoal: 未找到对应目标, goalId={}, userId={}", goalId, userId);
                         return failure("未找到对应目标");
                     }
                     targetGoal.setStatus("DONE");
                     targetGoal.setProgress(100);
                     goalMapper.update(targetGoal);
                     markMilestonesDone(targetGoal.getId());
+                    log.debug("updateGoal: 目标已标记完成, goalId={}", goalId);
                     message = "目标已标记为完成";
                 }
                 case "delete" -> {
                     if (goalId == null || goalId <= 0) {
+                        log.warn("updateGoal: 删除目标时 goalId 为空或无效");
                         return failure("删除目标时 goalId 不能为空");
                     }
                     targetGoal = goalMapper.findByIdAndUserId(goalId, userId);
                     if (targetGoal == null) {
+                        log.warn("updateGoal: 未找到对应目标, goalId={}, userId={}", goalId, userId);
                         return failure("未找到对应目标");
                     }
                     goalMilestoneMapper.deleteByGoalId(goalId);
                     goalMapper.deleteByIdAndUserId(goalId, userId);
+                    log.debug("updateGoal: 目标删除成功, goalId={}", goalId);
 
                     Map<String, Object> payload = new LinkedHashMap<>();
                     payload.put("success", true);
@@ -473,8 +526,10 @@ public class CareerPlanningTools {
             @ToolParam(description = "岗位类别或岗位关键词，可选，例如前端、Java、产品经理")
             @Nullable String category) {
         try {
+            log.debug("getMarketInsight: industry={}, category={}", industry, category);
             JobCategory matchedJob = resolveMarketJobCategory(category);
             Long jobProfileId = matchedJob != null ? matchedJob.getId() : null;
+            log.debug("getMarketInsight: 匹配岗位={}, jobProfileId={}", matchedJob != null ? matchedJob.getJobCategoryName() : "无", jobProfileId);
 
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("success", true);
@@ -515,18 +570,24 @@ public class CareerPlanningTools {
         try {
             Long userId = requireUserId(toolContext);
             String normalizedField = field == null ? "" : field.trim();
+            log.debug("modifyResume: userId={}, field={}, newValueLength={}", userId, normalizedField, newValue == null ? 0 : newValue.length());
             if (!ToolConstant.MODIFIABLE_FIELDS.contains(normalizedField)) {
+                log.warn("modifyResume: 不支持修改的字段, field={}", normalizedField);
                 return failure("不支持修改字段: " + normalizedField + "，可修改字段为 " + ToolConstant.MODIFIABLE_FIELDS);
             }
 
             ResumeAnalysisResult resume = getLatestResume(userId);
             if (resume == null) {
+                log.warn("modifyResume: 未找到可修改的简历记录, userId={}", userId);
                 return failure("未找到可修改的简历记录");
             }
+            log.debug("modifyResume: 找到简历记录, resumeId={}, vectorStoreId={}, filePath={}",
+                    resume.getId(), resume.getVectorStoreId(), resume.getResumeFilePath());
 
             // 获取数据库中的旧值作为兜底参考
             ObjectNode dbParsedData = parseEditableJson(resume.getParsedData());
             JsonNode dbOldValueNode = dbParsedData.get(normalizedField);
+            log.debug("modifyResume: 数据库旧值={}, newValue={}", dbOldValueNode, newValue);
 
             JsonNode newValueNode = convertFieldValue(normalizedField, newValue);
 
@@ -541,23 +602,27 @@ public class CareerPlanningTools {
             String fileExt = resumeFileEditService.getExtension(currentFileUrl);
             boolean isSystemGeneratedPdf = currentFileUrl != null
                     && currentFileUrl.contains(ToolConstant.TOOL_RESUME_PDF_SUFFIX);
+            log.debug("modifyResume: fileExt={}, isSystemGeneratedPdf={}, fileUrl={}", fileExt, isSystemGeneratedPdf, currentFileUrl);
 
             String newFileUrl = currentFileUrl;
             boolean fileUpdated = false;
             String fileEditFailReason = null;
 
-            if (ResumeFileEditService.EDITABLE_TYPES.contains(fileExt)) {
+            if (ResumeConstant.EDITABLE_RESUME_FILE_TYPES.contains(fileExt)) {
                 // txt / md：直接编辑用户文件
+                log.debug("modifyResume: 尝试编辑 {} 格式文件", fileExt);
                 String editedUrl = resumeFileEditService.tryEditResumeFile(
                         currentFileUrl, normalizedField, dbOldValueNode, newValueNode, userId);
                 if (editedUrl != null) {
                     newFileUrl = editedUrl;
                     fileUpdated = true;
+                    log.debug("modifyResume: 文件编辑成功, newUrl={}", newFileUrl);
                 } else {
                     // 文件编辑失败：回滚数据库更新，保持与文件内容一致
                     newFileUrl = currentFileUrl;
                     fileEditFailReason = "文件内容定位失败：可能是技能区块标题（如《专业技能》）不在已知关键词列表中，或文件编码异常。";
-                    log.warn("字段 [{}] 在 {} 文件中编辑失败，跳过数据库更新", normalizedField, fileExt);
+                    log.warn("字段 [{}] 在 {} 文件中编辑失败，跳过数据库更新, userId={}, fileUrl={}",
+                            normalizedField, fileExt, userId, currentFileUrl);
                     // 回滚：不写入数据库，直接跳到返回
                     Map<String, Object> failPayload = new LinkedHashMap<>();
                     failPayload.put("success", false);
@@ -572,18 +637,26 @@ public class CareerPlanningTools {
                 }
             } else if (isSystemGeneratedPdf || currentFileUrl == null || currentFileUrl.isBlank()) {
                 // 系统生成的 PDF：重新生成
+                log.debug("modifyResume: 系统生成 PDF，尝试重新生成");
                 try {
                     newFileUrl = generateResumePdfInternal(userId, dbParsedData);
-                    fileUpdated = true;
+                    if (newFileUrl == null || newFileUrl.isBlank()) {
+                        log.warn("modifyResume: PDF 重新生成但返回 URL 为空");
+                    } else {
+                        fileUpdated = true;
+                        log.debug("modifyResume: PDF 重新生成成功, newUrl={}", newFileUrl);
+                    }
                 } catch (Exception e) {
-                    log.error("PDF 重新生成失败", e);
+                    log.error("modifyResume: PDF 重新生成失败, userId={}", userId, e);
                     newFileUrl = currentFileUrl != null ? currentFileUrl : "";
                 }
             } else {
+                log.debug("modifyResume: 文件格式不支持自动编辑 ({}), 仅更新数据库", fileExt);
                 newFileUrl = currentFileUrl;
             }
 
             // 更新记录
+            log.debug("modifyResume: 更新数据库和向量库");
             ResumeAnalysisResult updatedResume = ResumeAnalysisResult.builder()
                     .vectorStoreId(resume.getVectorStoreId())
                     .parsedData(updatedParsedData)
@@ -608,17 +681,23 @@ public class CareerPlanningTools {
             org.springframework.ai.document.Document updatedDoc = new org.springframework.ai.document.Document(
                     resume.getVectorStoreId(), resumeContent, metadata);
             pgVectorStore.add(List.of(updatedDoc));
+            log.debug("modifyResume: 向量库同步成功");
 
             JobCategory matchedJob = null;
             if ("target_role".equals(normalizedField)) {
                 matchedJob = matchJobByKeyword(newValue);
+                log.debug("modifyResume: 按 target_role 匹配岗位, keyword={}", newValue);
             } else if ("skills".equals(normalizedField)) {
                 matchedJob = matchJobByKeyword(extractTargetRole(dbParsedData));
+                log.debug("modifyResume: 按 skills 修改后匹配岗位, targetRole={}", extractTargetRole(dbParsedData));
             }
-
             if (matchedJob != null) {
+                log.debug("modifyResume: 匹配到岗位, jobId={}, jobName={}", matchedJob.getId(), matchedJob.getJobCategoryName());
                 syncCareerData(userId, matchedJob);
                 syncRoadmap(userId, matchedJob);
+                log.debug("modifyResume: 职业数据和路线同步成功");
+            } else {
+                log.debug("modifyResume: 未匹配到岗位，跳过职业数据和路线同步");
             }
 
             Map<String, Object> payload = new LinkedHashMap<>();
@@ -672,10 +751,12 @@ public class CareerPlanningTools {
                     userId = Long.parseLong(value);
                 } catch (NumberFormatException ignored) {
                     // Ignore malformed context user id and keep null for unified exception handling.
+                    log.debug("requireUserId: toolContext userId 格式无效，忽略");
                 }
             }
         }
         if (userId == null) {
+            log.warn("requireUserId: 无法从任何来源获取用户 ID");
             throw new IllegalStateException("当前请求缺少用户上下文");
         }
         return userId;
@@ -1049,9 +1130,16 @@ public class CareerPlanningTools {
     }
 
     private String generateResumePdfInternal(Long userId, JsonNode parsedDataNode) throws Exception {
+        log.debug("generateResumePdfInternal: userId={}", userId);
         byte[] pdfBytes = renderResumePdf(parsedDataNode);
+        if (pdfBytes == null || pdfBytes.length == 0) {
+            log.warn("generateResumePdfInternal: PDF 字节流为空");
+            return null;
+        }
         String objectName = "resumes/" + userId + "/" + UUID.randomUUID() + ToolConstant.TOOL_RESUME_PDF_SUFFIX;
-        return aliOssUtil.upload(pdfBytes, objectName);
+        String url = aliOssUtil.upload(pdfBytes, objectName);
+        log.debug("generateResumePdfInternal: OSS 上传成功, objectName={}, url={}", objectName, url);
+        return url;
     }
 
     private byte[] renderResumePdf(JsonNode parsedDataNode) throws Exception {
@@ -1102,10 +1190,12 @@ public class CareerPlanningTools {
             addPdfSection(document, "工作/项目经历", stringifyExperience(parsedDataNode.get("experience")), sectionFont, bodyFont);
 
         } catch (DocumentException e) {
+            log.error("renderResumePdf: Document 渲染异常", e);
             throw new IllegalStateException("生成简历 PDF 失败", e);
         } finally {
             document.close();
         }
+        log.debug("renderResumePdf: PDF 渲染成功, size={} bytes", outputStream.size());
         return outputStream.toByteArray();
     }
 
@@ -1186,7 +1276,9 @@ public class CareerPlanningTools {
     }
 
     private String buildEmbeddingVector(String text) {
+        log.debug("buildEmbeddingVector: textLength={}", text == null ? 0 : text.length());
         float[] vector = embeddingModel.embed(text == null ? "" : text);
+        log.debug("buildEmbeddingVector: vectorDimension={}", vector.length);
         StringBuilder builder = new StringBuilder("[");
         for (int i = 0; i < vector.length; i++) {
             if (i > 0) {
@@ -1200,12 +1292,20 @@ public class CareerPlanningTools {
 
     private JobCategory matchJobByKeyword(@Nullable String keyword) {
         if (keyword == null || keyword.isBlank()) {
+            log.debug("matchJobByKeyword: keyword 为空，无匹配");
             return null;
         }
-        return jobCategoryMapper.searchByKeyword(keyword, 1).stream().findFirst().orElse(null);
+        JobCategory job = jobCategoryMapper.searchByKeyword(keyword, 1).stream().findFirst().orElse(null);
+        if (job == null) {
+            log.debug("matchJobByKeyword: 未找到匹配岗位, keyword={}", keyword);
+        } else {
+            log.debug("matchJobByKeyword: 匹配到岗位, jobId={}, name={}", job.getId(), job.getJobCategoryName());
+        }
+        return job;
     }
 
     private void syncCareerData(Long userId, JobCategory matchedJob) throws Exception {
+        log.debug("syncCareerData: userId={}, jobId={}", userId, matchedJob.getId());
         UserCareerData existing = userCareerDataMapper.selectByUserId(userId);
         Map<String, Object> jobProfile = new LinkedHashMap<>();
         jobProfile.put("id", matchedJob.getId());
@@ -1226,6 +1326,7 @@ public class CareerPlanningTools {
         if (existing != null) {
             data.setId(existing.getId());
             userCareerDataMapper.update(data);
+            log.debug("syncCareerData: 更新已有记录");
         } else {
             data.setMatchSummary("{\"score\":0,\"description\":\"由 Tool 自动更新\"}");
             data.setMarketTrends("[]");
@@ -1233,16 +1334,20 @@ public class CareerPlanningTools {
             data.setActions("[]");
             data.setCreateTime(currentDateTime());
             userCareerDataMapper.insert(data);
+            log.debug("syncCareerData: 插入新记录");
         }
     }
 
     private void syncRoadmap(Long userId, JobCategory matchedJob) throws Exception {
+        log.debug("syncRoadmap: userId={}, jobId={}", userId, matchedJob.getId());
         String baseCategoryCode = matchedJob.getJobCategoryCode()
                 .replaceAll("_(INTERNSHIP|JUNIOR|MID|SENIOR)$", "");
         List<JobCategory> verticalPath = jobCategoryMapper.selectVerticalPathByCategoryCode(baseCategoryCode);
         if (verticalPath == null || verticalPath.isEmpty()) {
+            log.warn("syncRoadmap: 未找到岗位垂直路径, baseCategoryCode={}", baseCategoryCode);
             return;
         }
+        log.debug("syncRoadmap: 岗位垂直路径长度={}", verticalPath.size());
 
         verticalPath = verticalPath.stream()
                 .sorted((a, b) -> Integer.compare(levelIndex(a.getJobLevel()), levelIndex(b.getJobLevel())))
@@ -1265,6 +1370,7 @@ public class CareerPlanningTools {
             step.put("status", Objects.equals(job.getId(), matchedJob.getId()) ? "当前目标" : "待解锁");
             steps.add(step);
         }
+        log.debug("syncRoadmap: 当前阶段索引={}, 总步骤数={}", currentIndex, steps.size());
 
         UserRoadmapSteps existing = userRoadmapStepsMapper.selectByUserId(userId);
         UserRoadmapSteps roadmap = UserRoadmapSteps.builder()
@@ -1278,9 +1384,11 @@ public class CareerPlanningTools {
         if (existing != null) {
             roadmap.setId(existing.getId());
             userRoadmapStepsMapper.update(roadmap);
+            log.debug("syncRoadmap: 更新已有路线记录");
         } else {
             roadmap.setCreateTime(currentDateTime());
             userRoadmapStepsMapper.insert(roadmap);
+            log.debug("syncRoadmap: 插入新路线记录");
         }
     }
 
@@ -1305,6 +1413,9 @@ public class CareerPlanningTools {
     private List<Goal> loadUserGoals(Long userId, @Nullable Long goalId) {
         if (goalId != null && goalId > 0) {
             Goal goal = goalMapper.findByIdAndUserId(goalId, userId);
+            if (goal == null) {
+                log.debug("loadUserGoals: 指定 goalId 未找到, goalId={}, userId={}", goalId, userId);
+            }
             return goal == null ? List.of() : List.of(goal);
         }
 
@@ -1312,8 +1423,11 @@ public class CareerPlanningTools {
         Goal primary = goalMapper.findPrimaryByUserId(userId);
         if (primary != null) {
             goals.add(primary);
+            log.debug("loadUserGoals: 找到主目标, id={}", primary.getId());
         }
-        goals.addAll(goalMapper.findParallelByUserId(userId));
+        List<Goal> parallelGoals = goalMapper.findParallelByUserId(userId);
+        goals.addAll(parallelGoals);
+        log.debug("loadUserGoals: 加载到 {} 个副目标", parallelGoals.size());
         goals.sort(Comparator
                 .comparing((Goal goal) -> !Boolean.TRUE.equals(goal.getIsPrimary()))
                 .thenComparing(Goal::getCreateTime, Comparator.nullsLast(Comparator.reverseOrder())));
@@ -1435,12 +1549,14 @@ public class CareerPlanningTools {
         }
         JsonNode node = objectMapper.readTree(milestones);
         if (!node.isArray()) {
+            log.warn("parseMilestoneSpecs: milestones 不是 JSON 数组");
             throw new IllegalArgumentException("milestones 必须传 JSON 数组字符串");
         }
 
         List<Map<String, Object>> result = new ArrayList<>();
         for (JsonNode item : node) {
             if (!item.isObject()) {
+                log.debug("parseMilestoneSpecs: 跳过非对象元素");
                 continue;
             }
             Map<String, Object> spec = new LinkedHashMap<>();
@@ -1451,6 +1567,7 @@ public class CareerPlanningTools {
             spec.put("order", item.has("order") && item.get("order").canConvertToInt() ? item.get("order").asInt() : result.size() + 1);
             result.add(spec);
         }
+        log.debug("parseMilestoneSpecs: 解析到 {} 个里程碑", result.size());
         return result;
     }
 
@@ -1518,10 +1635,16 @@ public class CareerPlanningTools {
         if (category == null || category.isBlank()) {
             return null;
         }
-        return jobCategoryMapper.searchByKeyword(category.trim(), 1)
+        JobCategory job = jobCategoryMapper.searchByKeyword(category.trim(), 1)
                 .stream()
                 .findFirst()
                 .orElse(null);
+        if (job == null) {
+            log.debug("resolveMarketJobCategory: 未匹配到岗位, category={}", category);
+        } else {
+            log.debug("resolveMarketJobCategory: 匹配到岗位, id={}, name={}", job.getId(), job.getJobCategoryName());
+        }
+        return job;
     }
 
     private LocalDate currentDate() {
@@ -1544,6 +1667,7 @@ public class CareerPlanningTools {
         long matched = requiredSkills.stream()
                 .filter(item -> lowerSkill.contains(item.toLowerCase(Locale.ROOT)) || item.toLowerCase(Locale.ROOT).contains(lowerSkill))
                 .count();
+        log.debug("calculateSkillMatchScore: skill={}, jobRequired={}, matched={}", skill, requiredSkills.size(), matched);
         return BigDecimal.valueOf((double) matched / requiredSkills.size()).setScale(2, RoundingMode.HALF_UP);
     }
 
