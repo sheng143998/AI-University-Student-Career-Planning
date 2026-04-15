@@ -8,11 +8,15 @@ import com.itsheng.common.constant.ToolConstant;
 import com.itsheng.common.context.BaseContext;
 import com.itsheng.common.utils.AliOssUtil;
 import com.itsheng.pojo.entity.JobCategory;
+import com.itsheng.pojo.entity.Goal;
+import com.itsheng.pojo.entity.GoalMilestone;
 import com.itsheng.pojo.entity.ResumeAnalysisResult;
 import com.itsheng.pojo.entity.StudentCapabilityProfile;
 import com.itsheng.pojo.entity.UserCareerData;
 import com.itsheng.pojo.entity.UserRoadmapSteps;
 import com.itsheng.pojo.entity.UserVectorStore;
+import com.itsheng.service.mapper.GoalMapper;
+import com.itsheng.service.mapper.GoalMilestoneMapper;
 import com.itsheng.service.mapper.JobCategoryMapper;
 import com.itsheng.service.mapper.ResumeMapper;
 import com.itsheng.service.mapper.StudentCapabilityProfileMapper;
@@ -20,6 +24,7 @@ import com.itsheng.service.mapper.UserCareerDataMapper;
 import com.itsheng.service.mapper.UserRoadmapStepsMapper;
 import com.itsheng.service.mapper.UserVectorStoreMapper;
 import com.itsheng.service.service.JobVectorSearchService;
+import com.itsheng.service.service.MarketService;
 import com.itsheng.service.service.ResumeFileEditService;
 import com.lowagie.text.Document;
 import com.lowagie.text.DocumentException;
@@ -42,8 +47,13 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Clock;
+import java.time.DayOfWeek;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -61,14 +71,18 @@ public class CareerPlanningTools {
     private final StudentCapabilityProfileMapper capabilityProfileMapper;
     private final UserRoadmapStepsMapper userRoadmapStepsMapper;
     private final UserVectorStoreMapper userVectorStoreMapper;
+    private final GoalMapper goalMapper;
+    private final GoalMilestoneMapper goalMilestoneMapper;
     private final JobCategoryMapper jobCategoryMapper;
     private final JobVectorSearchService jobVectorSearchService;
     private final UserCareerDataMapper userCareerDataMapper;
+    private final MarketService marketService;
     private final AliOssUtil aliOssUtil;
     private final OpenAiEmbeddingModel embeddingModel;
     private final ObjectMapper objectMapper;
     private final VectorStore pgVectorStore;
     private final ResumeFileEditService resumeFileEditService;
+    private final Clock clock;
 
     /**
      * 查询用户简历解析结果和能力画像。
@@ -250,6 +264,239 @@ public class CareerPlanningTools {
     }
 
     /**
+     * 获取当前准确日期和时间。
+     * @return 包含日期、时间、时区和星期信息的 JSON 字符串
+     */
+    @Tool(description = "获取当前准确日期和时间。凡是涉及今天、明天、本周、截止日期、几个月后等时间推算时，必须先调用本工具，再基于返回结果进行判断。")
+    public String getCurrentDateTime() {
+        try {
+            LocalDateTime now = currentDateTime();
+            LocalDate today = now.toLocalDate();
+            DayOfWeek dayOfWeek = now.getDayOfWeek();
+            ZoneId zone = clock.getZone();
+
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("success", true);
+            payload.put("date", today.toString());
+            payload.put("datetime", now.toString());
+            payload.put("timezone", zone.getId());
+            payload.put("weekday", dayOfWeek.name());
+            payload.put("timestamp", now.atZone(zone).toInstant().toEpochMilli());
+            return toJson(payload);
+        } catch (Exception e) {
+            log.error("getCurrentDateTime 执行失败", e);
+            return failure("获取当前日期时间失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 查询用户目标及其里程碑进度。
+     * @param goalId 目标 ID，可为空；为空时查询当前用户全部目标
+     * @param status 状态过滤，可选值：active/completed
+     * @return 包含目标列表及里程碑信息的 JSON 字符串
+     */
+    @Tool(description = "查询当前用户的目标列表、状态、截止时间和里程碑进度。适用于回顾学习目标、查看完成情况或跟进阶段任务。" +
+            "当用户使用今天、明天、本周、下个月等相对时间表达时，必须先调用 getCurrentDateTime 获取准确日期。")
+    public String getUserGoals(
+            @ToolParam(description = "目标 ID，可选；不传时查询当前用户全部目标")
+            @Nullable Long goalId,
+            @ToolParam(description = "状态过滤，可选值：active/completed")
+            @Nullable String status,
+            @Nullable ToolContext toolContext) {
+        try {
+            Long userId = requireUserId(toolContext);
+            String normalizedStatus = normalizeGoalStatusFilter(status);
+
+            List<Goal> goals = loadUserGoals(userId, goalId);
+            if (normalizedStatus != null) {
+                goals = goals.stream()
+                        .filter(goal -> matchesGoalStatusFilter(goal.getStatus(), normalizedStatus))
+                        .toList();
+            }
+
+            List<Map<String, Object>> goalItems = goals.stream()
+                    .map(this::buildGoalPayload)
+                    .toList();
+
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("success", true);
+            payload.put("goal_id", goalId);
+            payload.put("status_filter", normalizedStatus);
+            payload.put("count", goalItems.size());
+            payload.put("goals", goalItems);
+            return toJson(payload);
+        } catch (Exception e) {
+            log.error("getUserGoals 执行失败", e);
+            return failure("查询用户目标失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 创建、更新、完成或删除用户目标。
+     * @param action 操作类型：create/update/complete/delete
+     * @param goalId 目标 ID，update/complete/delete 必填
+     * @param title 目标标题，create 时建议必填
+     * @param isPrimary 是否为主目标，仅 create 时使用；必须先明确主目标还是副目标
+     * @param deadline 目标截止日期，建议传 ISO 日期格式 yyyy-MM-dd
+     * @param milestones 里程碑 JSON 数组，create/update 可选
+     * @return 包含操作结果和目标信息的 JSON 字符串
+     */
+    @Transactional
+    @Tool(description = "创建、更新、完成或删除当前用户的目标，并可批量写入里程碑。action 支持 create/update/complete/delete。" +
+            "【创建规则】当 action=create 时，必须先和用户确认要创建的是主目标还是副目标，再调用本工具；" +
+            "主目标需要设置 isPrimary=true，且可以创建 milestones；副目标需要设置 isPrimary=false，且不创建 milestones。" +
+            "【日期规则】当用户说今天、明天、本周、几个月后、月底前等相对时间时，必须先调用 getCurrentDateTime，再传入精确的 yyyy-MM-dd 日期。")
+    public String updateGoal(
+            @ToolParam(description = "操作类型：create/update/complete/delete")
+            String action,
+            @ToolParam(description = "目标 ID，update/complete/delete 时必填")
+            @Nullable Long goalId,
+            @ToolParam(description = "目标标题，create 时必填，update 时可选")
+            @Nullable String title,
+            @ToolParam(description = "是否为主目标，仅 create 时使用。true 表示主目标，false 表示副目标；创建前必须先确认")
+            @Nullable Boolean isPrimary,
+            @ToolParam(description = "目标截止日期，可选，建议传 yyyy-MM-dd")
+            @Nullable String deadline,
+            @ToolParam(description = "里程碑 JSON 数组，可选。仅主目标创建或更新时使用；元素支持 title、desc、status、progress、order 字段")
+            @Nullable String milestones,
+            @Nullable ToolContext toolContext) {
+        try {
+            Long userId = requireUserId(toolContext);
+            String normalizedAction = normalizeGoalAction(action);
+            if (normalizedAction == null) {
+                return failure("不支持的目标操作: " + action + "，可选值为 create/update/complete/delete");
+            }
+
+            List<Map<String, Object>> milestoneSpecs = parseMilestoneSpecs(milestones);
+            Goal targetGoal;
+            String message;
+
+            switch (normalizedAction) {
+                case "create" -> {
+                    if (title == null || title.isBlank()) {
+                        return failure("创建目标时 title 不能为空");
+                    }
+                    if (isPrimary == null) {
+                        return failure("创建目标前必须先确认该目标是主目标还是副目标");
+                    }
+                    targetGoal = createGoalRecord(userId, title.trim(), deadline, isPrimary);
+                    if (Boolean.TRUE.equals(isPrimary)) {
+                        replaceMilestones(userId, targetGoal.getId(), milestoneSpecs);
+                    }
+                    message = "目标创建成功";
+                }
+                case "update" -> {
+                    if (goalId == null || goalId <= 0) {
+                        return failure("更新目标时 goalId 不能为空");
+                    }
+                    targetGoal = goalMapper.findByIdAndUserId(goalId, userId);
+                    if (targetGoal == null) {
+                        return failure("未找到对应目标");
+                    }
+                    boolean changed = false;
+                    if (title != null && !title.isBlank()) {
+                        targetGoal.setTitle(title.trim());
+                        changed = true;
+                    }
+                    if (deadline != null && !deadline.isBlank()) {
+                        targetGoal.setEta(parseGoalDeadline(deadline));
+                        changed = true;
+                    }
+                    if (changed) {
+                        goalMapper.update(targetGoal);
+                    }
+                    if (milestones != null && Boolean.TRUE.equals(targetGoal.getIsPrimary())) {
+                        replaceMilestones(userId, targetGoal.getId(), milestoneSpecs);
+                    }
+                    message = "目标更新成功";
+                }
+                case "complete" -> {
+                    if (goalId == null || goalId <= 0) {
+                        return failure("完成目标时 goalId 不能为空");
+                    }
+                    targetGoal = goalMapper.findByIdAndUserId(goalId, userId);
+                    if (targetGoal == null) {
+                        return failure("未找到对应目标");
+                    }
+                    targetGoal.setStatus("DONE");
+                    targetGoal.setProgress(100);
+                    goalMapper.update(targetGoal);
+                    markMilestonesDone(targetGoal.getId());
+                    message = "目标已标记为完成";
+                }
+                case "delete" -> {
+                    if (goalId == null || goalId <= 0) {
+                        return failure("删除目标时 goalId 不能为空");
+                    }
+                    targetGoal = goalMapper.findByIdAndUserId(goalId, userId);
+                    if (targetGoal == null) {
+                        return failure("未找到对应目标");
+                    }
+                    goalMilestoneMapper.deleteByGoalId(goalId);
+                    goalMapper.deleteByIdAndUserId(goalId, userId);
+
+                    Map<String, Object> payload = new LinkedHashMap<>();
+                    payload.put("success", true);
+                    payload.put("action", normalizedAction);
+                    payload.put("goal_id", goalId);
+                    payload.put("message", "目标删除成功");
+                    return toJson(payload);
+                }
+                default -> {
+                    return failure("不支持的目标操作");
+                }
+            }
+
+            Goal refreshedGoal = goalMapper.findByIdAndUserId(targetGoal.getId(), userId);
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("success", true);
+            payload.put("action", normalizedAction);
+            payload.put("message", message);
+            payload.put("goal", refreshedGoal == null ? Map.of() : buildGoalPayload(refreshedGoal));
+            return toJson(payload);
+        } catch (Exception e) {
+            log.error("updateGoal 执行失败", e);
+            return failure("更新目标失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取岗位市场洞察、趋势和热门岗位。
+     * @param industry 行业分类，可选
+     * @param category 岗位类别或岗位关键词，可选
+     * @return 包含洞察、趋势和热门岗位的 JSON 字符串
+     */
+    @Tool(description = "查询岗位市场洞察、薪资趋势和热门岗位。适用于回答某类岗位的市场需求、薪资变化和热门技能。")
+    public String getMarketInsight(
+            @ToolParam(description = "行业分类，可选，例如互联网、AI、数据分析")
+            @Nullable String industry,
+            @ToolParam(description = "岗位类别或岗位关键词，可选，例如前端、Java、产品经理")
+            @Nullable String category) {
+        try {
+            JobCategory matchedJob = resolveMarketJobCategory(category);
+            Long jobProfileId = matchedJob != null ? matchedJob.getId() : null;
+
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("success", true);
+            payload.put("industry", industry);
+            payload.put("category", category);
+            payload.put("matched_job", matchedJob == null ? null : Map.of(
+                    "job_id", matchedJob.getId(),
+                    "job_name", matchedJob.getJobCategoryName(),
+                    "job_level", matchedJob.getJobLevel(),
+                    "job_level_name", matchedJob.getJobLevelName()
+            ));
+            payload.put("insight", jsonNodeToJava(objectMapper.valueToTree(marketService.getInsight(jobProfileId, null))));
+            payload.put("trends", jsonNodeToJava(objectMapper.valueToTree(marketService.getTrends(jobProfileId, null, "quarter"))));
+            payload.put("hot_jobs", jsonNodeToJava(objectMapper.valueToTree(marketService.getHotJobs(5, null, industry))));
+            return toJson(payload);
+        } catch (Exception e) {
+            log.error("getMarketInsight 执行失败", e);
+            return failure("查询市场洞察失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 修改用户最新简历的结构化字段，并联动更新 PDF、向量和岗位匹配。
      * @param field 要修改的字段名
      * @param newValue 字段的新值，复杂字段传 JSON 字符串
@@ -341,7 +588,7 @@ public class CareerPlanningTools {
                     .vectorStoreId(resume.getVectorStoreId())
                     .parsedData(updatedParsedData)
                     .resumeFilePath(newFileUrl)
-                    .updateTime(LocalDateTime.now())
+                    .updateTime(currentDateTime())
                     .build();
             resumeMapper.update(updatedResume);
 
@@ -349,7 +596,7 @@ public class CareerPlanningTools {
                     .id(resume.getVectorStoreId())
                     .resumeContent(resumeContent)
                     .resumeFilePath(newFileUrl)
-                    .updateTime(LocalDateTime.now())
+                    .updateTime(currentDateTime())
                     .build();
             userVectorStoreMapper.update(vectorStore);
 
@@ -973,7 +1220,7 @@ public class CareerPlanningTools {
                 .targetJob(matchedJob.getJobCategoryName())
                 .targetJobId(matchedJob.getId())
                 .jobProfile(toJson(jobProfile))
-                .updateTime(LocalDateTime.now())
+                .updateTime(currentDateTime())
                 .build();
 
         if (existing != null) {
@@ -984,7 +1231,7 @@ public class CareerPlanningTools {
             data.setMarketTrends("[]");
             data.setSkillRadar("{}");
             data.setActions("[]");
-            data.setCreateTime(LocalDateTime.now());
+            data.setCreateTime(currentDateTime());
             userCareerDataMapper.insert(data);
         }
     }
@@ -1025,14 +1272,14 @@ public class CareerPlanningTools {
                 .jobProfileId(matchedJob.getId())
                 .currentStepIndex(currentIndex)
                 .steps(toJson(steps))
-                .updateTime(LocalDateTime.now())
+                .updateTime(currentDateTime())
                 .build();
 
         if (existing != null) {
             roadmap.setId(existing.getId());
             userRoadmapStepsMapper.update(roadmap);
         } else {
-            roadmap.setCreateTime(LocalDateTime.now());
+            roadmap.setCreateTime(currentDateTime());
             userRoadmapStepsMapper.insert(roadmap);
         }
     }
@@ -1053,6 +1300,236 @@ public class CareerPlanningTools {
             case "INTERNSHIP", "JUNIOR", "MID", "SENIOR" -> level.trim().toUpperCase(Locale.ROOT);
             default -> null;
         };
+    }
+
+    private List<Goal> loadUserGoals(Long userId, @Nullable Long goalId) {
+        if (goalId != null && goalId > 0) {
+            Goal goal = goalMapper.findByIdAndUserId(goalId, userId);
+            return goal == null ? List.of() : List.of(goal);
+        }
+
+        List<Goal> goals = new ArrayList<>();
+        Goal primary = goalMapper.findPrimaryByUserId(userId);
+        if (primary != null) {
+            goals.add(primary);
+        }
+        goals.addAll(goalMapper.findParallelByUserId(userId));
+        goals.sort(Comparator
+                .comparing((Goal goal) -> !Boolean.TRUE.equals(goal.getIsPrimary()))
+                .thenComparing(Goal::getCreateTime, Comparator.nullsLast(Comparator.reverseOrder())));
+        return goals;
+    }
+
+    private Map<String, Object> buildGoalPayload(Goal goal) {
+        List<GoalMilestone> milestones = goalMilestoneMapper.findByGoalId(goal.getId());
+        int milestoneTotal = milestones.size();
+        int milestoneCompleted = (int) milestones.stream()
+                .filter(item -> "DONE".equalsIgnoreCase(item.getStatus()))
+                .count();
+
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("goal_id", goal.getId());
+        item.put("title", goal.getTitle());
+        item.put("description", goal.getGoalDesc());
+        item.put("status", goal.getStatus());
+        item.put("progress", goal.getProgress());
+        item.put("deadline", goal.getEta());
+        item.put("is_primary", goal.getIsPrimary());
+        item.put("milestone_completed", milestoneCompleted);
+        item.put("milestone_total", milestoneTotal);
+        item.put("milestones", milestones.stream().map(this::buildMilestonePayload).toList());
+        item.put("success_criteria", buildGoalSuccessCriteria(goal));
+        item.put("long_term_aspirations", parseJsonArray(goal.getLongTermAspirations()));
+        item.put("ai_advice", goal.getAiAdvice());
+        item.put("created_at", goal.getCreateTime());
+        item.put("updated_at", goal.getUpdateTime());
+        return item;
+    }
+
+    private Map<String, Object> buildMilestonePayload(GoalMilestone milestone) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("milestone_id", milestone.getId());
+        item.put("goal_id", milestone.getGoalId());
+        item.put("title", milestone.getTitle());
+        item.put("description", milestone.getMilestoneDesc());
+        item.put("status", milestone.getStatus());
+        item.put("progress", milestone.getProgress());
+        item.put("sort_order", milestone.getSortOrder());
+        item.put("created_at", milestone.getCreateTime());
+        item.put("updated_at", milestone.getUpdateTime());
+        return item;
+    }
+
+    private Map<String, Object> buildGoalSuccessCriteria(Goal goal) {
+        Map<String, Object> criteria = new LinkedHashMap<>();
+        criteria.put("salary", goal.getSuccessSalary());
+        criteria.put("companies", parseJsonArray(goal.getSuccessCompanies()));
+        criteria.put("cities", parseJsonArray(goal.getSuccessCities()));
+        return criteria;
+    }
+
+    private String normalizeGoalStatusFilter(@Nullable String status) {
+        if (status == null || status.isBlank()) {
+            return null;
+        }
+        return switch (status.trim().toLowerCase(Locale.ROOT)) {
+            case "active", "completed" -> status.trim().toLowerCase(Locale.ROOT);
+            default -> null;
+        };
+    }
+
+    private boolean matchesGoalStatusFilter(@Nullable String goalStatus, String filter) {
+        String normalized = goalStatus == null ? "" : goalStatus.trim().toUpperCase(Locale.ROOT);
+        return switch (filter) {
+            case "active" -> !"DONE".equals(normalized);
+            case "completed" -> "DONE".equals(normalized);
+            default -> true;
+        };
+    }
+
+    private String normalizeGoalAction(@Nullable String action) {
+        if (action == null || action.isBlank()) {
+            return null;
+        }
+        return switch (action.trim().toLowerCase(Locale.ROOT)) {
+            case "create", "update", "complete", "delete" -> action.trim().toLowerCase(Locale.ROOT);
+            default -> null;
+        };
+    }
+
+    private Goal createGoalRecord(Long userId, String title, @Nullable String deadline, boolean isPrimary) {
+        Goal goal = new Goal();
+        goal.setUserId(userId);
+        goal.setTitle(title);
+        goal.setGoalDesc("");
+        goal.setStatus("TODO");
+        goal.setProgress(0);
+        goal.setEta(parseGoalDeadline(deadline));
+        goal.setIsPrimary(isPrimary);
+        goal.setSuccessSalary(null);
+        goal.setSuccessCompanies("[]");
+        goal.setSuccessCities("[]");
+        goal.setLongTermAspirations("[]");
+        goal.setAiAdvice(null);
+        if (isPrimary) {
+            goalMapper.clearPrimaryByUserId(userId);
+        }
+        goalMapper.insert(goal);
+        return goal;
+    }
+
+    private String parseGoalDeadline(@Nullable String deadline) {
+        if (deadline == null || deadline.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(deadline.trim()).toString();
+        } catch (Exception e) {
+            throw new IllegalArgumentException("deadline 必须为 yyyy-MM-dd 格式");
+        }
+    }
+
+    private List<Map<String, Object>> parseMilestoneSpecs(@Nullable String milestones) throws Exception {
+        if (milestones == null || milestones.isBlank()) {
+            return List.of();
+        }
+        JsonNode node = objectMapper.readTree(milestones);
+        if (!node.isArray()) {
+            throw new IllegalArgumentException("milestones 必须传 JSON 数组字符串");
+        }
+
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (JsonNode item : node) {
+            if (!item.isObject()) {
+                continue;
+            }
+            Map<String, Object> spec = new LinkedHashMap<>();
+            spec.put("title", textValue(item, "title", ""));
+            spec.put("desc", textValue(item, "desc", ""));
+            spec.put("status", textValue(item, "status", "TODO"));
+            spec.put("progress", item.has("progress") && item.get("progress").canConvertToInt() ? item.get("progress").asInt() : 0);
+            spec.put("order", item.has("order") && item.get("order").canConvertToInt() ? item.get("order").asInt() : result.size() + 1);
+            result.add(spec);
+        }
+        return result;
+    }
+
+    private void replaceMilestones(Long userId, Long goalId, List<Map<String, Object>> milestoneSpecs) {
+        goalMilestoneMapper.deleteByGoalId(goalId);
+        for (int i = 0; i < milestoneSpecs.size(); i++) {
+            Map<String, Object> spec = milestoneSpecs.get(i);
+            String title = String.valueOf(spec.getOrDefault("title", "")).trim();
+            if (title.isBlank()) {
+                continue;
+            }
+            GoalMilestone milestone = new GoalMilestone();
+            milestone.setGoalId(goalId);
+            milestone.setUserId(userId);
+            milestone.setTitle(title);
+            milestone.setMilestoneDesc(String.valueOf(spec.getOrDefault("desc", "")));
+            milestone.setStatus(normalizeMilestoneStatus(String.valueOf(spec.getOrDefault("status", "TODO"))));
+            milestone.setProgress(clampProgress(asInt(spec.get("progress"), 0)));
+            milestone.setSortOrder(asInt(spec.get("order"), i + 1));
+            if ("DONE".equals(milestone.getStatus())) {
+                milestone.setProgress(100);
+            }
+            goalMilestoneMapper.insert(milestone);
+        }
+    }
+
+    private void markMilestonesDone(Long goalId) {
+        List<GoalMilestone> milestones = goalMilestoneMapper.findByGoalId(goalId);
+        for (GoalMilestone milestone : milestones) {
+            milestone.setStatus("DONE");
+            milestone.setProgress(100);
+            goalMilestoneMapper.update(milestone);
+        }
+    }
+
+    private String normalizeMilestoneStatus(@Nullable String status) {
+        if (status == null || status.isBlank()) {
+            return "TODO";
+        }
+        return switch (status.trim().toUpperCase(Locale.ROOT)) {
+            case "TODO", "IN_PROGRESS", "DONE" -> status.trim().toUpperCase(Locale.ROOT);
+            default -> "TODO";
+        };
+    }
+
+    private int asInt(@Nullable Object value, int defaultValue) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value instanceof String text && !text.isBlank()) {
+            try {
+                return Integer.parseInt(text);
+            } catch (NumberFormatException ignored) {
+                return defaultValue;
+            }
+        }
+        return defaultValue;
+    }
+
+    private int clampProgress(int progress) {
+        return Math.max(0, Math.min(100, progress));
+    }
+
+    private JobCategory resolveMarketJobCategory(@Nullable String category) {
+        if (category == null || category.isBlank()) {
+            return null;
+        }
+        return jobCategoryMapper.searchByKeyword(category.trim(), 1)
+                .stream()
+                .findFirst()
+                .orElse(null);
+    }
+
+    private LocalDate currentDate() {
+        return LocalDate.now(clock);
+    }
+
+    private LocalDateTime currentDateTime() {
+        return LocalDateTime.now(clock);
     }
 
     private BigDecimal calculateSkillMatchScore(String skill, JobCategory job) {

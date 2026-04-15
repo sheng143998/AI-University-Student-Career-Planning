@@ -28,6 +28,8 @@ import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
+import java.time.Clock;
+import java.time.ZoneId;
 import java.util.concurrent.Executor;
 
 import static org.springframework.ai.vectorstore.pgvector.PgVectorStore.PgDistanceType.COSINE_DISTANCE;
@@ -38,6 +40,11 @@ import static org.springframework.ai.vectorstore.pgvector.PgVectorStore.PgIndexT
 @EnableCaching
 @EnableScheduling
 public class CommonConfig implements AsyncConfigurer {
+
+    @Bean
+    public Clock systemClock() {
+        return Clock.system(ZoneId.of("Asia/Shanghai"));
+    }
 
     @Bean
     public ChatMemory chatMemory(){

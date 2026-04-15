@@ -176,7 +176,13 @@
 
           >
 
-            <div v-if="m.role === 'assistant'" class="prose prose-sm max-w-none leading-relaxed message-content" v-html="renderMarkdown(m.content)"></div>
+            <div v-if="m.role === 'assistant'">
+              <div v-if="m.isThinking" class="flex items-center gap-2 text-xs text-on-surface-variant font-medium">
+                <span>AI 正在思考</span>
+                <span class="thinking-dots" aria-hidden="true"></span>
+              </div>
+              <div v-else class="prose prose-sm max-w-none leading-relaxed message-content" v-html="renderMarkdown(m.content)"></div>
+            </div>
             <p v-else class="leading-relaxed whitespace-pre-wrap">{{ m.content }}</p>
 
 
@@ -423,6 +429,7 @@ type ChatMessage = {
   id: string
   role: 'assistant' | 'user'
   content: string
+  isThinking?: boolean
   suggestions?: Suggestion[]
   tip?: string
 }
@@ -583,19 +590,24 @@ async function send() {
 
   // 添加占位 AI 消息
   const aiMsgId = `a${Date.now()}`
-  list.push({ id: aiMsgId, role: 'assistant', content: '' })
+  list.push({ id: aiMsgId, role: 'assistant', content: '', isThinking: true })
   void nextTick(() => scrollToBottom())
 
   try {
     const response = await sendMessage(conversationId, content, selectedResumeId.value ?? undefined)
     if (!response.body) {
-      list[list.length - 1].content = '抱歉，发生了错误，请重试。'
+      const msg = list.find(m => m.id === aiMsgId)
+      if (msg) {
+        msg.isThinking = false
+        msg.content = '抱歉，发生了错误，请重试。'
+      }
       return
     }
 
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let aiContent = ''
+    let firstChunkReceived = false
 
     while (true) {
       const { done, value } = await reader.read()
@@ -604,8 +616,19 @@ async function send() {
       aiContent += chunk
       // 更新消息内容
       const msg = list.find(m => m.id === aiMsgId)
-      if (msg) msg.content = aiContent
+      if (msg) {
+        if (!firstChunkReceived) {
+          firstChunkReceived = true
+          msg.isThinking = false
+        }
+        msg.content = aiContent
+      }
       void nextTick(() => scrollToBottom())
+    }
+
+    if (!firstChunkReceived) {
+      const msg = list.find(m => m.id === aiMsgId)
+      if (msg) msg.isThinking = false
     }
     
     // 流结束后刷新会话列表以显示新标题
@@ -613,7 +636,10 @@ async function send() {
   } catch (e) {
     console.error('发送消息失败', e)
     const msg = list.find(m => m.id === aiMsgId)
-    if (msg) msg.content = '抱歉，发生了错误，请重试。'
+    if (msg) {
+      msg.isThinking = false
+      msg.content = '抱歉，发生了错误，请重试。'
+    }
   }
 }
 
@@ -701,6 +727,62 @@ function formatTime(dateStr: string | null): string {
 </script>
 
 <style scoped>
+.thinking-dots {
+  width: 18px;
+  height: 4px;
+  display: inline-block;
+  background: currentColor;
+  border-radius: 999px;
+  opacity: 0.25;
+  position: relative;
+  animation: thinkingPulse 1.2s infinite ease-in-out;
+}
+
+.thinking-dots::before,
+.thinking-dots::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.7;
+}
+
+.thinking-dots::before {
+  left: -8px;
+  animation: thinkingDot 1.2s infinite ease-in-out;
+}
+
+.thinking-dots::after {
+  right: -8px;
+  animation: thinkingDot 1.2s infinite ease-in-out;
+  animation-delay: 0.2s;
+}
+
+@keyframes thinkingPulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes thinkingDot {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  50% {
+    transform: translateY(-2px);
+    opacity: 0.9;
+  }
+}
+
 /* AI 消息 Markdown 样式 */
 .message-content {
   line-height: 1.7;
