@@ -53,6 +53,17 @@ logging:
     org.springframework.ai.chat.client.advisor: debug
     com.itsheng.service: debug
 
+resume:
+  parser:
+    pdf:
+      min-effective-chars: 80
+      min-effective-chars-per-page: 20
+      ocr-enabled: true
+      ocr-model: qwen-vl-ocr-2025-11-20
+      ocr-max-pages: 10
+      ocr-render-dpi: 180
+      ocr-timeout-seconds: 60
+
 fuchuang:
   jwt:
     # jwt 签名密钥（至少32字符，满足HS256的256bits要求）

@@ -30,6 +30,7 @@ import com.itsheng.service.mapper.UserCareerDataMapper;
 import com.itsheng.service.mapper.UserRoadmapStepsMapper;
 import com.itsheng.service.mapper.UserVectorStoreMapper;
 import com.itsheng.service.service.JobVectorSearchService;
+import com.itsheng.service.service.ResumeOcrService;
 import com.itsheng.service.service.ResumeService;
 import com.itsheng.common.utils.AliOssUtil;
 import lombok.RequiredArgsConstructor;
@@ -49,6 +50,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -81,6 +83,16 @@ public class ResumeServiceImpl implements ResumeService {
     private final JobVectorSearchService jobVectorSearchService;
     private final UserCareerDataMapper userCareerDataMapper;
     private final UserRoadmapStepsMapper userRoadmapStepsMapper;
+    private final ResumeOcrService resumeOcrService;
+
+    @Value("${resume.parser.pdf.min-effective-chars:80}")
+    private int pdfMinEffectiveChars;
+
+    @Value("${resume.parser.pdf.min-effective-chars-per-page:20}")
+    private int pdfMinEffectiveCharsPerPage;
+
+    @Value("${resume.parser.pdf.ocr-enabled:true}")
+    private boolean pdfOcrEnabled;
 
     // 文件类型与 MIME 类型的映射
     private static final Map<String, String> MIME_TYPE_MAP = new HashMap<>();
@@ -114,6 +126,8 @@ public class ResumeServiceImpl implements ResumeService {
             // 获取原始文件名和扩展名
             String originalFilename = file.getOriginalFilename();
             String fileType = getFileExtension(originalFilename);
+            log.debug("简历上传参数：userId={}, originalFilename={}, fileType={}, fileSize={} bytes",
+                    userId, originalFilename, fileType, file.getSize());
 
             // 调用 CommonController 上传文件到 OSS
             Result<String> uploadResult = commonController.upload(file);
@@ -126,6 +140,12 @@ public class ResumeServiceImpl implements ResumeService {
             // 解析简历内容
             byte[] fileBytes = file.getBytes();
             List<Document> documents = parseResume(fileBytes, fileType, userId, fileUrl);
+            log.debug("简历解析完成：userId={}, fileType={}, documentCount={}", userId, fileType, documents.size());
+
+            if (documents.isEmpty()) {
+                log.warn("简历解析后未生成任何文档片段，终止后续流程，userId={}, fileUrl={}", userId, fileUrl);
+                throw new FileUploadException("RESUME_TEXT_EXTRACTION_FAILED: 简历未识别到有效内容，请上传可编辑文本版 PDF 或 DOCX");
+            }
 
             // 将简历内容分批添加到向量存储（通义千问限制 batch size 最大为 10）
             int batchSize = 10;
@@ -152,6 +172,14 @@ public class ResumeServiceImpl implements ResumeService {
             String resumeContent = documents.stream()
                     .map(Document::getText)
                     .collect(Collectors.joining("\n"));
+            int effectiveChars = countEffectiveChars(resumeContent);
+            log.debug("简历文本聚合完成：userId={}, totalChars={}, effectiveChars={}", userId,
+                    resumeContent.length(), effectiveChars);
+
+            if (effectiveChars == 0) {
+                log.warn("简历聚合文本为空，终止 AI 分析流程，userId={}, fileUrl={}", userId, fileUrl);
+                throw new FileUploadException("RESUME_TEXT_EXTRACTION_FAILED: 简历内容为空，无法继续分析");
+            }
 
             // 生成主键 ID（UUID 字符串）
             String id = documents.get(0).getId();
@@ -976,65 +1004,180 @@ public class ResumeServiceImpl implements ResumeService {
         String baseDocId = UUID.randomUUID().toString();
 
         // 构建基础 metadata
+        Map<String, Object> baseMetadata = buildBaseMetadata(userId, fileUrl, fileType, baseDocId);
+        log.debug("开始解析简历文件：userId={}, fileType={}, fileUrl={}, baseDocId={}",
+                userId, fileType, fileUrl, baseDocId);
+
+        if ("pdf".equals(fileType)) {
+            return parseResumeByPdf(resource, fileBytes, baseMetadata, userId, fileUrl);
+        } else {
+            return parseResumeByTika(resource, baseMetadata, fileType);
+        }
+    }
+
+    private List<Document> parseResumeByPdf(ByteArrayResource resource, byte[] fileBytes,
+                                            Map<String, Object> baseMetadata, Long userId, String fileUrl) {
+        log.debug("开始执行 PDF 文本提取：userId={}, fileUrl={}", userId, fileUrl);
+
+        PagePdfDocumentReader reader = new PagePdfDocumentReader(
+                resource,
+                PdfDocumentReaderConfig.builder()
+                        .withPageExtractedTextFormatter(ExtractedTextFormatter.defaults())
+                        .withPagesPerDocument(ResumeConstant.PDF_PAGES_PER_DOCUMENT)
+                        .build()
+        );
+        List<Document> pageDocuments = reader.read();
+        log.info("PDF 简历文本提取完成，共{}页文档", pageDocuments.size());
+
+        int rawEffectiveChars = countEffectiveChars(joinDocumentTexts(pageDocuments));
+        log.debug("PDF 文本提取统计：rawDocumentCount={}, rawEffectiveChars={}, minEffectiveChars={}, minEffectiveCharsPerPage={}",
+                pageDocuments.size(), rawEffectiveChars, pdfMinEffectiveChars, pdfMinEffectiveCharsPerPage);
+
+        if (isTextExtractionInsufficient(pageDocuments)) {
+            log.warn("检测到疑似图片型 PDF 或文本过少，userId={}, fileUrl={}, rawEffectiveChars={}",
+                    userId, fileUrl, rawEffectiveChars);
+            pageDocuments = parsePdfWithOcrFallback(fileBytes, baseMetadata, userId, fileUrl, rawEffectiveChars);
+        }
+
+        validateExtractedResumeText(pageDocuments, "PDF_OCR_OR_TEXT");
+
+        List<Document> splitDocuments = splitDocuments(pageDocuments);
+        log.info("PDF 文本分割完成，共{}个片段", splitDocuments.size());
+
+        for (int i = 0; i < splitDocuments.size(); i++) {
+            splitDocuments.get(i).getMetadata().putAll(baseMetadata);
+            splitDocuments.get(i).getMetadata().put(ResumeConstant.METADATA_KEY_CHUNK_NUMBER, i);
+        }
+
+        validateExtractedResumeText(splitDocuments, "PDF_SPLIT");
+        return splitDocuments;
+    }
+
+    private List<Document> parseResumeByTika(ByteArrayResource resource, Map<String, Object> baseMetadata, String fileType) {
+        TikaDocumentReader reader = new TikaDocumentReader(resource);
+        List<Document> documents = reader.read();
+        log.info("Tika 简历解析成功 ({}), 共{}个文档", fileType, documents.size());
+        log.debug("Tika 文本提取统计：fileType={}, rawEffectiveChars={}", fileType, countEffectiveChars(joinDocumentTexts(documents)));
+
+        List<Document> splitDocuments = splitDocuments(documents);
+        log.info("文本分割完成，共{}个片段", splitDocuments.size());
+
+        for (int i = 0; i < splitDocuments.size(); i++) {
+            splitDocuments.get(i).getMetadata().putAll(baseMetadata);
+            splitDocuments.get(i).getMetadata().put(ResumeConstant.METADATA_KEY_CHUNK_NUMBER, i);
+        }
+
+        validateExtractedResumeText(splitDocuments, "TIKA_SPLIT");
+        return splitDocuments;
+    }
+
+    private List<Document> parsePdfWithOcrFallback(byte[] fileBytes, Map<String, Object> baseMetadata,
+                                                   Long userId, String fileUrl, int rawEffectiveChars) {
+        if (!pdfOcrEnabled) {
+            log.warn("检测到疑似图片型 PDF，但 OCR 未启用，userId={}, fileUrl={}", userId, fileUrl);
+            throw new FileUploadException("RESUME_IMAGE_PDF_OCR_REQUIRED: 该 PDF 可能为扫描件或图片，当前系统未启用 OCR，请上传可复制文本版 PDF 或 DOCX");
+        }
+
+        log.warn("开始对疑似图片型 PDF 执行 OCR fallback，userId={}, fileUrl={}, rawEffectiveChars={}",
+                userId, fileUrl, rawEffectiveChars);
+
+        List<Document> ocrDocuments = resumeOcrService.extractDocumentsFromPdf(fileBytes, baseMetadata);
+        int ocrEffectiveChars = countEffectiveChars(joinDocumentTexts(ocrDocuments));
+        log.debug("OCR fallback 完成：userId={}, fileUrl={}, ocrDocumentCount={}, ocrEffectiveChars={}",
+                userId, fileUrl, ocrDocuments.size(), ocrEffectiveChars);
+
+        if (isTextExtractionInsufficient(ocrDocuments)) {
+            log.warn("OCR fallback 后文本仍不足，userId={}, fileUrl={}, ocrEffectiveChars={}", userId, fileUrl, ocrEffectiveChars);
+            throw new FileUploadException("RESUME_OCR_FAILED: 简历内容识别失败，请上传可编辑文本版 PDF 或 DOCX");
+        }
+
+        return ocrDocuments;
+    }
+
+    private Map<String, Object> buildBaseMetadata(Long userId, String fileUrl, String fileType, String baseDocId) {
         Map<String, Object> baseMetadata = new HashMap<>();
         baseMetadata.put(ResumeConstant.METADATA_KEY_USER_ID, userId);
         baseMetadata.put(ResumeConstant.METADATA_KEY_FILE_PATH, fileUrl);
         baseMetadata.put(ResumeConstant.METADATA_KEY_FILE_TYPE, fileType);
         baseMetadata.put(ResumeConstant.METADATA_KEY_DOCUMENT_ID, baseDocId);
+        return baseMetadata;
+    }
 
-        if ("pdf".equals(fileType)) {
-            // PDF 文件解析 - 先按页读取，然后使用 TokenTextSplitter 进行带重叠的分割
-            PagePdfDocumentReader reader = new PagePdfDocumentReader(
-                    resource,
-                    PdfDocumentReaderConfig.builder()
-                            .withPageExtractedTextFormatter(ExtractedTextFormatter.defaults())
-                            .withPagesPerDocument(ResumeConstant.PDF_PAGES_PER_DOCUMENT)
-                            .build()
-            );
-            List<Document> documents = reader.read();
-            log.info("PDF 简历解析成功，共{}页", documents.size());
+    private List<Document> splitDocuments(List<Document> documents) {
+        TokenTextSplitter splitter = TokenTextSplitter.builder()
+                .withChunkSize(ResumeConstant.TEXT_SPLITTER_CHUNK_SIZE)
+                .withMinChunkSizeChars(ResumeConstant.TEXT_SPLITTER_MIN_CHUNK_SIZE_CHARS)
+                .withMinChunkLengthToEmbed(ResumeConstant.TEXT_SPLITTER_MIN_CHUNK_LENGTH_TO_EMBED)
+                .withMaxNumChunks(ResumeConstant.TEXT_SPLITTER_MAX_NUM_CHUNKS)
+                .build();
 
-            // 使用 TokenTextSplitter 进行带重叠的分割，避免跨页内容丢失
-            TokenTextSplitter splitter = TokenTextSplitter.builder()
-                    .withChunkSize(ResumeConstant.TEXT_SPLITTER_CHUNK_SIZE)
-                    .withMinChunkSizeChars(ResumeConstant.TEXT_SPLITTER_MIN_CHUNK_SIZE_CHARS)
-                    .withMinChunkLengthToEmbed(ResumeConstant.TEXT_SPLITTER_MIN_CHUNK_LENGTH_TO_EMBED)
-                    .withMaxNumChunks(ResumeConstant.TEXT_SPLITTER_MAX_NUM_CHUNKS)
-                    .build();
+        List<Document> splitDocuments = splitter.apply(documents);
+        log.debug("文本分割统计：rawDocumentCount={}, splitDocumentCount={}, splitEffectiveChars={}",
+                documents.size(), splitDocuments.size(), countEffectiveChars(joinDocumentTexts(splitDocuments)));
+        return splitDocuments;
+    }
 
-            List<Document> splitDocuments = splitter.apply(documents);
-            log.info("PDF 文本分割完成（带重叠），共{}个片段", splitDocuments.size());
-
-            // 为每个 document 添加基础 metadata
-            for (int i = 0; i < splitDocuments.size(); i++) {
-                splitDocuments.get(i).getMetadata().putAll(baseMetadata);
-                splitDocuments.get(i).getMetadata().put(ResumeConstant.METADATA_KEY_PAGE_NUMBER, i + 1);
-            }
-            return splitDocuments;
-        } else {
-            // 使用 Tika 处理 DOCX、PPTX、HTML、TXT 等格式
-            TikaDocumentReader reader = new TikaDocumentReader(resource);
-            List<Document> documents = reader.read();
-            log.info("Tika 简历解析成功 ({}), 共{}个文档", fileType, documents.size());
-
-            // 对于非 PDF 格式，使用文本分割器进行分割以适配向量模型
-            TokenTextSplitter splitter = TokenTextSplitter.builder()
-                    .withChunkSize(ResumeConstant.TEXT_SPLITTER_CHUNK_SIZE)
-                    .withMinChunkSizeChars(ResumeConstant.TEXT_SPLITTER_MIN_CHUNK_SIZE_CHARS)
-                    .withMinChunkLengthToEmbed(ResumeConstant.TEXT_SPLITTER_MIN_CHUNK_LENGTH_TO_EMBED)
-                    .withMaxNumChunks(ResumeConstant.TEXT_SPLITTER_MAX_NUM_CHUNKS)
-                    .build();
-
-            List<Document> splitDocuments = splitter.apply(documents);
-            log.info("文本分割完成，共{}个片段", splitDocuments.size());
-
-            // 为每个 document 添加基础 metadata
-            for (int i = 0; i < splitDocuments.size(); i++) {
-                splitDocuments.get(i).getMetadata().putAll(baseMetadata);
-                splitDocuments.get(i).getMetadata().put(ResumeConstant.METADATA_KEY_CHUNK_NUMBER, i);
-            }
-            return splitDocuments;
+    private void validateExtractedResumeText(List<Document> documents, String stage) {
+        int effectiveChars = countEffectiveChars(joinDocumentTexts(documents));
+        if (documents == null || documents.isEmpty()) {
+            log.warn("简历解析阶段 {} 未生成任何文档", stage);
+            throw new FileUploadException("RESUME_TEXT_EXTRACTION_FAILED: 简历未识别到有效内容，请上传可编辑文本版 PDF 或 DOCX");
         }
+        if (effectiveChars == 0) {
+            log.warn("简历解析阶段 {} 的有效字符数为 0", stage);
+            throw new FileUploadException("RESUME_TEXT_EXTRACTION_FAILED: 简历内容为空，无法继续分析");
+        }
+        log.debug("简历解析阶段 {} 校验通过：documentCount={}, effectiveChars={}", stage, documents.size(), effectiveChars);
+    }
+
+    private boolean isTextExtractionInsufficient(List<Document> documents) {
+        if (documents == null || documents.isEmpty()) {
+            log.warn("文本提取结果为空，判定为提取不足");
+            return true;
+        }
+
+        String mergedText = joinDocumentTexts(documents);
+        int totalEffectiveChars = countEffectiveChars(mergedText);
+        int avgEffectiveCharsPerDocument = totalEffectiveChars / documents.size();
+
+        boolean insufficient = totalEffectiveChars < pdfMinEffectiveChars
+                || avgEffectiveCharsPerDocument < pdfMinEffectiveCharsPerPage
+                || allDocumentsNearlyEmpty(documents);
+
+        log.debug("文本有效性判定：documentCount={}, totalEffectiveChars={}, avgEffectiveCharsPerDocument={}, insufficient={}",
+                documents.size(), totalEffectiveChars, avgEffectiveCharsPerDocument, insufficient);
+
+        if (insufficient) {
+            log.warn("文本提取结果不足：documentCount={}, totalEffectiveChars={}, avgEffectiveCharsPerDocument={}",
+                    documents.size(), totalEffectiveChars, avgEffectiveCharsPerDocument);
+        }
+        return insufficient;
+    }
+
+    private boolean allDocumentsNearlyEmpty(List<Document> documents) {
+        for (Document document : documents) {
+            if (countEffectiveChars(document.getText()) >= Math.max(10, pdfMinEffectiveCharsPerPage)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private String joinDocumentTexts(List<Document> documents) {
+        if (documents == null || documents.isEmpty()) {
+            return "";
+        }
+        return documents.stream()
+                .map(Document::getText)
+                .filter(Objects::nonNull)
+                .collect(Collectors.joining("\n"));
+    }
+
+    private int countEffectiveChars(String text) {
+        if (text == null || text.isBlank()) {
+            return 0;
+        }
+        return text.replaceAll("\\s+", "").length();
     }
 
     /**
