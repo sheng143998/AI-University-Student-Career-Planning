@@ -11,8 +11,8 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 /**
- * AIå¸åºæ´å¯å®æ¶å·æ°ä»»å¡¡
- * æ¯å¤©åæ¨¨2ç¹æ§è¡ï¼æ´æ°ææå²ä½çAIæ´å¯ç¼å­
+ * AI市场洞察定时刷新任务
+ * 每天凌晨2点执行，更新所有岗位的AI洞察缓存
  */
 @Slf4j
 @Component
@@ -23,34 +23,34 @@ public class MarketInsightRefreshTask {
     private final JobCategoryMapper jobCategoryMapper;
 
     /**
-     * æ¯å¤©åæ¨¨2ç¹æ§è¡ï¼å·æ°ææå²ä½çAIæ´å¯ç¼å­
-     * cron: ç§ åé æ¶ æ¥ æ æ å¹
+     * 每天凌晨2点执行，更新所有岗位的AI洞察缓存
+     * cron: 秒 分 时 日 月 星期
      */
     @Scheduled(cron = "0 0 2 * * ?")
     public void refreshAllInsights() {
-        log.info("===== å¼å§æ§è¡AIå¸åºæ´å¯å®æ¶å·æ°ä»»å¡ =====");
-        
+        log.info("===== 开始执行AI市场洞察定时刷新任务 =====");
+
         try {
-            // è·åææå²ä½
+            // 获取所有岗位
             List<JobCategory> allJobs = jobCategoryMapper.selectAll();
             int successCount = 0;
             int failCount = 0;
-            
+
             for (JobCategory job : allJobs) {
                 try {
                     marketService.refreshInsightCache(job.getId());
                     successCount++;
                 } catch (Exception e) {
-                    log.warn("å·æ°å²ä½æ´å¯å¤±è´¥: jobId={}, error={}", job.getId(), e.getMessage());
+                    log.warn("更新岗位洞察失败: jobId={}, error={}", job.getId(), e.getMessage());
                     failCount++;
                 }
             }
-            
-            log.info("===== AIå¸åºæ´å¯å®æ¶å·æ°å®æ: æå={}, å¤±è´¥={}, æ»æ°={} =====", 
+
+            log.info("===== AI市场洞察定时刷新完成: 成功={}, 失败={}, 总数={} =====",
                     successCount, failCount, allJobs.size());
-                    
+
         } catch (Exception e) {
-            log.error("AIå¸åºæ´å¯å®æ¶å·æ°ä»»å¡æ§è¡å¤±è´¥", e);
+            log.error("AI市场洞察定时刷新任务执行失败", e);
         }
     }
 }
