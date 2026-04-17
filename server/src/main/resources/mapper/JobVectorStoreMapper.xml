@@ -78,6 +78,14 @@
         WHERE id = #{id}
     </select>
 
+    <select id="selectAllAvailable" resultMap="JobVectorStoreResult">
+        SELECT *
+        FROM ai_career_plan.job_vector_store
+        WHERE job_id IS NOT NULL
+          AND embedding IS NOT NULL
+        ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST, id ASC
+    </select>
+
     <!-- 动态更新岗位向量数据 -->
     <update id="update" parameterType="com.itsheng.pojo.entity.JobVectorStore">
         UPDATE ai_career_plan.job_vector_store
@@ -91,14 +99,6 @@
         </set>
         WHERE id = #{id}
     </update>
-
-    <!-- 根据向量搜索相似岗位 (余弦相似度) -->
-    <select id="searchByVector" resultMap="JobVectorStoreResult">
-        SELECT *
-        FROM ai_career_plan.job_vector_store
-        ORDER BY embedding &lt;#&gt; #{vector}
-        LIMIT #{limit}
-    </select>
 
     <!-- 批量更新岗位向量数据的 job_id 和 content_hash 字段 -->
     <update id="updateBatch" parameterType="java.util.List">

@@ -36,7 +36,6 @@ import com.lowagie.text.pdf.BaseFont;
 import com.lowagie.text.pdf.PdfWriter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
@@ -79,7 +78,6 @@ public class CareerPlanningTools {
     private final UserCareerDataMapper userCareerDataMapper;
     private final MarketService marketService;
     private final AliOssUtil aliOssUtil;
-    private final OpenAiEmbeddingModel embeddingModel;
     private final ObjectMapper objectMapper;
     private final VectorStore pgVectorStore;
     private final ResumeFileEditService resumeFileEditService;
@@ -182,7 +180,7 @@ public class CareerPlanningTools {
             log.debug("searchJobs: keyword search found {} jobs", jobs.size());
             if (jobs.isEmpty()) {
                 log.debug("searchJobs: 关键词搜索无结果，尝试向量搜索");
-                jobs = new ArrayList<>(jobVectorSearchService.searchSimilarJobs(buildEmbeddingVector(skill), safeLimit * 3));
+                jobs = new ArrayList<>(jobVectorSearchService.searchSimilarJobs(skill, safeLimit * 3));
                 log.debug("searchJobs: 向量搜索返回 {} 个岗位", jobs.size());
             }
 
@@ -1273,21 +1271,6 @@ public class CareerPlanningTools {
             }
         });
         return String.join("\n", lines);
-    }
-
-    private String buildEmbeddingVector(String text) {
-        log.debug("buildEmbeddingVector: textLength={}", text == null ? 0 : text.length());
-        float[] vector = embeddingModel.embed(text == null ? "" : text);
-        log.debug("buildEmbeddingVector: vectorDimension={}", vector.length);
-        StringBuilder builder = new StringBuilder("[");
-        for (int i = 0; i < vector.length; i++) {
-            if (i > 0) {
-                builder.append(",");
-            }
-            builder.append(vector[i]);
-        }
-        builder.append("]");
-        return builder.toString();
     }
 
     private JobCategory matchJobByKeyword(@Nullable String keyword) {

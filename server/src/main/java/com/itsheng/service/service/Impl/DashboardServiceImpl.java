@@ -1,13 +1,18 @@
 package com.itsheng.service.service.Impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.itsheng.pojo.entity.JobCategory;
+import com.itsheng.pojo.entity.ResumeAnalysisResult;
 import com.itsheng.pojo.entity.UserCareerData;
 import com.itsheng.pojo.entity.UserRoadmapSteps;
 import com.itsheng.service.mapper.JobCategoryMapper;
+import com.itsheng.service.mapper.ResumeMapper;
 import com.itsheng.service.mapper.UserCareerDataMapper;
 import com.itsheng.service.mapper.UserRoadmapStepsMapper;
+import com.itsheng.service.mapper.UserVectorStoreMapper;
+import com.itsheng.service.service.JobVectorSearchService;
 import com.itsheng.service.service.DashboardService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,6 +29,9 @@ public class DashboardServiceImpl implements DashboardService {
     private final UserRoadmapStepsMapper userRoadmapStepsMapper;
     private final UserCareerDataMapper userCareerDataMapper;
     private final JobCategoryMapper jobCategoryMapper;
+    private final ResumeMapper resumeMapper;
+    private final UserVectorStoreMapper userVectorStoreMapper;
+    private final JobVectorSearchService jobVectorSearchService;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -167,21 +175,15 @@ public class DashboardServiceImpl implements DashboardService {
      * 基于用户目标岗位创建垂直晋升路径
      */
     private UserRoadmapSteps createRoadmapFromTargetJob(Long userId) {
-        // 获取用户职业数据中的目标岗位
         UserCareerData careerData = userCareerDataMapper.selectByUserId(userId);
-        if (careerData == null || careerData.getTargetJobId() == null) {
-            log.warn("用户尚未上传简历或无目标岗位，无法创建职业发展路径，userId: {}", userId);
-            return null;
-        }
-
-        Long targetJobId = careerData.getTargetJobId();
-
-        // 查询目标岗位
-        JobCategory targetJob = jobCategoryMapper.selectById(targetJobId);
+        JobCategory targetJob = resolveTargetJob(userId, careerData);
         if (targetJob == null) {
-            log.warn("目标岗位不存在，jobId: {}", targetJobId);
+            log.warn("用户无可用目标岗位，且 RAG 未匹配到相似岗位，无法创建职业发展路径，userId: {}", userId);
             return null;
         }
+
+        Long targetJobId = targetJob.getId();
+        syncCareerTarget(userId, careerData, targetJob);
 
         // 查询同一 job_category_code 基础类别的所有级别（垂直晋升路径）
         String baseCategoryCode = targetJob.getJobCategoryCode()
@@ -265,9 +267,15 @@ public class DashboardServiceImpl implements DashboardService {
 
         // target_job_id 和 target_job_name（从 user_career_data 获取）
         UserCareerData careerData = userCareerDataMapper.selectByUserId(roadmap.getUserId());
-        if (careerData != null) {
+        if (careerData != null && careerData.getTargetJobId() != null) {
             response.put("target_job_id", careerData.getTargetJobId());
             response.put("target_job_name", careerData.getTargetJob());
+        } else if (roadmap.getJobProfileId() != null) {
+            JobCategory targetJob = jobCategoryMapper.selectById(roadmap.getJobProfileId());
+            if (targetJob != null) {
+                response.put("target_job_id", targetJob.getId());
+                response.put("target_job_name", targetJob.getJobCategoryName());
+            }
         }
 
         // steps 列表
@@ -316,5 +324,161 @@ public class DashboardServiceImpl implements DashboardService {
             updatedSteps.add(step);
         }
         return updatedSteps;
+    }
+
+    private JobCategory resolveTargetJob(Long userId, UserCareerData careerData) {
+        if (careerData != null && careerData.getTargetJobId() != null) {
+            JobCategory targetJob = jobCategoryMapper.selectById(careerData.getTargetJobId());
+            if (targetJob != null) {
+                return targetJob;
+            }
+            log.warn("用户职业数据中的目标岗位不存在，尝试 RAG 重新匹配，userId: {}, jobId: {}",
+                    userId, careerData.getTargetJobId());
+        }
+
+        List<ResumeAnalysisResult> latestResults = resumeMapper.selectByUserId(userId, null, 1);
+        if (latestResults == null || latestResults.isEmpty()) {
+            log.warn("用户暂无可用简历分析记录，无法执行 RAG 岗位匹配，userId: {}", userId);
+            return null;
+        }
+
+        ResumeAnalysisResult latestResult = latestResults.get(0);
+        if (latestResult.getVectorStoreId() == null || latestResult.getVectorStoreId().isBlank()) {
+            log.warn("用户最新简历分析缺少向量存储 ID，无法执行 RAG 岗位匹配，userId: {}, analysisId: {}",
+                    userId, latestResult.getId());
+            return null;
+        }
+
+        var resumeVectorStore = userVectorStoreMapper.selectByVectorStoreId(latestResult.getVectorStoreId());
+        if (resumeVectorStore == null || resumeVectorStore.getResumeContent() == null
+                || resumeVectorStore.getResumeContent().isBlank()) {
+            log.warn("用户最新简历内容不存在，无法执行 RAG 岗位匹配，userId: {}, vectorStoreId: {}",
+                    userId, latestResult.getVectorStoreId());
+            return null;
+        }
+
+        String resumeQueryText = buildResumeQueryText(latestResult, resumeVectorStore.getResumeContent());
+        List<JobCategory> similarJobs = jobVectorSearchService.searchSimilarJobs(resumeQueryText, 1);
+        if (similarJobs == null || similarJobs.isEmpty()) {
+            log.warn("RAG 未检索到相似岗位，userId: {}, vectorStoreId: {}",
+                    userId, latestResult.getVectorStoreId());
+            return null;
+        }
+
+        JobCategory targetJob = similarJobs.get(0);
+        log.info("RAG 为用户匹配目标岗位成功，userId: {}, jobId: {}, jobName: {}",
+                userId, targetJob.getId(), targetJob.getJobCategoryName());
+        return targetJob;
+    }
+
+    private void syncCareerTarget(Long userId, UserCareerData existingCareerData, JobCategory targetJob) {
+        boolean targetAlreadySynced = existingCareerData != null
+                && Objects.equals(existingCareerData.getTargetJobId(), targetJob.getId())
+                && Objects.equals(existingCareerData.getTargetJob(), targetJob.getJobCategoryName());
+        if (targetAlreadySynced) {
+            return;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        String jobProfileJson = buildTargetJobProfile(targetJob);
+
+        if (existingCareerData != null) {
+            UserCareerData updateData = UserCareerData.builder()
+                    .userId(userId)
+                    .targetJob(targetJob.getJobCategoryName())
+                    .targetJobId(targetJob.getId())
+                    .jobProfile(jobProfileJson)
+                    .updateTime(now)
+                    .build();
+            userCareerDataMapper.update(updateData);
+            log.info("已回填用户目标岗位到职业数据，userId: {}, jobId: {}", userId, targetJob.getId());
+            return;
+        }
+
+        UserCareerData insertData = UserCareerData.builder()
+                .userId(userId)
+                .targetJob(targetJob.getJobCategoryName())
+                .targetJobId(targetJob.getId())
+                .jobProfile(jobProfileJson)
+                .matchSummary("{}")
+                .marketTrends("[]")
+                .skillRadar("{}")
+                .actions("[]")
+                .createTime(now)
+                .updateTime(now)
+                .build();
+        userCareerDataMapper.insert(insertData);
+        log.info("已创建用户职业数据并写入 RAG 匹配岗位，userId: {}, jobId: {}", userId, targetJob.getId());
+    }
+
+    private String buildTargetJobProfile(JobCategory targetJob) {
+        try {
+            Map<String, Object> profile = new LinkedHashMap<>();
+            profile.put("id", targetJob.getId());
+            profile.put("name", targetJob.getJobCategoryName());
+            profile.put("level", targetJob.getJobLevel());
+            profile.put("level_name", targetJob.getJobLevelName());
+            profile.put("required_skills", parseJsonArray(targetJob.getRequiredSkills()));
+            profile.put("job_description", targetJob.getJobDescription());
+            return objectMapper.writeValueAsString(profile);
+        } catch (JsonProcessingException e) {
+            log.warn("构建目标岗位画像失败，jobId: {}", targetJob.getId(), e);
+            return "{}";
+        }
+    }
+
+    private String buildResumeQueryText(ResumeAnalysisResult latestResult, String resumeContent) {
+        List<String> parts = new ArrayList<>();
+        try {
+            if (latestResult.getParsedData() != null && !latestResult.getParsedData().isBlank()
+                    && !"{}".equals(latestResult.getParsedData())) {
+                JsonNode parsedData = objectMapper.readTree(latestResult.getParsedData());
+                addIfPresent(parts, parsedData, "target_role", "目标岗位");
+                addIfPresent(parts, parsedData, "current_role", "当前岗位");
+                JsonNode skillsNode = parsedData.get("skills");
+                if (skillsNode != null && skillsNode.isArray() && !skillsNode.isEmpty()) {
+                    List<String> skills = new ArrayList<>();
+                    skillsNode.forEach(skill -> {
+                        String text = skill.asText();
+                        if (text != null && !text.isBlank() && skills.size() < 10) {
+                            skills.add(text.trim());
+                        }
+                    });
+                    if (!skills.isEmpty()) {
+                        parts.add("技能：" + String.join("、", skills));
+                    }
+                }
+            }
+        } catch (JsonProcessingException e) {
+            log.warn("解析简历 parsedData 失败，回退到简历原文进行匹配，analysisId: {}", latestResult.getId(), e);
+        }
+
+        if (!parts.isEmpty()) {
+            return String.join("\n", parts);
+        }
+        return resumeContent.length() > 500 ? resumeContent.substring(0, 500) : resumeContent;
+    }
+
+    private void addIfPresent(List<String> parts, JsonNode node, String fieldName, String label) {
+        JsonNode fieldNode = node.get(fieldName);
+        if (fieldNode != null) {
+            String value = fieldNode.asText();
+            if (value != null && !value.isBlank() && !"null".equalsIgnoreCase(value.trim())) {
+                parts.add(label + "：" + value.trim());
+            }
+        }
+    }
+
+    private List<Object> parseJsonArray(String json) {
+        if (json == null || json.isBlank()) {
+            return Collections.emptyList();
+        }
+        try {
+            return objectMapper.readValue(json,
+                    objectMapper.getTypeFactory().constructCollectionType(List.class, Object.class));
+        } catch (JsonProcessingException e) {
+            log.warn("解析 JSON 数组失败，content: {}", json, e);
+            return Collections.emptyList();
+        }
     }
 }

@@ -218,12 +218,4 @@
         WHERE id = #{id}
     </delete>
 
-    <!-- 根据 source_job_ids 包含指定 job_id 查询岗位分类 -->
-    <select id="selectBySourceJobId" resultMap="JobCategoryResultMap">
-        SELECT *
-        FROM ai_career_plan.job
-        WHERE source_job_ids::jsonb @> #{jobId}::text::jsonb
-        LIMIT 1
-    </select>
-
 </mapper>

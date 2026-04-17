@@ -10,12 +10,12 @@ import java.util.List;
 public interface JobVectorSearchService {
 
     /**
-     * 根据简历向量搜索相似岗位
-     * @param resumeVector 简历 embedding 向量（格式："[0.1,0.2,...]"）
+     * 根据查询文本搜索相似岗位
+     * @param queryText 查询文本，可来自简历摘要、技能关键词、求职意向等
      * @param limit 返回数量
      * @return 相似岗位分类列表（JobCategory）
      */
-    List<JobCategory> searchSimilarJobs(String resumeVector, Integer limit);
+    List<JobCategory> searchSimilarJobs(String queryText, Integer limit);
 
     /**
      * 根据岗位 ID 获取向量

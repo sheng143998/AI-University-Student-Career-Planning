@@ -1316,8 +1316,8 @@ public class ResumeServiceImpl implements ResumeService {
 
             // 获取简历的 embedding 向量
             UserVectorStore userVector = userVectorStoreMapper.selectByVectorStoreId(vectorStoreId);
-            if (userVector != null && userVector.getEmbeddingVector() != null) {
-                String resumeVector = userVector.getEmbeddingVector();
+            if (resumeContent != null && !resumeContent.isBlank()) {
+                String resumeVector = buildJobSearchQuery(parsedRole, userSkills, resumeContent);
                 List<JobCategory> similarJobs = jobVectorSearchService.searchSimilarJobs(resumeVector, 5);
 
                 if (similarJobs != null && !similarJobs.isEmpty()) {
@@ -1341,6 +1341,28 @@ public class ResumeServiceImpl implements ResumeService {
     /**
      * 从简历中提取技能列表（通过 AI）
      */
+    private String buildJobSearchQuery(String parsedRole, List<String> userSkills, String resumeContent) {
+        List<String> parts = new ArrayList<>();
+        if (parsedRole != null && !parsedRole.isBlank() && !"null".equalsIgnoreCase(parsedRole.trim())) {
+            parts.add("目标岗位：" + parsedRole.trim());
+        }
+        if (userSkills != null && !userSkills.isEmpty()) {
+            List<String> limitedSkills = userSkills.stream()
+                    .filter(Objects::nonNull)
+                    .map(String::trim)
+                    .filter(skill -> !skill.isBlank())
+                    .limit(10)
+                    .toList();
+            if (!limitedSkills.isEmpty()) {
+                parts.add("技能：" + String.join("、", limitedSkills));
+            }
+        }
+        if (parts.isEmpty() && resumeContent != null && !resumeContent.isBlank()) {
+            parts.add(resumeContent.length() > 500 ? resumeContent.substring(0, 500) : resumeContent);
+        }
+        return String.join("\n", parts);
+    }
+
     private List<String> extractSkillsFromResume(String resumeContent) {
         try {
             String prompt = """

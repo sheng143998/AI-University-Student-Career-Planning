@@ -41,19 +41,17 @@ public interface JobVectorStoreMapper {
     JobVectorStore selectByVectorStoreId(@Param("id") String id);
 
     /**
+     * 查询所有可用于相似度匹配的岗位向量
+     * @return 岗位向量列表
+     */
+    List<JobVectorStore> selectAllAvailable();
+
+    /**
      * 动态更新岗位向量数据
      * @param jobVectorStore 岗位向量存储实体
      * @return 影响行数
      */
     int update(JobVectorStore jobVectorStore);
-
-    /**
-     * 根据向量搜索相似岗位
-     * @param vector embedding 向量
-     * @param limit 返回数量
-     * @return 相似的岗位向量列表
-     */
-    List<JobVectorStore> searchByVector(@Param("vector") String vector, @Param("limit") Integer limit);
 
     /**
      * 批量更新岗位向量数据的 job_id 和 content_hash 字段
