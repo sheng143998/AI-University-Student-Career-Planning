@@ -1,0 +1,2 @@
+# The current service runs on Python standard library modules only.
+# Keep this file for future model/vector-store dependencies.

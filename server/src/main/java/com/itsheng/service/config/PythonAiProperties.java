@@ -18,6 +18,11 @@ public class PythonAiProperties {
     private String baseUrl = "http://127.0.0.1:8090";
 
     /**
+     * Chat-only Python RAG service base URL.
+     */
+    private String chatBaseUrl = "http://127.0.0.1:8092";
+
+    /**
      * Chat 生成超时时间（秒）
      */
     private Integer chatTimeoutSeconds;
@@ -54,6 +59,17 @@ public class PythonAiProperties {
     public Integer getChatTimeoutSeconds() {
         Integer legacyEnvValue = readPositiveEnv("FUCHUANG_PYTHON_AI_CHAT_TIMEOUT_SECONDS");
         return firstPositive(legacyEnvValue, chatTimeoutSeconds, timeoutSeconds, 60);
+    }
+
+    public String getChatBaseUrl() {
+        String envValue = System.getenv("FUCHUANG_AI_PYTHON_CHAT_BASE_URL");
+        if (envValue != null && !envValue.isBlank()) {
+            return envValue.trim();
+        }
+        if (chatBaseUrl != null && !chatBaseUrl.isBlank()) {
+            return chatBaseUrl.trim();
+        }
+        return "http://127.0.0.1:8092";
     }
 
     public Integer getDailySuggestionsTimeoutSeconds() {

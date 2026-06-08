@@ -31,6 +31,15 @@ public interface ChatMessageMapper {
                                               @Param("limit") Integer limit);
 
     /**
+     * 查询最近消息列表（按创建时间倒序）
+     * @param conversationId 会话ID
+     * @param limit 每页数量
+     * @return 消息列表
+     */
+    List<ChatMessage> selectRecentByConversationId(@Param("conversationId") Long conversationId,
+                                                    @Param("limit") Integer limit);
+
+    /**
      * 根据ID查询消息
      * @param id 消息ID
      * @return 消息实体

@@ -74,7 +74,8 @@ public class ChatRestController {
     @PostMapping(value = "/messages", produces = MediaType.TEXT_HTML_VALUE + ";charset=utf-8")
     @Operation(summary = "发送消息", description = "发送消息并获取 AI 流式响应")
     public Flux<String> sendMessage(@Valid @RequestBody ChatSendMessageDTO dto) {
-        log.info("发送消息到会话 {}: {}", dto.getConversationId(), dto.getContent());
+        log.info("发送消息到会话: conversationId={}, resumeId={}, contentLength={}",
+                dto.getConversationId(), dto.getResumeId(), dto.getContent() == null ? 0 : dto.getContent().length());
         return chatService.sendMessage(dto);
     }
 

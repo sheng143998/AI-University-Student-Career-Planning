@@ -1,1 +1,1 @@
-"""HTTP entrypoints for the Python AI service."""
+"""HTTP entrypoints for the Python AI/RAG service."""

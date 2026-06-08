@@ -31,6 +31,15 @@
         LIMIT #{limit}
     </select>
 
+    <!-- 查询最近消息列表（按创建时间倒序） -->
+    <select id="selectRecentByConversationId" resultMap="ChatMessageMap">
+        SELECT id, conversation_id, user_id, role, content, create_time
+        FROM ai_career_plan.chat_message
+        WHERE conversation_id = #{conversationId}
+        ORDER BY create_time DESC, id DESC
+        LIMIT #{limit}
+    </select>
+
     <!-- 根据ID查询消息 -->
     <select id="selectById" resultMap="ChatMessageMap">
         SELECT id, conversation_id, user_id, role, content, create_time
