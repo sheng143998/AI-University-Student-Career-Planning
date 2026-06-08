@@ -25,6 +25,14 @@ public interface UserRoadmapStepsMapper {
     UserRoadmapSteps selectByUserId(@Param("userId") Long userId);
 
     /**
+     * 根据 ID 和用户 ID 查询职业发展路径
+     * @param id 路径记录 ID
+     * @param userId 用户 ID
+     * @return 用户职业发展路径实体
+     */
+    UserRoadmapSteps selectByIdAndUserId(@Param("id") Long id, @Param("userId") Long userId);
+
+    /**
      * 动态更新用户职业发展路径
      * @param roadmapSteps 用户职业发展路径实体
      * @return 影响行数

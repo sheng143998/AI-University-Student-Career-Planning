@@ -8,13 +8,16 @@ import com.itsheng.pojo.dto.AiRagFeedbackDTO;
 import com.itsheng.pojo.dto.AiRagSettingsDTO;
 import com.itsheng.pojo.entity.CareerReport;
 import com.itsheng.pojo.entity.ChatMessage;
+import com.itsheng.pojo.entity.UserRoadmapSteps;
 import com.itsheng.pojo.vo.AiRagFeedbackVO;
 import com.itsheng.pojo.vo.AiRagSettingsVO;
 import com.itsheng.service.client.PythonRagFeedbackClient;
 import com.itsheng.service.mapper.CareerReportMapper;
 import com.itsheng.service.mapper.ChatMessageMapper;
 import com.itsheng.service.mapper.GoalMapper;
+import com.itsheng.service.mapper.JobCategoryMapper;
 import com.itsheng.service.mapper.ResumeMapper;
+import com.itsheng.service.mapper.UserRoadmapStepsMapper;
 import com.itsheng.service.service.AiRagFeedbackService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -50,6 +53,8 @@ public class AiRagFeedbackServiceImpl implements AiRagFeedbackService {
     private final ResumeMapper resumeMapper;
     private final CareerReportMapper careerReportMapper;
     private final GoalMapper goalMapper;
+    private final JobCategoryMapper jobCategoryMapper;
+    private final UserRoadmapStepsMapper userRoadmapStepsMapper;
     private final Map<Long, AiRagSettingsDTO> settingsStore = new ConcurrentHashMap<>();
 
     @Override
@@ -102,11 +107,8 @@ public class AiRagFeedbackServiceImpl implements AiRagFeedbackService {
     }
 
     private boolean ownsTarget(Long userId, String targetType, String targetId) {
-        if ("JOB_MATCH".equals(targetType) || "MARKET_INSIGHT".equals(targetType)) {
-            return true;
-        }
         Long id = parseLong(targetId);
-        if (id == null) {
+        if (id == null && !"NOTIFICATION_AI_ADVICE".equals(targetType)) {
             return false;
         }
         return switch (targetType) {
@@ -115,14 +117,34 @@ public class AiRagFeedbackServiceImpl implements AiRagFeedbackService {
                 yield message != null && userId.equals(message.getUserId());
             }
             case "RESUME_ANALYSIS" -> resumeMapper.selectByIdAndUserId(id, userId) != null;
+            case "JOB_MATCH", "MARKET_INSIGHT" -> jobCategoryMapper.selectById(id) != null;
             case "REPORT" -> {
                 CareerReport report = careerReportMapper.selectById(id);
                 yield report != null && userId.equals(report.getUserId());
             }
             case "GOAL_ADVICE" -> goalMapper.findByIdAndUserId(id, userId) != null;
-            case "ROADMAP", "NOTIFICATION_AI_ADVICE" -> false;
+            case "ROADMAP" -> {
+                UserRoadmapSteps roadmap = userRoadmapStepsMapper.selectByIdAndUserId(id, userId);
+                yield roadmap != null;
+            }
+            case "NOTIFICATION_AI_ADVICE" -> ownsNotificationAdviceSource(userId, targetId);
             default -> false;
         };
+    }
+
+    private boolean ownsNotificationAdviceSource(Long userId, String targetId) {
+        if (blank(targetId)) {
+            return false;
+        }
+        String[] parts = targetId.trim().split(":", 2);
+        if (parts.length != 2 || blank(parts[0]) || blank(parts[1])) {
+            return false;
+        }
+        String sourceType = parts[0].trim();
+        if ("NOTIFICATION_AI_ADVICE".equals(sourceType)) {
+            return false;
+        }
+        return ownsTarget(userId, sourceType, parts[1].trim());
     }
 
     private Map<String, Object> buildFeedbackPayload(Long userId, AiRagFeedbackDTO dto) {

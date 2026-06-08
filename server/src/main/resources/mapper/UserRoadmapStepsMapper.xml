@@ -43,6 +43,13 @@
     </select>
 
     <!-- 动态更新用户职业发展路径 -->
+    <select id="selectByIdAndUserId" resultMap="UserRoadmapStepsResult">
+        SELECT *
+        FROM ai_career_plan.user_roadmap_steps
+        WHERE id = #{id}
+          AND user_id = #{userId}
+    </select>
+
     <update id="update" parameterType="com.itsheng.pojo.entity.UserRoadmapSteps">
         UPDATE ai_career_plan.user_roadmap_steps
         <set>
