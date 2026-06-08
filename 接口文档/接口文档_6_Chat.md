@@ -4,6 +4,7 @@
 
 | 日期 | 变更 |
 | :--- | :--- |
+| 2026-06-09 | 收紧遗留 `/ai/chat` 调试入口：默认通过 `fuchuang.ai.python.debug-chat-endpoint-enabled=false` 不注册路由，禁用时表现为 404；仅显式启用后允许 `GET /ai/chat` 开发调试，且仍必须经由 `PythonChatClient` 调用 Chat 专属 Python RAG 服务。显式启用时 `HEAD`/`OPTIONS`/`POST`/`PUT`/`PATCH`/`DELETE` 均返回 405 且不得调用 Python。正式前端继续使用 `/api/chat/messages`，本变更不接入真实 pgvector、Dashscope embedding/LLM 或完整 runtime smoke。 |
 | 2026-06-08 | 按自动化验收反馈修正文档口径：当前 `ai-service` Chat 实现为 Python RAG 边界雏形与 deterministic fallback，已覆盖递归切块、摘要索引、Multi-Query、BM25+词袋向量 fallback、RAG-Fusion 和证据返回；尚未接入真实 pgvector、Dashscope embedding/LLM 或完整简历/JD 知识库，生产完成态需后续单独验收。补充 `parsedData` 透传、幂等性/重试约束、日志脱敏和每日建议空结构降级说明。 |
 | 2026-06-08 | 明确 Chat Python 服务入口归属：`ai-service` 为 Chat 专属 Python RAG 服务，默认监听 `http://127.0.0.1:8092`；`ai_service` 继续作为 8090 聚合服务，Resume-AI 继续 8091。Java Chat 新增/使用 `fuchuang.ai.python.chat-base-url`，避免复用 8090 聚合入口。 |
 | 2026-06-08 | 明确 Chat AI 边界迁移到 Python RAG 服务；修正发送消息实际路径为 `/api/chat/messages`；补充 Multi-Query、BM25+Embedding/fallback、RAG-Fusion、证据引用、超时和错误映射契约；遗留 `/ai/chat` 调试入口也改为走 Python Chat 契约，不再直连 Java `ChatClient`。 |
@@ -33,7 +34,7 @@ Java Chat 不复用 `fuchuang.ai.python.base-url` 的 8090 聚合入口，而是
 | 删除会话 | DELETE | `/api/chat/conversations/{conversationId}` | 删除会话及消息 |
 | 获取会话消息 | GET | `/api/chat/conversations/{conversationId}/messages` | 分页拉取会话消息 |
 | 发送消息 | POST | `/api/chat/messages` | 保存用户消息，调用 Python RAG，流式返回 AI 回复 |
-| 兼容调试聊天 | GET | `/ai/chat` | 遗留调试入口，仅用于兼容，调用 Python RAG 后返回文本流 |
+| 兼容调试聊天 | GET | `/ai/chat` | 遗留开发调试入口，默认关闭并返回 404；显式启用后调用 Python RAG 返回文本流 |
 | 获取每日建议 | GET | `/api/chat/daily-suggestions` | 基于简历和用户画像生成今日建议 |
 | 上传附件 | POST | `/api/chat/attachments` | 上传聊天附件，返回文件 URL |
 | 语音转文字 | POST | `/api/chat/voice` | 上传音频文件，返回转写文本 |
@@ -46,7 +47,7 @@ Java Chat 不复用 `fuchuang.ai.python.base-url` 的 8090 聚合入口，而是
 - **普通 JSON 响应**：使用项目统一 `Result<T>`，`code=1` 成功，`code=0` 失败。
 - **发送消息响应**：`POST /api/chat/messages` 为兼容前端打字机效果，返回 `text/html;charset=utf-8` 文本流，不包裹 `Result<T>`。
 - **AI 范围**：Chat 的 AI 生成、RAG 检索、证据筛选、建议问题生成、每日建议生成应由 Python 服务完成；Java 不再直接使用 Spring AI `ChatClient` 承担 Chat 模块生成逻辑。
-- **兼容入口**：`/ai/chat` 是早期调试入口，不属于正式前端 API；保留时也必须经由 `PythonChatClient` 调用 Python 服务，不能绕过 Python RAG 边界直接调用 Java `ChatClient`。
+- **兼容入口**：`/ai/chat` 是早期开发调试入口，不属于正式前端 API；默认不注册路由，禁用时表现为 404。仅当 `fuchuang.ai.python.debug-chat-endpoint-enabled=true` 或环境变量 `FUCHUANG_AI_PYTHON_DEBUG_CHAT_ENDPOINT_ENABLED=true` 显式开启时才允许 GET 调试；开启后也必须经由 `PythonChatClient` 调用 Python 服务，不能绕过 Python RAG 边界直接调用 Java `ChatClient`。
 
 ---
 
@@ -288,13 +289,16 @@ Java 在保存用户消息后调用 Python AI 服务：
 
 - **请求方法**：`GET`
 - **请求路径**：`/ai/chat`
-- **鉴权**：不在 `/api/**` JWT 拦截范围内，仅作为开发兼容入口使用；生产侧不应作为正式业务入口暴露。
+- **默认状态**：关闭。未设置 `fuchuang.ai.python.debug-chat-endpoint-enabled=true` 时，Java 不注册该路由，`GET /ai/chat` 返回 404。
+- **启用配置**：仅开发兼容场景可设置 `fuchuang.ai.python.debug-chat-endpoint-enabled=true` 或环境变量 `FUCHUANG_AI_PYTHON_DEBUG_CHAT_ENDPOINT_ENABLED=true`。
+- **鉴权**：不在 `/api/**` JWT 拦截范围内，仅作为开发兼容入口使用；生产侧不应作为正式业务入口暴露，默认关闭即为安全契约，不属于异常降级。
 - **Query 参数**：
   - `prompt`：string，必填，用户输入内容
   - `chatId`：string，可选，遗留会话标识，能转为数字时映射为 Python 请求中的 `conversationId`
 - **响应 Content-Type**：`text/html;charset=utf-8`
 - **Python 调用**：复用 `POST {pythonBaseUrl}/api/v1/chat/complete`，`userId` 使用 `0` 表示调试用户，`resumeId=null`，`history=[]`，并启用 Multi-Query、BM25+Embedding、RAG-Fusion 和元数据过滤默认参数。
 - **失败响应**：与 `POST /api/chat/messages` 的 Python 错误映射保持一致。
+- **方法限制**：显式启用后也只允许 GET；`HEAD`、`OPTIONS`、`POST`、`PUT`、`PATCH`、`DELETE` 等非 GET 方法不得成为可用入口，应返回 404 或 405，且不得调用 Python Chat 服务。
 
 ---
 
@@ -391,6 +395,8 @@ Java 在保存用户消息后调用 Python AI 服务：
 ## 验证建议
 
 - 端口一致性：`rg -n "8090|8091|8092|FUCHUANG_AI_PYTHON_CHAT_BASE_URL|AI_SERVICE_PORT|chat-base-url|chatBaseUrl" ai-service ai_service server/src/main/resources server/src/main/java 接口文档`
+- 调试入口门禁：`mvn -pl server -am -Dtest=PythonChatClientTest,ChatControllerDebugEndpointDisabledTest,ChatControllerDebugEndpointEnabledTest,ChatRestControllerMessagesTest "-Dsurefire.failIfNoSpecifiedTests=false" test`
+- 调试入口配置反查：`rg -n "debug-chat-endpoint-enabled" server/src/main/resources` 应无结果，避免通过 `application.yml` 或 `application-dev.yml` 默认开启。
 - 后端：`mvn -pl server -am -DskipTests compile`，具备 Redis、PostgreSQL/pgvector、Dashscope Key 与 Python Chat 服务时再执行 Chat runtime smoke test
 - Python：`python ai-service\tests\test_chat_pipeline.py`
 - 前端：本轮未改变前端 API 形态，仍建议运行 `cd website && npm run build` 验证兼容性

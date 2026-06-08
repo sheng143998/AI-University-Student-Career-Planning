@@ -56,6 +56,11 @@ public class PythonAiProperties {
      */
     private Integer resumeTimeoutSeconds;
 
+    /**
+     * Whether to register the legacy /ai/chat debug endpoint.
+     */
+    private boolean debugChatEndpointEnabled = false;
+
     public Integer getChatTimeoutSeconds() {
         Integer legacyEnvValue = readPositiveEnv("FUCHUANG_PYTHON_AI_CHAT_TIMEOUT_SECONDS");
         return firstPositive(legacyEnvValue, chatTimeoutSeconds, timeoutSeconds, 60);
@@ -105,6 +110,14 @@ public class PythonAiProperties {
     public Integer getResumeTimeoutSeconds() {
         Integer envValue = readPositiveEnv("FUCHUANG_AI_PYTHON_RESUME_TIMEOUT_SECONDS");
         return firstPositive(envValue, resumeTimeoutSeconds, timeoutSeconds, 30);
+    }
+
+    public boolean isDebugChatEndpointEnabled() {
+        String envValue = System.getenv("FUCHUANG_AI_PYTHON_DEBUG_CHAT_ENDPOINT_ENABLED");
+        if (envValue != null && !envValue.isBlank()) {
+            return Boolean.parseBoolean(envValue.trim());
+        }
+        return debugChatEndpointEnabled;
     }
 
     private Integer firstPositive(Integer... values) {
