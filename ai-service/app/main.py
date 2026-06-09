@@ -16,6 +16,7 @@ CHAT_PIPELINE = ChatRagPipeline()
 
 
 class AiServiceHandler(BaseHTTPRequestHandler):
+    service = REPORTS_SERVICE
     reports_service = REPORTS_SERVICE
     chat_pipeline = CHAT_PIPELINE
 
@@ -29,7 +30,7 @@ class AiServiceHandler(BaseHTTPRequestHandler):
         try:
             payload = self._read_json()
             if self.path == "/api/v1/reports/generate-support":
-                result = type(self).reports_service.generate_support(payload)
+                result = type(self).service.generate_support(payload)
                 self._write_json(result)
                 return
             if self.path == "/internal/goals/advice":
