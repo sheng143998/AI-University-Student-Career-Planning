@@ -5,6 +5,7 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from career_ai.goals_advice_service import generate_goal_advice
 from career_ai.report_support_service import ReportSupportService
 
 
@@ -15,12 +16,15 @@ class ReportsHandler(BaseHTTPRequestHandler):
     service = SERVICE
 
     def do_POST(self) -> None:
-        if self.path != "/api/v1/reports/generate-support":
-            self._write_json(404, {"error": "NOT_FOUND", "message": "unknown path"})
-            return
         try:
             payload = self._read_json()
-            result = type(self).service.generate_support(payload)
+            if self.path == "/api/v1/reports/generate-support":
+                result = type(self).service.generate_support(payload)
+            elif self.path == "/internal/goals/advice":
+                result = generate_goal_advice(payload)
+            else:
+                self._write_json(404, {"error": "NOT_FOUND", "message": "unknown path"})
+                return
             self._write_json(200, result)
         except json.JSONDecodeError:
             self._write_json(400, {"error": "INVALID_JSON", "message": "request body must be a JSON object"})

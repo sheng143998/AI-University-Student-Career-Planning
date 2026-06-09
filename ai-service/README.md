@@ -1,8 +1,8 @@
 # AI Service
 
-Reports-RAG uses only the Python standard library in this branch.
+The integrated AI service uses only the Python standard library for the deterministic fallback paths in this branch.
 
-## Run Reports Support Service
+## Run AI/RAG Service
 
 ```powershell
 $env:PYTHONPATH='ai-service'
@@ -16,11 +16,16 @@ Environment variables:
 - `AI_SERVICE_HOST`: bind host, default `127.0.0.1`
 - `AI_SERVICE_PORT`: bind port, default `8090`
 
+Endpoints:
+
+- `POST /api/v1/reports/generate-support`
+- `POST /internal/goals/advice`
+
 ## Test
 
 ```powershell
 $env:PYTHONPATH='ai-service'
-python -B -m pytest ai-service/tests/test_report_support_service.py -q -p no:cacheprovider
+python -B -m pytest ai-service/tests -q -p no:cacheprovider
 ```
 
 This service is intentionally separated from the legacy `ai_service/` directory.
