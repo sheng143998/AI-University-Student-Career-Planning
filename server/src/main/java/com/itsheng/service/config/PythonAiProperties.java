@@ -41,6 +41,16 @@ public class PythonAiProperties {
 
     private Integer reportsTimeoutSeconds;
 
+    /**
+     * Resume-AI Python 服务地址，兼容 fuchuang.ai.python.resume-base-url。
+     */
+    private String resumeBaseUrl;
+
+    /**
+     * Resume-AI Python 服务超时时间（秒）。
+     */
+    private Integer resumeTimeoutSeconds;
+
     public Integer getChatTimeoutSeconds() {
         Integer legacyEnvValue = readPositiveEnv("FUCHUANG_PYTHON_AI_CHAT_TIMEOUT_SECONDS");
         return firstPositive(legacyEnvValue, chatTimeoutSeconds, timeoutSeconds, 60);
@@ -69,6 +79,18 @@ public class PythonAiProperties {
         return firstPositive(envValue, reportsTimeoutSeconds, timeoutSeconds, 8);
     }
 
+    public String getResumeBaseUrl() {
+        String envValue = readStringEnv("FUCHUANG_AI_PYTHON_RESUME_BASE_URL");
+        String genericEnvValue = readStringEnv("FUCHUANG_AI_PYTHON_BASE_URL");
+        String configuredBaseUrl = "http://127.0.0.1:8090".equals(baseUrl) ? null : baseUrl;
+        return firstText(envValue, resumeBaseUrl, genericEnvValue, configuredBaseUrl, "http://127.0.0.1:8091");
+    }
+
+    public Integer getResumeTimeoutSeconds() {
+        Integer envValue = readPositiveEnv("FUCHUANG_AI_PYTHON_RESUME_TIMEOUT_SECONDS");
+        return firstPositive(envValue, resumeTimeoutSeconds, timeoutSeconds, 30);
+    }
+
     private Integer firstPositive(Integer... values) {
         for (Integer value : values) {
             if (value != null && value > 0) {
@@ -89,5 +111,19 @@ public class PythonAiProperties {
         } catch (NumberFormatException ignored) {
             return null;
         }
+    }
+
+    private String firstText(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return "http://127.0.0.1:8090";
+    }
+
+    private String readStringEnv(String name) {
+        String raw = System.getenv(name);
+        return raw == null || raw.isBlank() ? null : raw.trim();
     }
 }

@@ -16,6 +16,35 @@
         <result column="update_time" property="updateTime" javaType="java.time.LocalDateTime"/>
     </resultMap>
 
+    <insert id="upsert" parameterType="com.itsheng.pojo.entity.UserVectorStore">
+        INSERT INTO ai_career_plan.user_vector_store (
+            id,
+            user_id,
+            content,
+            resume_file_path,
+            vector_type,
+            metadata,
+            create_time,
+            update_time
+        ) VALUES (
+            #{id},
+            #{userId},
+            #{resumeContent},
+            #{resumeFilePath},
+            #{vectorType},
+            #{metadata}::jsonb,
+            #{createTime},
+            #{updateTime}
+        )
+        ON CONFLICT (id) DO UPDATE
+        SET user_id = EXCLUDED.user_id,
+            content = EXCLUDED.content,
+            resume_file_path = EXCLUDED.resume_file_path,
+            vector_type = EXCLUDED.vector_type,
+            metadata = EXCLUDED.metadata,
+            update_time = EXCLUDED.update_time
+    </insert>
+
 
     <!-- 动态更新 user_vector_store 表记录（只更新非 null 字段） -->
     <update id="update" parameterType="com.itsheng.pojo.entity.UserVectorStore">
@@ -36,6 +65,14 @@
         SELECT *
         FROM ai_career_plan.user_vector_store
         WHERE id = #{id}
+    </select>
+
+    <select id="selectByVectorStoreIdAndUserId" resultMap="UserVectorStoreResult">
+        SELECT *
+        FROM ai_career_plan.user_vector_store
+        WHERE id = #{id}
+          AND user_id = #{userId}
+        LIMIT 1
     </select>
 
 </mapper>
