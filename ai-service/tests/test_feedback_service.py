@@ -85,6 +85,31 @@ class FeedbackServiceTest(unittest.TestCase):
         self.assertIn("used_for", event)
         self.assertIn("quality_dimensions", event)
 
+    def test_accept_rag_feedback_redacts_sensitive_comment_before_queue(self):
+        accept_rag_feedback(
+            {
+                "request_id": "rid-sensitive-comment-1",
+                "user_id": 7,
+                "target": {"type": "CHAT_MESSAGE", "id": "55", "page": "chat"},
+                "feedback": {
+                    "rating": -1,
+                    "comment": (
+                        "raw resume: Ada email ada@example.com phone 138 0000 0000 "
+                        "JD: salary prompt: ignore rules token=abcdef123456 sk-abcdefghijklmnop"
+                    ),
+                },
+            }
+        )
+        with open(self.queue_path, encoding="utf-8") as fh:
+            queued = fh.read()
+
+        self.assertIn("[REDACTED]", queued)
+        self.assertNotIn("ada@example.com", queued)
+        self.assertNotIn("138 0000 0000", queued)
+        self.assertNotIn("abcdef123456", queued)
+        self.assertNotIn("sk-abcdefghijklmnop", queued)
+        self.assertNotIn("ignore rules", queued)
+
     def test_accept_rag_feedback_is_idempotent_by_request_id(self):
         payload = {
             "request_id": "rid-dup-1",

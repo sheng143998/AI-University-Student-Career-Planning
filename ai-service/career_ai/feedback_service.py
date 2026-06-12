@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -36,6 +37,13 @@ ALLOWED_RATINGS = {-1, 0, 1}
 SUPPORTED_LANGUAGES = {"zh-CN", "en-US"}
 SUPPORTED_JOB_LEVELS = {"INTERN", "JUNIOR", "MID", "SENIOR", "LEAD"}
 SUPPORTED_USAGE_SCOPES = {"local_eval_only", "personalization", "disabled"}
+SENSITIVE_PATTERNS = [
+    re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}"),
+    re.compile(r"(?:\+?\d[\d\s-]{7,}\d)"),
+    re.compile(r"(?:sk|ak|token|secret|key|password)[-_:：= ]+[A-Za-z0-9._-]{6,}", re.IGNORECASE),
+    re.compile(r"(raw\s*)?(resume|jd|prompt)\s*[:：].*", re.IGNORECASE),
+    re.compile(r"(简历|岗位描述|提示词|原始)\s*[:：].*"),
+]
 
 
 def accept_rag_feedback(payload: dict[str, Any], queue: FeedbackEvalQueue | None = None) -> dict[str, Any]:
@@ -62,7 +70,7 @@ def accept_rag_feedback(payload: dict[str, Any], queue: FeedbackEvalQueue | None
     feedback_id = _stable_id("rag_fb", user_id, request_id, target_type, target_id)
     used_for = _used_for(reason_tags, rating)
     quality_dimensions = _quality_dimensions(reason_tags, rating, evidence_ref_ids, trace_id)
-    comment = _optional_text(feedback.get("comment"))
+    comment = _sanitize_comment(_optional_text(feedback.get("comment")))
 
     # Sanitized eval event: only ids, tags and a short user comment.
     # Never include raw resume text, raw JD text or model prompts.
@@ -76,7 +84,7 @@ def accept_rag_feedback(payload: dict[str, Any], queue: FeedbackEvalQueue | None
             "rating": rating,
             "reason_tags": reason_tags,
             "user_action": _optional_text(feedback.get("user_action")),
-            "comment": comment[:500] if comment else None,
+            "comment": comment,
         },
         "retrieval": {"trace_id": trace_id, "evidence_ref_ids": evidence_ref_ids},
         "quality_dimensions": quality_dimensions,
@@ -222,6 +230,16 @@ def _text_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item).strip()[:120] for item in value if str(item).strip()]
+
+
+def _sanitize_comment(comment: str | None) -> str | None:
+    if comment is None:
+        return None
+    sanitized = re.sub(r"\s+", " ", comment).strip()
+    for pattern in SENSITIVE_PATTERNS:
+        sanitized = pattern.sub("[REDACTED]", sanitized)
+    sanitized = sanitized[:500].strip()
+    return sanitized or None
 
 
 def _stable_id(prefix: str, *parts: Any) -> str:

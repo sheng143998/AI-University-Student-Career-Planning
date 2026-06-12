@@ -5,7 +5,7 @@
 - 主工作区：C:\Users\WhenJayHe\IdeaProjects\AI-University-Student-Career-Planning
 - 集成 worktree：C:\Users\WhenJayHe\IdeaProjects\AI-University-Student-Career-Planning-ai-rag-integration
 - 基线：origin/master 313b9be
-- 当前集成 HEAD：946a396（本日志修订前）
+- 当前集成 HEAD：35d54ec（最终提交前最近一次修订）
 - 清单来源：C:\Users\WhenJayHe\IdeaProjects\AI-University-Student-Career-Planning-backups\main-dirty-20260613-013812\untracked\docs\AI_RAG_剩余修改与完善清单.md，已恢复为仓库内 docs/AI_RAG_剩余修改与完善清单.md
 
 ## 测试原因
@@ -48,7 +48,7 @@ git -C C:\Users\WhenJayHe\IdeaProjects\AI-University-Student-Career-Planning sta
 # 集成 Python 测试
 $env:PYTHONPATH='ai-service'
 python -B -m pytest ai-service/tests -q -p no:cacheprovider
-# 结果：38 passed in 6.04s / 38 passed in 6.00s
+# 结果：38 passed in 6.04s / 38 passed in 6.00s；修复 feedback comment 脱敏后 39 passed in 6.01s
 
 # Maven compile
 mvn -pl server -am -DskipTests compile
@@ -89,7 +89,7 @@ git diff --name-only origin/master..HEAD | Select-String 本地产物/缓存/sec
 - 主工作区存在大量 tracked/untracked 脏改：已写入仓库外备份并恢复 Git clean；被锁打包目录保留原地并写入本地 exclude。
 - Resume/Goals 原分支落在旧 ai_service/：已迁移到 ai-service/career_ai 与 ai-service/tests。
 - Chat 与 Reports/Goals 对 app.main 发生 add/add 冲突：已合并成统一 AiServiceHandler，并保留 ReportsHandler 兼容别名。
-- GitLab feedback queue 原提交直接 cherry-pick 会污染旧目录：已按同等功能移植到统一目录，保留 JSONL 幂等队列和脱敏约束。
+- GitLab feedback queue 原提交直接 cherry-pick 会污染旧目录：已按同等功能移植到统一目录，保留 JSONL 幂等队列和脱敏约束；代码审查指出 comment 未脱敏后，已新增 comment 脱敏和 raw resume/JD/prompt、邮箱、手机号、token/key 不入队测试。
 - GitLab 配置端口文档有 trailing whitespace：已修复。
 - 初次 frontend build 缺 node_modules，vue-tsc 不存在：已执行 npm ci 后 build 通过。
 - 初次 Maven 窄测被 PowerShell 参数解析影响：已用 --% 重跑通过。
@@ -100,7 +100,7 @@ git diff --name-only origin/master..HEAD | Select-String 本地产物/缓存/sec
 - Plan 需求覆盖审查：FAIL 后已补强 GitLab 分支处置、备份证据、主工作区 clean 门禁、分支台账、清单入口顺序。
 - Plan 技术风险审查：FAIL 后已改为以干净集成 worktree 为合并现场，并硬性排除本地产物、旧目录污染和未验收分支。
 - Goal 边界审查：PASS，但指出冲突和清单缺失；当前已解决冲突并恢复清单。
-- Goal 验证命令审查：FAIL 后已补充验证对象、基线、分支处置、目录策略、Python/Java/前端/安全证据。
+- Goal 验证命令审查：FAIL 后已补充验证对象、基线、分支处置、目录策略、Python/Java/前端/安全证据。代码/集成验收初审 FAIL 后已修复 feedback comment 脱敏和端口文档过期问题。
 
 ## 剩余风险
 
