@@ -37,6 +37,10 @@ public class PythonAiProperties {
      */
     private Integer ragFeedbackTimeoutSeconds;
 
+    private String reportsBaseUrl;
+
+    private Integer reportsTimeoutSeconds;
+
     public Integer getChatTimeoutSeconds() {
         Integer legacyEnvValue = readPositiveEnv("FUCHUANG_PYTHON_AI_CHAT_TIMEOUT_SECONDS");
         return firstPositive(legacyEnvValue, chatTimeoutSeconds, timeoutSeconds, 60);
@@ -50,6 +54,19 @@ public class PythonAiProperties {
     public Integer getRagFeedbackTimeoutSeconds() {
         Integer legacyEnvValue = readPositiveEnv("FUCHUANG_PYTHON_AI_RAG_FEEDBACK_TIMEOUT_SECONDS");
         return firstPositive(legacyEnvValue, ragFeedbackTimeoutSeconds, timeoutSeconds, 10);
+    }
+
+    public String getReportsBaseUrl() {
+        String envValue = System.getenv("FUCHUANG_AI_PYTHON_REPORTS_BASE_URL");
+        if (envValue != null && !envValue.isBlank()) {
+            return envValue;
+        }
+        return reportsBaseUrl != null && !reportsBaseUrl.isBlank() ? reportsBaseUrl : baseUrl;
+    }
+
+    public Integer getReportsTimeoutSeconds() {
+        Integer envValue = readPositiveEnv("FUCHUANG_AI_PYTHON_REPORTS_TIMEOUT_SECONDS");
+        return firstPositive(envValue, reportsTimeoutSeconds, timeoutSeconds, 8);
     }
 
     private Integer firstPositive(Integer... values) {

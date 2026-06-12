@@ -32,7 +32,7 @@ export interface LatestReport {
 }
 
 export interface ReportTargetJob {
-  id: number
+  id?: number | null
   name: string
   industry?: string
   city?: string
@@ -44,6 +44,27 @@ export interface ReportMatchDetails {
   professional_skills?: number
   professional_quality?: number
   development_potential?: number
+  [k: string]: unknown
+}
+
+export interface ReportEvidenceRef {
+  id: string
+  sourceType?: string
+  title?: string
+  score?: number
+  snippet?: string
+  metadata?: Record<string, unknown>
+}
+
+export interface ReportRagDiagnostics {
+  status?: string
+  retrievalMode?: string
+  embeddingMode?: string
+  expandedQueryCount?: number
+  candidateCount?: number
+  selectedEvidenceCount?: number
+  fallbackReason?: string | null
+  emptyRetrieval?: boolean
   [k: string]: unknown
 }
 
@@ -64,16 +85,18 @@ export interface ReportDetail {
   matchDetails?: ReportMatchDetails
   sections: ReportSection[]
   aiSuggestions?: string
+  evidenceRefs?: ReportEvidenceRef[]
+  ragDiagnostics?: ReportRagDiagnostics
   editable?: boolean
   generatedAt?: string
   updatedAt?: string
 }
 
 export interface ReportUpdateBody {
-  career_goal?: unknown
-  action_plan?: unknown
-  target_job?: unknown
-  development_path?: unknown
+  careerGoal?: unknown
+  actionPlan?: unknown
+  targetJob?: unknown
+  developmentPath?: unknown
   [k: string]: unknown
 }
 

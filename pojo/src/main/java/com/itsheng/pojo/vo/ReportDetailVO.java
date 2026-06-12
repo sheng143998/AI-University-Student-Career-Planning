@@ -25,7 +25,7 @@ public class ReportDetailVO {
     @Schema(description = "报告标题")
     private String title;
 
-    @Schema(description = "状态：DRAFT/COMPLETED/ARCHIVED")
+    @Schema(description = "状态：DRAFT/PROCESSING/COMPLETED/FAILED/ARCHIVED")
     private String status;
 
     @Schema(description = "用户 ID")
@@ -45,6 +45,12 @@ public class ReportDetailVO {
 
     @Schema(description = "AI 建议")
     private String aiSuggestions;
+
+    @Schema(description = "Reports-RAG evidence references")
+    private List<Map<String, Object>> evidenceRefs;
+
+    @Schema(description = "Reports-RAG diagnostics")
+    private Map<String, Object> ragDiagnostics;
 
     @Schema(description = "是否可编辑")
     private Boolean editable;

@@ -15,13 +15,12 @@ import com.itsheng.pojo.dto.ReportGenerateDTO;
 import com.itsheng.pojo.dto.ReportUpdateDTO;
 import com.itsheng.pojo.entity.*;
 import com.itsheng.pojo.vo.*;
+import com.itsheng.service.client.PythonReportsAiClient;
 import com.itsheng.service.controller.CommonController;
 import com.itsheng.service.mapper.*;
 import com.itsheng.service.service.ReportService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,7 +45,7 @@ public class ReportServiceImpl implements ReportService {
     private final UserCareerDataMapper userCareerDataMapper;
     private final GoalMapper goalMapper;
     private final ResumeMapper resumeMapper;
-    private final ChatClient chatClient;
+    private final PythonReportsAiClient pythonReportsAiClient;
     private final ObjectMapper objectMapper;
     private final CommonController commonController;
 
@@ -125,13 +124,19 @@ public class ReportServiceImpl implements ReportService {
             report.setMatchScore((Integer) matchDetails.getOrDefault("overall", 0));
 
             // 职业目标设定
-            report.setActionPlan(buildActionPlan(userId));
+            String actionPlan = buildActionPlan(userId);
+            report.setActionPlan(actionPlan);
 
             // 职业发展路径
-            report.setDevelopmentPath(buildDevelopmentPath(targetJobName));
+            String developmentPath = buildDevelopmentPath(targetJobName);
+            report.setDevelopmentPath(developmentPath);
 
             // AI 建议（从简历分析结果获取）
-            report.setAiSuggestions(fetchAiSuggestions(userId));
+            ReportAiSupport aiSupport = generateReportsSupport(reportId, userId, capability, latestCareerData, targetJobName, matchDetails, actionPlan, developmentPath);
+            matchDetails.put("evidence_refs", aiSupport.evidenceRefs());
+            matchDetails.put("rag_diagnostics", aiSupport.ragDiagnostics());
+            report.setMatchDetails(toJson(matchDetails));
+            report.setAiSuggestions(aiSupport.aiSuggestions());
 
             report.setStatus("COMPLETED");
             report.setIsEditable(true);
@@ -492,32 +497,102 @@ public class ReportServiceImpl implements ReportService {
         };
     }
 
-    private String fetchAiSuggestions(Long userId) {
-        // 从简历分析结果获取建议
-        List<ResumeAnalysisResult> results = resumeMapper.selectByUserId(userId, null, 1);
-        if (results != null && !results.isEmpty()) {
-            ResumeAnalysisResult result = results.get(0);
-            if (result.getSuggestions() != null && !result.getSuggestions().isEmpty()) {
-                return result.getSuggestions();
-            }
-        }
+    private ReportAiSupport generateReportsSupport(Long reportId,
+                                                   Long userId,
+                                                   StudentCapabilityProfile capability,
+                                                   UserCareerData careerData,
+                                                   String targetJobName,
+                                                   Map<String, Object> matchDetails,
+                                                   String actionPlan,
+                                                   String developmentPath) {
+        ResumeAnalysisResult resumeAnalysis = latestResumeAnalysis(userId);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("reportId", reportId);
+        payload.put("userId", userId);
+        payload.put("targetJobName", targetJobName);
+        payload.put("capabilityProfile", toMap(capability));
+        payload.put("careerData", toMap(careerData));
+        payload.put("resumeAnalysis", toMap(resumeAnalysis));
+        payload.put("matchDetails", matchDetails);
+        payload.put("actionPlan", parseObjectMap(actionPlan));
+        payload.put("developmentPath", parseObjectMap(developmentPath));
+        payload.put("metadataFilters", Map.of(
+                "userId", userId,
+                "visibility", "private",
+                "documentTypes", Arrays.asList("resume_analysis", "career_data", "capability_profile", "match_details", "action_plan", "development_path")
+        ));
 
-        // 如果没有简历分析结果，使用 AI 生成
         try {
-            String prompt = "基于用户的职业发展情况，给出简洁的职业发展建议（100字以内）：";
-            ChatResponse response = chatClient.prompt()
-                    .user(prompt)
-                    .call()
-                    .chatResponse();
-
-            if (response != null && response.getResult() != null) {
-                return response.getResult().getOutput().getText();
+            PythonReportsAiClient.ReportsSupportResult result = pythonReportsAiClient.generateSupport(payload);
+            if ("EMPTY_RETRIEVAL".equalsIgnoreCase(result.status())) {
+                return fallbackSupport(resumeAnalysis, "EMPTY_RETRIEVAL");
             }
+            String suggestions = result.aiSuggestions() == null || result.aiSuggestions().isBlank()
+                    ? fallbackSuggestion(resumeAnalysis)
+                    : result.aiSuggestions();
+            List<Map<String, Object>> evidenceRefs = objectMapper.convertValue(result.evidenceRefs(), List.class);
+            Map<String, Object> diagnostics = objectMapper.convertValue(result.ragDiagnostics(), Map.class);
+            return new ReportAiSupport(suggestions, safeList(evidenceRefs), safeMap(diagnostics));
         } catch (Exception e) {
-            log.warn("AI 建议生成失败: {}", e.getMessage());
+            log.warn("Reports-RAG support fallback, reportId={}, reason={}", reportId, e.getMessage());
+            return fallbackSupport(resumeAnalysis, e.getClass().getSimpleName());
         }
+    }
 
-        return "建议持续学习提升专业技能，多参与实践项目积累经验。";
+    private ResumeAnalysisResult latestResumeAnalysis(Long userId) {
+        List<ResumeAnalysisResult> results = resumeMapper.selectByUserId(userId, null, 1);
+        return results != null && !results.isEmpty() ? results.get(0) : null;
+    }
+
+    private ReportAiSupport fallbackSupport(ResumeAnalysisResult resumeAnalysis, String reason) {
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        diagnostics.put("status", "FALLBACK");
+        diagnostics.put("retrievalMode", "java_deterministic_fallback");
+        diagnostics.put("embeddingMode", "none");
+        diagnostics.put("expandedQueryCount", 0);
+        diagnostics.put("candidateCount", 0);
+        diagnostics.put("selectedEvidenceCount", 0);
+        diagnostics.put("emptyRetrieval", "EMPTY_RETRIEVAL".equals(reason));
+        diagnostics.put("fallbackReason", reason);
+        return new ReportAiSupport(fallbackSuggestion(resumeAnalysis), Collections.emptyList(), diagnostics);
+    }
+
+    private String fallbackSuggestion(ResumeAnalysisResult resumeAnalysis) {
+        if (resumeAnalysis != null && resumeAnalysis.getSuggestions() != null && !resumeAnalysis.getSuggestions().isBlank()) {
+            return resumeAnalysis.getSuggestions();
+        }
+        return "Keep improving core skills, add measurable project outcomes, and update the action plan against target job requirements.";
+    }
+
+    private Map<String, Object> toMap(Object value) {
+        if (value == null) {
+            return Collections.emptyMap();
+        }
+        return objectMapper.convertValue(value, Map.class);
+    }
+
+    private Map<String, Object> parseObjectMap(String json) {
+        try {
+            Map<String, Object> value = fromJson(json, Map.class);
+            return value != null ? value : Collections.emptyMap();
+        } catch (Exception e) {
+            return Collections.emptyMap();
+        }
+    }
+
+    private List<Map<String, Object>> safeList(List<Map<String, Object>> value) {
+        return value != null ? value : Collections.emptyList();
+    }
+
+    private Map<String, Object> safeMap(Map<String, Object> value) {
+        return value != null ? value : Collections.emptyMap();
+    }
+
+    private record ReportAiSupport(
+            String aiSuggestions,
+            List<Map<String, Object>> evidenceRefs,
+            Map<String, Object> ragDiagnostics
+    ) {
     }
 
     private ReportSummaryVO buildReportSummary(CareerReport report) {
@@ -573,7 +648,10 @@ public class ReportServiceImpl implements ReportService {
         // 解析匹配详情
         if (report.getMatchDetails() != null) {
             try {
-                builder.matchDetails(fromJson(report.getMatchDetails(), Map.class));
+                Map<String, Object> matchDetails = fromJson(report.getMatchDetails(), Map.class);
+                builder.matchDetails(matchDetails);
+                builder.evidenceRefs(safeList((List<Map<String, Object>>) matchDetails.get("evidence_refs")));
+                builder.ragDiagnostics(safeMap((Map<String, Object>) matchDetails.get("rag_diagnostics")));
             } catch (Exception e) {
                 log.warn("解析匹配详情失败: {}", e.getMessage());
             }
