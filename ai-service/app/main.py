@@ -5,6 +5,7 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from career_ai.feedback_service import accept_rag_feedback, validate_rag_preferences
 from career_ai.goals_advice_service import generate_goal_advice
 from career_ai.report_support_service import ReportSupportService
 from rag.chat_pipeline import ChatRagPipeline
@@ -43,6 +44,12 @@ class AiServiceHandler(BaseHTTPRequestHandler):
             if self.path == "/api/v1/chat/daily-suggestions":
                 response = type(self).chat_pipeline.daily_suggestions(DailySuggestionsRequest.from_dict(payload))
                 self._write_json(response.to_dict())
+                return
+            if self.path == "/internal/rag/feedback":
+                self._write_json(accept_rag_feedback(payload))
+                return
+            if self.path == "/internal/rag/preferences/validate":
+                self._write_json(validate_rag_preferences(payload))
                 return
             self._write_json({"error": "NOT_FOUND", "message": "unknown path"}, status=404)
         except json.JSONDecodeError:

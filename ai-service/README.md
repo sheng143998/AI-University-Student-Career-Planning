@@ -23,6 +23,8 @@ The same `app.main` entrypoint can be started on different ports. Java routes by
 - `POST /api/v1/chat/complete`
 - `POST /api/v1/chat/daily-suggestions`
 - `POST /api/v1/resume/analyze` via `career_ai.resume_analysis_service` standalone handler.
+- `POST /internal/rag/feedback`
+- `POST /internal/rag/preferences/validate`
 
 Current implementation status: deterministic fallback RAG with recursive chunking, summary indexing, metadata filtering, Multi-Query expansion, BM25 plus hash embedding retrieval, RRF/RAG-Fusion, deterministic reranking, and sanitized diagnostics. It does not yet claim production pgvector/Dashscope/cross-encoder quality.
 
