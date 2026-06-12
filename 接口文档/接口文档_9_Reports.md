@@ -442,6 +442,7 @@ Java 错误映射：
   - `ragDiagnostics?: ReportRagDiagnostics`
 - 现有轮询、下载、编辑路径不变。
 - 前端可选择展示证据和诊断；不应把诊断视为用户可编辑字段。
+- `ReportUpdateBody` 仅声明 `careerGoal`、`actionPlan`、`targetJob`、`developmentPath` 等可编辑字段；`evidenceRefs`、`ragDiagnostics`、`aiSuggestions`、`matchDetails` 在类型层面禁止由前端写回。
 
 ## 测试口径
 

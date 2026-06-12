@@ -97,7 +97,10 @@ export interface ReportUpdateBody {
   actionPlan?: unknown
   targetJob?: unknown
   developmentPath?: unknown
-  [k: string]: unknown
+  evidenceRefs?: never
+  ragDiagnostics?: never
+  aiSuggestions?: never
+  matchDetails?: never
 }
 
 export type ReportUpdateResult = boolean
