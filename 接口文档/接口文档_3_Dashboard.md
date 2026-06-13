@@ -2,6 +2,17 @@
 
 ---
 
+## 变更记录
+
+| 日期 | 变更内容 | 影响范围 |
+|------|----------|----------|
+| 2026-06-09 | 补充 `user_vector_store.content` SQL 层归属读取门禁、Python `resume_profile` 嵌套对象防御性过滤、`query_variants` 脱敏和 Dashboard validation error 收窄规则 | `/internal/dashboard/target-job/match` |
+| 2026-06-09 | 明确 Dashboard-AI 三层 summary index 合同、`summary_level`、`record_id`/`parent_id` 关系和 evidence 只引用 chunk 的规则 | `/internal/dashboard/target-job/match` |
+| 2026-06-08 | 补充 Dashboard-AI `resume_profile` 出站白名单、敏感字段丢弃规则和 `resume_content` 边界说明 | `/internal/dashboard/target-job/match` |
+| 2026-06-08 | 补充 Dashboard-AI 目标岗位 RAG 匹配 Python 边界、Java-Python 错误映射、超时/幂等、前端影响和测试口径 | `/api/dashboard/roadmap`、`/internal/dashboard/target-job/match` |
+
+---
+
 ## 数据模型
 
 本模块**不需要新建表**，所有数据从现有的 `users` 表、`resume_analysis_result` 表以及 AI 分析计算结果中获取。
@@ -253,3 +264,172 @@ GET /api/dashboard/summary 或 /api/dashboard/roadmap
 | :--- | :--- | :--- | :--- | :--- |
 | 3.1 | 获取仪表盘汇总 | GET | /api/dashboard/summary | 匹配摘要、趋势、雷达、行动项 |
 | 3.2 | 获取仪表盘进化路线 | GET | /api/dashboard/roadmap | 首页"职业进化地图"卡片数据 |
+
+---
+
+## 2026-06-08 Dashboard-AI 目标岗位匹配合同
+
+### Java-Python 边界
+
+Dashboard 对外仍只暴露 Java Spring Boot `/api/dashboard/**` 接口，前端不直接访问 Python 服务。`GET /api/dashboard/roadmap` 按以下顺序处理：
+
+1. 若 `user_roadmap_steps` 已存在，直接返回已生成路线。
+2. 若 `user_career_data.target_job_id` 存在且能在 `job` 表中查到有效岗位，Java 基于该岗位生成垂直晋升路线，不调用 Python。
+3. 若目标岗位缺失或无效，Java 读取当前用户最新 `resume_analysis_result`、对应 `user_vector_store.content` 和 `job` 候选快照，调用 Python Dashboard-AI：
+
+`POST {fuchuang.ai.python.base-url}/internal/dashboard/target-job/match`
+
+调用约束：
+
+- 鉴权：仅 Java 内部调用；用户身份来自已通过 JWT 的 `BaseContext.userId`。
+- Python 地址：复用 `fuchuang.ai.python.base-url`，默认 `http://127.0.0.1:8090`。
+- 超时：Dashboard 专用超时默认 30 秒；优先读取 `FUCHUANG_AI_PYTHON_DASHBOARD_TIMEOUT_SECONDS`，再兼容 legacy `FUCHUANG_PYTHON_AI_DASHBOARD_TIMEOUT_SECONDS`，再读取 `fuchuang.ai.python.dashboard-timeout-seconds`，未配置时回退 `fuchuang.ai.python.timeout-seconds`，最后兜底 30 秒。
+- 幂等键：`request_id`，格式 `dashboard-target-job-{user_id}-{resume_analysis_id}`。同一输入重复调用应返回稳定匹配结果，不由 Python 写库。
+- 重试：本同步读取链路不自动重试；超时和下游不可用直接映射为业务失败。
+- 数据职责：Java 负责鉴权、用户边界、业务表读取和落库；读取 `user_vector_store.content` 必须使用 `id + user_id` 条件在 SQL 层完成归属过滤，不得先用 `SELECT * WHERE id = ?` 读取正文后再在 Java 内存中判断归属；Python 不直接读取业务数据库，不接收完整跨用户数据。
+- 前端影响：前端仍调用 `/api/dashboard/roadmap` 和 `/api/dashboard/summary`，TypeScript API 契约不变。
+
+### 内部请求
+
+```json
+{
+  "request_id": "dashboard-target-job-10001-20001",
+  "user_id": 10001,
+  "resume_analysis_id": 20001,
+  "resume_vector_store_id": "resume_vec_20001",
+  "resume_profile": {
+    "target_role": "AI 算法工程师",
+    "skills": ["Python", "机器学习", "RAG"],
+    "experience_years": 1
+  },
+  "resume_content": "Java 截断后的匹配必要简历文本",
+  "job_candidates": [
+    {
+      "job_id": 30001,
+      "job_name": "AI 算法工程师",
+      "job_category_code": "AI_ENGINEER_JUNIOR",
+      "job_level": "JUNIOR",
+      "job_level_name": "初级",
+      "required_skills": ["Python", "机器学习", "模型部署"],
+      "job_description": "负责模型训练、评估和应用落地",
+      "job_profile": {"industrySegment": "人工智能"}
+    }
+  ],
+  "filters": {
+    "document_type": ["resume", "job", "jd"],
+    "visibility_scope": "user_or_public",
+    "language": "zh-CN"
+  },
+  "top_k": 5
+}
+```
+
+`resume_profile` 由 Java 从 `resume_analysis_result.parsed_data` 显式白名单构造，只允许以下字段进入 Python 请求：
+
+| 字段 | 类型 | 处理规则 |
+| :--- | :--- | :--- |
+| `target_role` | string | 可选；仅接收字符串、数字、布尔等标量值，转字符串并 `trim`，空值不发送 |
+| `skills` | string[] | 可选；来源可为数组或逗号/中文逗号/顿号分隔字符串；数组元素仅接收字符串、数字、布尔等标量值，转字符串、`trim`、去空、去重，最多 12 项 |
+| `experience_years` | number | 可选；仅保留数字类型，字符串或其他类型丢弃；Python 内部入口也必须做同等类型校验，非数字值不得进入 summary records |
+
+以下字段不得出现在 `resume_profile` 中：`phone`、`email`、`name`、`location`、`education`、`experience`、`projects`、`raw_text`、`rawText`、`resume_text`、`resumeContent`、`contact` 以及任何未知键或嵌套扩展对象。这里的 `raw_text` 禁止仅指画像对象内的原文类字段；顶层 `resume_content` 仍是 Python Dashboard-AI 的必需输入，由 Java 继续按既有规则截断到 4000 字符后发送。
+
+允许字段也必须做值级敏感信息过滤。若 `target_role` 或 `skills` 的值包含邮箱、手机号、`token`/`secret`/`api_key` 形式的凭据，或长度较长且同时包含字母和数字的 token-like 字符串，Java 必须丢弃该字段值；Python 也必须在生成 `query_variants` 和 summary records 前做同等防御性过滤。Python 内部入口只能把字符串、数字、布尔值等标量转换为画像文本，嵌套对象、数组对象、未知扩展字段必须丢弃，不得通过 `str()` 化进入查询变体或 summary records。`query_variants` 不得回显邮箱、手机号、token-like 片段或连续原始简历正文。
+
+### 内部成功响应
+
+```json
+{
+  "code": 1,
+  "msg": "success",
+  "data": {
+    "matched_job": {
+      "job_id": 30001,
+      "job_name": "AI 算法工程师",
+      "job_level": "JUNIOR",
+      "score": 0.87
+    },
+    "retrieval": {
+      "query_variants": ["AI 算法工程师 目标岗位 匹配", "Python 机器学习 RAG 技能差距 岗位要求"],
+      "filters_applied": {
+        "user_id": 10001,
+        "document_type": ["resume", "job", "jd"],
+        "visibility_scope": "user_or_public",
+        "language": "zh-CN"
+      },
+      "fusion_method": "rrf",
+      "reranker": "deterministic-fallback",
+      "candidate_count": 6,
+      "selected_evidence_ids": ["job_30001:chunk:0"]
+    },
+    "evidence_refs": [
+      {
+        "source_type": "job_chunk",
+        "source_id": "job_30001:chunk:0",
+        "section": "岗位要求",
+        "score": 0.0164
+      }
+    ]
+  }
+}
+```
+
+### 内部空匹配响应
+
+```json
+{
+  "code": 0,
+  "msg": "NO_MATCH",
+  "data": {
+    "retrieval": {
+      "query_variants": [],
+      "filters_applied": {"user_id": 10001},
+      "fusion_method": "rrf",
+      "reranker": "deterministic-fallback",
+      "candidate_count": 0,
+      "selected_evidence_ids": []
+    },
+    "evidence_refs": []
+  }
+}
+```
+
+### RAG 处理要求
+
+- Python 对 `resume_content`、`resume_profile` 和 `job_candidates` 构建临时语料，不读取数据库。
+- Python 只可依赖 `resume_profile.target_role`、`resume_profile.skills` 和 `resume_profile.experience_years` 作为结构化画像信号；Java 不得透传 `parsed_data` 原始对象或未知字段。
+- 进入检索前使用递归切块，优先按标题、段落、句子、标点和字符预算切分。
+- 建立三层 summary index，保留 `summary_level=document|section|chunk`：
+  - `document` 记录用于简历或岗位候选的整体粗召回，`record_id` 形如 `resume_vec_10:document` 或 `job_101:document`，`parent_id=null`。
+  - `section` 记录用于画像、简历正文、岗位要求、岗位描述等章节级粗召回，`record_id` 形如 `resume_vec_10:section:resume_profile` 或 `job_101:section:job_requirement`，`parent_id` 指向对应 document 记录。
+  - `chunk` 记录用于原始证据，`record_id` 形如 `resume_vec_10:chunk:0` 或 `job_101:chunk:0`，`parent_id` 指向对应 section 记录。
+- metadata 至少包含 `summary_level`、`record_id`、`parent_id`、`user_id`、`document_type`、`document_id`、`job_id`、`section`、`language`、`visibility_scope`。
+- 查询侧生成目标岗位、技能差距、项目经历、JD 要求等 Multi-Query 变体。
+- 每个查询执行 BM25 和 deterministic embedding 检索，保留候选分数。
+- 使用 Reciprocal Rank Fusion 融合多路结果，默认 reranker 为 `deterministic-fallback`。
+- 响应必须返回 `retrieval` diagnostics 和 `evidence_refs`；`evidence_refs.source_id` 只能引用 `summary_level=chunk` 的岗位原始证据，不返回 document/section summary id；`query_variants` 不得包含连续原始简历正文片段、邮箱、手机号或 token-like 值。Java/Python 日志只记录脱敏后的融合方法、候选数和 evidence id 等摘要，不记录完整简历正文、请求体或完整 retrieval 对象。
+- `ai-service/app/main.py` 是当前 8090 聚合入口，本轮为 `/internal/dashboard/target-job/match` 挂载 Dashboard endpoint，并仅对 Dashboard endpoint 返回统一 `VALIDATION_ERROR`。旧 `ai_service/market_ai_service.py` 只作为历史迁移来源保留，Dashboard 新能力不得继续落在旧目录。
+
+### Java 错误映射
+
+| Python/HTTP 场景 | Java `Result<T>` |
+| :--- | :--- |
+| `400` / `422` / 参数缺失 | `Result.error("Dashboard-AI 请求参数错误")` |
+| `204` 或 `code=0,msg=NO_MATCH` | `Result.error("暂无可用岗位匹配结果")` |
+| 请求超时 | `Result.error("Dashboard-AI 服务超时，请稍后重试")` |
+| 连接失败 / `5xx` / 非 JSON | `Result.error("Dashboard-AI 服务暂不可用")` |
+
+### 测试口径
+
+```bash
+set PYTHONPATH=ai-service
+python -B -m pytest ai-service/tests/test_dashboard_rag_service.py -q -p no:cacheprovider
+python -B -m pytest ai-service/tests -q -p no:cacheprovider
+mvn -pl common,pojo -am install -DskipTests
+mvn -pl server -Dtest=PythonDashboardAiClientTest test
+mvn -pl server -Dtest=DashboardServiceImplTest test
+mvn -pl server -Dtest=DashboardControllerTest test
+mvn -pl server -am -DskipTests compile
+```
+
+若本地未安装 pytest，则使用 unittest 并在 `tests-log/ai-rag-automation/` 的 Dashboard 专项日志中记录降级原因。Runtime smoke 应优先验证 8090 Python 服务启动和 `/internal/dashboard/target-job/match` sample request；Java 端到端 smoke 依赖 Redis、PostgreSQL/pgvector、Java 8081、Python 8090 和 `OPENAI_API_KEY`，条件不齐时只能记录未执行原因，不能声明端到端通过。

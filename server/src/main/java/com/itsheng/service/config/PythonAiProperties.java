@@ -57,6 +57,11 @@ public class PythonAiProperties {
     private Integer resumeTimeoutSeconds;
 
     /**
+     * Dashboard-AI 目标岗位匹配超时时间（秒）
+     */
+    private Integer dashboardTimeoutSeconds;
+
+    /**
      * Whether to register the legacy /ai/chat debug endpoint.
      */
     private boolean debugChatEndpointEnabled = false;
@@ -110,6 +115,12 @@ public class PythonAiProperties {
     public Integer getResumeTimeoutSeconds() {
         Integer envValue = readPositiveEnv("FUCHUANG_AI_PYTHON_RESUME_TIMEOUT_SECONDS");
         return firstPositive(envValue, resumeTimeoutSeconds, timeoutSeconds, 30);
+    }
+
+    public Integer getDashboardTimeoutSeconds() {
+        Integer legacyEnvValue = readPositiveEnv("FUCHUANG_PYTHON_AI_DASHBOARD_TIMEOUT_SECONDS");
+        Integer envValue = readPositiveEnv("FUCHUANG_AI_PYTHON_DASHBOARD_TIMEOUT_SECONDS");
+        return firstPositive(envValue, legacyEnvValue, dashboardTimeoutSeconds, timeoutSeconds, 30);
     }
 
     public boolean isDebugChatEndpointEnabled() {

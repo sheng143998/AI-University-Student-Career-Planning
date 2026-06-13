@@ -4,23 +4,24 @@
 范围：Java backend 与 Python AI/RAG 服务之间的端口分工、配置键、环境变量与超时优先级。
 对应清单：`docs/AI_RAG_剩余修改与完善清单.md` P2-12。
 
-所有内容基于 `ai-rag-integration-20260613` 集成分支实际代码核对（`PythonAiProperties`、各 `Python*Client`、`ai-service/`）。Dashboard、Roadmap、Market 尚未纳入本集成分支，保留为后续迁移项。
+所有内容基于 `ai-rag-integration-20260613` 集成分支实际代码核对（`PythonAiProperties`、各 `Python*Client`、`ai-service/`）。Dashboard 已迁入聚合服务；Roadmap、Market 尚未纳入本集成分支，保留为后续迁移项。
 
 ## 1. 端口分工（定稿）
 
 | 服务 | 端口 | 入口 | 职责 |
 | --- | --- | --- | --- |
 | Java backend | `8081` | `server`（Spring Boot） | 鉴权、业务、对前端唯一入口 |
-| Python 聚合 AI 服务 | `8090` | `ai-service/app/main.py`（`AI_SERVICE_HOST` / `AI_SERVICE_PORT`） | Reports、Goals、RAG feedback、偏好校验 |
+| Python 聚合 AI 服务 | `8090` | `ai-service/app/main.py`（`AI_SERVICE_HOST` / `AI_SERVICE_PORT`） | Reports、Goals、Dashboard、RAG feedback、偏好校验 |
 | Python Resume AI 服务 | `8091` | `ai-service/career_ai/resume_analysis_service.py` | 简历分析 |
 | Python Chat AI 服务 | `8092` | `ai-service/app/main.py`（`AI_SERVICE_HOST` / `AI_SERVICE_PORT`） | Chat complete、每日建议 |
 
-**决策**：除 Resume（8091）和 Chat（8092）独立端口外，已集成的 Reports、Goals、Feedback 统一聚合在 8090。Dashboard、Roadmap、Market 因旧 `ai_service/` 入口冲突暂缓，不在本集成分支声明已暴露。
+**决策**：除 Resume（8091）和 Chat（8092）独立端口外，已集成的 Reports、Goals、Dashboard、Feedback 统一聚合在 8090。Roadmap、Market 因旧 `ai_service/` 入口冲突暂缓，不在本集成分支声明已暴露。
 
 聚合服务（8090）当前暴露的路由：
 
 - `POST /api/v1/reports/generate-support`
 - `POST /internal/goals/advice`
+- `POST /internal/dashboard/target-job/match`
 - `POST /internal/rag/feedback`
 - `POST /internal/rag/preferences/validate`
 
@@ -49,6 +50,7 @@ Resume 服务（8091）当前暴露的路由：
 | `fuchuang.ai.python.reports-base-url` | `FUCHUANG_AI_PYTHON_REPORTS_BASE_URL` | 回退到 `base-url` | `PythonReportsAiClient` |
 | `fuchuang.ai.python.reports-timeout-seconds` | `FUCHUANG_AI_PYTHON_REPORTS_TIMEOUT_SECONDS` | `8` | Reports-RAG |
 | `fuchuang.ai.python.resume-timeout-seconds` | `FUCHUANG_AI_PYTHON_RESUME_TIMEOUT_SECONDS` | `30` | Resume-AI |
+| `fuchuang.ai.python.dashboard-timeout-seconds` | `FUCHUANG_AI_PYTHON_DASHBOARD_TIMEOUT_SECONDS` / `FUCHUANG_PYTHON_AI_DASHBOARD_TIMEOUT_SECONDS`（legacy） | `30` | Dashboard-RAG |
 | `fuchuang.ai.python.chat-timeout-seconds` | `FUCHUANG_PYTHON_AI_CHAT_TIMEOUT_SECONDS`（legacy） | `60` | Chat complete |
 | `fuchuang.ai.python.daily-suggestions-timeout-seconds` | `FUCHUANG_PYTHON_AI_DAILY_SUGGESTIONS_TIMEOUT_SECONDS`（legacy） | `30` | 每日建议 |
 | `fuchuang.ai.python.rag-feedback-timeout-seconds` | `FUCHUANG_PYTHON_AI_RAG_FEEDBACK_TIMEOUT_SECONDS`（legacy） | `10` | RAG 反馈与偏好校验 |
@@ -58,6 +60,12 @@ Resume 服务（8091）当前暴露的路由：
 
 ```
 legacy 环境变量（FUCHUANG_PYTHON_AI_*） > 专用配置键 > fuchuang.ai.python.timeout-seconds > 内置默认值
+```
+
+Dashboard timeout 兼容顺序为：
+
+```
+FUCHUANG_AI_PYTHON_DASHBOARD_TIMEOUT_SECONDS > FUCHUANG_PYTHON_AI_DASHBOARD_TIMEOUT_SECONDS（legacy） > fuchuang.ai.python.dashboard-timeout-seconds > fuchuang.ai.python.timeout-seconds > 30
 ```
 
 ### 2.2 模块独立配置（历史命名，后续迁移项）
@@ -85,7 +93,7 @@ AI_SERVICE_PORT=8090 python -m app.main
 ## 4. 已知命名债务（暂不改动，列入后续收敛）
 
 1. **环境变量前缀不统一**：超时类 legacy 变量是 `FUCHUANG_PYTHON_AI_*`，base-url 类是 `FUCHUANG_AI_PYTHON_*`，两套前缀并存。新增配置一律使用 `FUCHUANG_AI_PYTHON_*`。
-2. **Roadmap/Dashboard/Market 尚未迁入本集成分支的 `ai-service/`**：旧分支仍依赖 `ai_service/market_ai_service.py`，直接合并会冲突，需独立迁移。
+2. **Roadmap/Market 尚未迁入本集成分支的 `ai-service/`**：旧分支仍依赖 `ai_service/market_ai_service.py`，直接合并会冲突，需独立迁移。
 3. **通用超时默认值不一致**：yml 默认 20s，Goals 默认 20s，Reports 默认 8s；以显式配置为准。
 
 ## 5. 本地启动速查

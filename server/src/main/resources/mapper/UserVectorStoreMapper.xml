@@ -67,6 +67,7 @@
         WHERE id = #{id}
     </select>
 
+    <!-- 根据 ID 和用户 ID 查询向量存储记录，避免跨用户读取简历正文 -->
     <select id="selectByVectorStoreIdAndUserId" resultMap="UserVectorStoreResult">
         SELECT *
         FROM ai_career_plan.user_vector_store

@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from career_ai.feedback_service import accept_rag_feedback, validate_rag_preferences
+from career_ai.dashboard_rag_service import match_target_job
 from career_ai.goals_advice_service import generate_goal_advice
 from career_ai.report_support_service import ReportSupportService
 from rag.chat_pipeline import ChatRagPipeline
@@ -36,6 +37,15 @@ class AiServiceHandler(BaseHTTPRequestHandler):
                 return
             if self.path == "/internal/goals/advice":
                 self._write_json(generate_goal_advice(payload))
+                return
+            if self.path == "/internal/dashboard/target-job/match":
+                try:
+                    self._write_json(match_target_job(payload))
+                except ValueError as exc:
+                    self._write_json(
+                        {"code": 0, "msg": "VALIDATION_ERROR", "data": {"error": str(exc)}},
+                        status=400,
+                    )
                 return
             if self.path == "/api/v1/chat/complete":
                 response = type(self).chat_pipeline.complete(ChatCompleteRequest.from_dict(payload))

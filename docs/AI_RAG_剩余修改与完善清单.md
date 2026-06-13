@@ -1,18 +1,19 @@
 ﻿# AI/RAG 剩余修改与完善清单
 
 生成时间：2026-06-13
+更新：2026-06-14
 范围：AI-University-Student-Career-Planning 的 AI/RAG Python 化、Java-Python 集成、接口文档、测试与运行验收。
 
 ## 当前总体状态
 
-当前主工作区 `C:\Users\WhenJayHe\IdeaProjects\AI-University-Student-Career-Planning` 仍然很脏，存在约 66 条已修改、删除或未跟踪文件。不要在主工作区直接执行 `git add .` 或批量提交。
+当前主工作区 `C:\Users\WhenJayHe\IdeaProjects\AI-University-Student-Career-Planning` 已恢复为 clean，且 `master` 与 `origin/master` 同步在 `313b9be`。历史脏改已备份到 `C:\Users\WhenJayHe\IdeaProjects\AI-University-Student-Career-Planning-backups\main-dirty-20260613-013812`。当前主要风险已经从“主工作区脏改”转为“多个隔离分支尚未合并/归档”。
 
 多个 AI/RAG 功能已经在隔离 worktree 中完成本地闭环，但还没有 push、merge 或开 PR：
 
 | 模块 | 隔离分支 | ahead | 最新提交 | 状态 |
 | --- | --- | ---: | --- | --- |
 | Chat | `ai-rag-chat-python-boundary` | 3 | `46451df test: verify chat debug env binding` | 本地闭环待合并决策 |
-| Dashboard | `ai-rag-dashboard-target-job-match` | 1 | `713eb90 feat: route dashboard target matching through python rag` | 本地闭环待合并决策 |
+| Dashboard | `ai-rag-dashboard-target-job-match` | 1 | `713eb90 feat: route dashboard target matching through python rag` | 已迁移进 `ai-rag-integration-20260613` 工作区，待最终提交/全量门禁 |
 | Goals | `ai-rag-goals-advice-python-rag` | 1 | `e0d6ae6 feat: route goals advice through python rag` | 本地闭环待合并决策 |
 | Reports | `ai-rag-reports-python-rag` | 2 | `958fcd9 test: close reports rag post-commit gate` | 本地闭环待合并决策 |
 | Resume | `ai-rag-resume-python-rag` | 1 | `2f60cde feat: route resume analysis through python rag` | 本地闭环待合并决策 |
@@ -20,27 +21,27 @@
 
 ## P0：必须先处理的风险
 
-### 1. 主工作区脏改需要隔离整理
+### 1. 主工作区脏改已经隔离，仍需防止回流
 
-主工作区当前同时包含旧改动、未跟踪目录、配置文件改动和多个模块变更。需要先决定：
+主工作区当前 clean。后续需要避免旧备份、旧 `ai_service/` 分支实现、配置文件改动和构建产物重新回流到 `master`。仍需决定：
 
 - 哪些隔离 worktree 分支要 push/merge。
-- 主工作区里的 `ai_service/` 删除和 `ai-service/` 未跟踪目录如何统一。
-- `application.yml`、`application-dev.yml` 的改动哪些属于必要配置，哪些应排除。
-- `database/*.sql`、打包产物、`.codex-temp*`、`.m2-codex`、`.claude` 等是否保留、忽略或清理。
+- 旧分支里的 `ai_service/` 新能力如何继续迁到统一 `ai-service/`。
+- `application.yml`、`application-dev.yml` 的历史改动如需恢复，必须单独审查，禁止随 AI/RAG 合并。
+- `database/*.sql`、打包产物、`.codex-temp*`、`.m2-codex`、`.claude` 等只保留在备份或本地忽略范围，不纳入 AI/RAG 提交。
 
-建议：先不要继续在主工作区实现新功能，优先用隔离分支逐个合并或 cherry-pick，确保每次只合并一个 AI/RAG 最小项。
+建议：继续只在隔离集成 worktree 中收敛，确保每次只迁移一个 AI/RAG 最小项。主工作区在最终验证前保持只读。
 
 ### 2. 所有本地闭环分支仍未 push/merge/PR
 
-Resume、Reports、Roadmap、Goals、Dashboard、Chat 都还停留在本地隔离分支。功能虽然已有本地验证，但主分支和远端并没有真正获得这些改动。
+Resume、Reports、Goals、Dashboard、Chat 已经在 `ai-rag-integration-20260613` 中有统一 `ai-service/` 方向的集成痕迹，其中 Dashboard 已于 2026-06-14 迁入 8090 聚合服务并通过 Python/Java 窄测。Roadmap 仍停留在旧 `ai_service/` 分支实现中，尚未迁入统一集成分支。主分支和远端仍没有真正获得这些改动。
 
 需要决定每个分支的处理方式：
 
 - push 到远端并开 PR。
 - cherry-pick 到一个集成分支。
 - 先废弃部分分支，只保留最稳定的实现。
-- 重新按统一 Python 服务目录合并后再提交。
+- 重新按统一 Python 服务目录合并后再提交；Roadmap 是当前剩余最大分支未合并风险。
 
 ### 3. Java + Python + DB + Redis + OSS/JWT 端到端 smoke 基本都未跑
 
@@ -72,12 +73,12 @@ Resume、Reports、Roadmap、Goals、Dashboard、Chat 都还停留在本地隔�
 
 ### 5. Python 服务目录需要统一
 
-当前仓库里出现两个目录概念：
+当前历史仓库里仍出现两个目录概念：
 
 - `ai_service/`
 - `ai-service/`
 
-隔离分支中也存在不同模块落在不同目录的情况。继续扩展前需要统一 Python 服务布局，例如：
+集成分支新增能力应统一落到 `ai-service/`。Dashboard 已按此规则迁移；Roadmap/Market 仍需继续迁移，不能把新增能力继续留在旧 `ai_service/`。统一布局为：
 
 - `app/`：HTTP 入口。
 - `rag/`：chunker、summary index、retriever、fusion、reranker。

@@ -1,18 +1,17 @@
 package com.itsheng.service.service.Impl;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.itsheng.pojo.entity.JobCategory;
 import com.itsheng.pojo.entity.ResumeAnalysisResult;
 import com.itsheng.pojo.entity.UserCareerData;
 import com.itsheng.pojo.entity.UserRoadmapSteps;
+import com.itsheng.service.client.PythonDashboardAiClient;
 import com.itsheng.service.mapper.JobCategoryMapper;
 import com.itsheng.service.mapper.ResumeMapper;
 import com.itsheng.service.mapper.UserCareerDataMapper;
 import com.itsheng.service.mapper.UserRoadmapStepsMapper;
 import com.itsheng.service.mapper.UserVectorStoreMapper;
-import com.itsheng.service.service.JobVectorSearchService;
 import com.itsheng.service.service.DashboardService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,18 +19,34 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.regex.Pattern;
 
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class DashboardServiceImpl implements DashboardService {
 
+    private static final int MAX_DASHBOARD_PROFILE_SKILLS = 12;
+    private static final Pattern DASHBOARD_PROFILE_EMAIL_PATTERN = Pattern.compile(
+            "[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}",
+            Pattern.CASE_INSENSITIVE
+    );
+    private static final Pattern DASHBOARD_PROFILE_PHONE_PATTERN = Pattern.compile(
+            "(?<!\\d)(?:\\+?86[- ]?)?1[3-9]\\d{9}(?!\\d)"
+    );
+    private static final Pattern DASHBOARD_PROFILE_SECRET_PATTERN = Pattern.compile(
+            "(?i)(token|secret|api[_-]?key)\\s*[:=]\\s*\\S+"
+    );
+    private static final Pattern DASHBOARD_PROFILE_TOKEN_LIKE_PATTERN = Pattern.compile(
+            "(?=.*[A-Za-z])(?=.*\\d)[A-Za-z0-9_-]{24,}"
+    );
+
     private final UserRoadmapStepsMapper userRoadmapStepsMapper;
     private final UserCareerDataMapper userCareerDataMapper;
     private final JobCategoryMapper jobCategoryMapper;
     private final ResumeMapper resumeMapper;
     private final UserVectorStoreMapper userVectorStoreMapper;
-    private final JobVectorSearchService jobVectorSearchService;
+    private final PythonDashboardAiClient pythonDashboardAiClient;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -349,7 +364,13 @@ public class DashboardServiceImpl implements DashboardService {
             return null;
         }
 
-        var resumeVectorStore = userVectorStoreMapper.selectByVectorStoreId(latestResult.getVectorStoreId());
+        var resumeVectorStore = userVectorStoreMapper.selectByVectorStoreIdAndUserId(
+                latestResult.getVectorStoreId(), userId);
+        if (resumeVectorStore != null && !Objects.equals(resumeVectorStore.getUserId(), userId)) {
+            log.warn("用户简历向量归属不匹配，拒绝执行 Dashboard-AI 岗位匹配，userId: {}, vectorStoreId: {}",
+                    userId, latestResult.getVectorStoreId());
+            return null;
+        }
         if (resumeVectorStore == null || resumeVectorStore.getResumeContent() == null
                 || resumeVectorStore.getResumeContent().isBlank()) {
             log.warn("用户最新简历内容不存在，无法执行 RAG 岗位匹配，userId: {}, vectorStoreId: {}",
@@ -357,18 +378,162 @@ public class DashboardServiceImpl implements DashboardService {
             return null;
         }
 
-        String resumeQueryText = buildResumeQueryText(latestResult, resumeVectorStore.getResumeContent());
-        List<JobCategory> similarJobs = jobVectorSearchService.searchSimilarJobs(resumeQueryText, 1);
-        if (similarJobs == null || similarJobs.isEmpty()) {
-            log.warn("RAG 未检索到相似岗位，userId: {}, vectorStoreId: {}",
-                    userId, latestResult.getVectorStoreId());
+        Map<String, Object> payload = buildDashboardAiMatchPayload(userId, latestResult, resumeVectorStore.getResumeContent());
+        PythonDashboardAiClient.TargetJobMatchResult matchResult = pythonDashboardAiClient.matchTargetJob(payload);
+        JobCategory targetJob = jobCategoryMapper.selectById(matchResult.jobId());
+        if (targetJob == null) {
+            log.warn("Python Dashboard-AI 返回的岗位不存在，userId: {}, jobId: {}",
+                    userId, matchResult.jobId());
             return null;
         }
 
-        JobCategory targetJob = similarJobs.get(0);
-        log.info("RAG 为用户匹配目标岗位成功，userId: {}, jobId: {}, jobName: {}",
-                userId, targetJob.getId(), targetJob.getJobCategoryName());
+        log.info("Python Dashboard-AI 为用户匹配目标岗位成功，userId: {}, jobId: {}, jobName: {}, score: {}",
+                userId, targetJob.getId(), targetJob.getJobCategoryName(), matchResult.score());
         return targetJob;
+    }
+
+    private Map<String, Object> buildDashboardAiMatchPayload(Long userId, ResumeAnalysisResult latestResult,
+                                                             String resumeContent) {
+        List<JobCategory> jobCandidates = jobCategoryMapper.selectAll();
+        if (jobCandidates == null || jobCandidates.isEmpty()) {
+            log.warn("岗位候选快照为空，无法调用 Python Dashboard-AI，userId: {}", userId);
+            throw new PythonDashboardAiClient.DashboardAiException("暂无可用岗位匹配结果");
+        }
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("request_id", "dashboard-target-job-" + userId + "-" + latestResult.getId());
+        payload.put("user_id", userId);
+        payload.put("resume_analysis_id", latestResult.getId());
+        payload.put("resume_vector_store_id", latestResult.getVectorStoreId());
+        payload.put("resume_profile", parseResumeProfile(latestResult));
+        payload.put("resume_content", truncateResumeContent(resumeContent));
+        payload.put("job_candidates", buildJobCandidatePayload(jobCandidates));
+        payload.put("filters", buildDashboardAiFilters());
+        payload.put("top_k", 5);
+        return payload;
+    }
+
+    private Map<String, Object> parseResumeProfile(ResumeAnalysisResult latestResult) {
+        if (latestResult.getParsedData() == null || latestResult.getParsedData().isBlank()
+                || "{}".equals(latestResult.getParsedData())) {
+            return Collections.emptyMap();
+        }
+        try {
+            Map<String, Object> parsedProfile = objectMapper.readValue(latestResult.getParsedData(),
+                    objectMapper.getTypeFactory().constructMapType(Map.class, String.class, Object.class));
+            return whitelistDashboardResumeProfile(parsedProfile);
+        } catch (JsonProcessingException e) {
+            log.warn("解析简历画像 JSON 失败，analysisId: {}", latestResult.getId(), e);
+            return Collections.emptyMap();
+        }
+    }
+
+    private Map<String, Object> whitelistDashboardResumeProfile(Map<String, Object> parsedProfile) {
+        if (parsedProfile == null || parsedProfile.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        Map<String, Object> profile = new LinkedHashMap<>();
+        putTextIfPresent(profile, "target_role", parsedProfile.get("target_role"));
+
+        List<String> skills = normalizeProfileSkills(parsedProfile.get("skills"));
+        if (!skills.isEmpty()) {
+            profile.put("skills", skills);
+        }
+
+        Object experienceYears = parsedProfile.get("experience_years");
+        if (experienceYears instanceof Number) {
+            profile.put("experience_years", experienceYears);
+        }
+        return profile;
+    }
+
+    private void putTextIfPresent(Map<String, Object> target, String key, Object value) {
+        if (!isScalarProfileValue(value)) {
+            return;
+        }
+        String text = String.valueOf(value).trim();
+        if (!text.isEmpty() && !containsDashboardProfileSensitiveValue(text)) {
+            target.put(key, text);
+        }
+    }
+
+    private List<String> normalizeProfileSkills(Object value) {
+        List<?> rawSkills;
+        if (value instanceof List<?> list) {
+            rawSkills = list;
+        } else if (value instanceof String text) {
+            rawSkills = Arrays.asList(text.split("[,，、]"));
+        } else {
+            return Collections.emptyList();
+        }
+
+        Set<String> uniqueSkills = new LinkedHashSet<>();
+        for (Object item : rawSkills) {
+            if (item == null) {
+                continue;
+            }
+            if (!isScalarProfileValue(item)) {
+                continue;
+            }
+            String skill = String.valueOf(item).trim();
+            if (skill.isEmpty() || containsDashboardProfileSensitiveValue(skill)) {
+                continue;
+            }
+            uniqueSkills.add(skill);
+            if (uniqueSkills.size() >= MAX_DASHBOARD_PROFILE_SKILLS) {
+                break;
+            }
+        }
+        return new ArrayList<>(uniqueSkills);
+    }
+
+    private boolean isScalarProfileValue(Object value) {
+        return value instanceof String
+                || value instanceof Number
+                || value instanceof Boolean
+                || value instanceof Character;
+    }
+
+    private boolean containsDashboardProfileSensitiveValue(String value) {
+        return DASHBOARD_PROFILE_EMAIL_PATTERN.matcher(value).find()
+                || DASHBOARD_PROFILE_PHONE_PATTERN.matcher(value).find()
+                || DASHBOARD_PROFILE_SECRET_PATTERN.matcher(value).find()
+                || DASHBOARD_PROFILE_TOKEN_LIKE_PATTERN.matcher(value).find();
+    }
+
+    private String truncateResumeContent(String resumeContent) {
+        if (resumeContent == null) {
+            return "";
+        }
+        String compact = resumeContent.trim();
+        int maxChars = 4000;
+        return compact.length() > maxChars ? compact.substring(0, maxChars) : compact;
+    }
+
+    private List<Map<String, Object>> buildJobCandidatePayload(List<JobCategory> jobs) {
+        List<Map<String, Object>> candidates = new ArrayList<>();
+        for (JobCategory job : jobs) {
+            Map<String, Object> candidate = new LinkedHashMap<>();
+            candidate.put("job_id", job.getId());
+            candidate.put("job_name", job.getJobCategoryName());
+            candidate.put("job_category_code", job.getJobCategoryCode());
+            candidate.put("job_level", job.getJobLevel());
+            candidate.put("job_level_name", job.getJobLevelName());
+            candidate.put("required_skills", parseJsonArray(job.getRequiredSkills()));
+            candidate.put("job_description", job.getJobDescription());
+            candidate.put("job_profile", parseJsonObject(job.getJobProfile()));
+            candidates.add(candidate);
+        }
+        return candidates;
+    }
+
+    private Map<String, Object> buildDashboardAiFilters() {
+        Map<String, Object> filters = new LinkedHashMap<>();
+        filters.put("document_type", List.of("resume", "job", "jd"));
+        filters.put("visibility_scope", "user_or_public");
+        filters.put("language", "zh-CN");
+        return filters;
     }
 
     private void syncCareerTarget(Long userId, UserCareerData existingCareerData, JobCategory targetJob) {
@@ -427,48 +592,6 @@ public class DashboardServiceImpl implements DashboardService {
         }
     }
 
-    private String buildResumeQueryText(ResumeAnalysisResult latestResult, String resumeContent) {
-        List<String> parts = new ArrayList<>();
-        try {
-            if (latestResult.getParsedData() != null && !latestResult.getParsedData().isBlank()
-                    && !"{}".equals(latestResult.getParsedData())) {
-                JsonNode parsedData = objectMapper.readTree(latestResult.getParsedData());
-                addIfPresent(parts, parsedData, "target_role", "目标岗位");
-                addIfPresent(parts, parsedData, "current_role", "当前岗位");
-                JsonNode skillsNode = parsedData.get("skills");
-                if (skillsNode != null && skillsNode.isArray() && !skillsNode.isEmpty()) {
-                    List<String> skills = new ArrayList<>();
-                    skillsNode.forEach(skill -> {
-                        String text = skill.asText();
-                        if (text != null && !text.isBlank() && skills.size() < 10) {
-                            skills.add(text.trim());
-                        }
-                    });
-                    if (!skills.isEmpty()) {
-                        parts.add("技能：" + String.join("、", skills));
-                    }
-                }
-            }
-        } catch (JsonProcessingException e) {
-            log.warn("解析简历 parsedData 失败，回退到简历原文进行匹配，analysisId: {}", latestResult.getId(), e);
-        }
-
-        if (!parts.isEmpty()) {
-            return String.join("\n", parts);
-        }
-        return resumeContent.length() > 500 ? resumeContent.substring(0, 500) : resumeContent;
-    }
-
-    private void addIfPresent(List<String> parts, JsonNode node, String fieldName, String label) {
-        JsonNode fieldNode = node.get(fieldName);
-        if (fieldNode != null) {
-            String value = fieldNode.asText();
-            if (value != null && !value.isBlank() && !"null".equalsIgnoreCase(value.trim())) {
-                parts.add(label + "：" + value.trim());
-            }
-        }
-    }
-
     private List<Object> parseJsonArray(String json) {
         if (json == null || json.isBlank()) {
             return Collections.emptyList();
@@ -479,6 +602,19 @@ public class DashboardServiceImpl implements DashboardService {
         } catch (JsonProcessingException e) {
             log.warn("解析 JSON 数组失败，content: {}", json, e);
             return Collections.emptyList();
+        }
+    }
+
+    private Map<String, Object> parseJsonObject(String json) {
+        if (json == null || json.isBlank()) {
+            return Collections.emptyMap();
+        }
+        try {
+            return objectMapper.readValue(json,
+                    objectMapper.getTypeFactory().constructMapType(Map.class, String.class, Object.class));
+        } catch (JsonProcessingException e) {
+            log.warn("解析岗位画像 JSON 对象失败", e);
+            return Collections.emptyMap();
         }
     }
 }
