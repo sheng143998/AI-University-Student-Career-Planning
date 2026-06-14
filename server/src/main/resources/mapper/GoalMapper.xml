@@ -53,7 +53,7 @@
         )
     </insert>
 
-    <update id="update">
+    <update id="updateByIdAndUserId">
         UPDATE ai_career_plan.goal SET
             title = #{title},
             goal_desc = #{goalDesc},
@@ -67,7 +67,14 @@
             long_term_aspirations = #{longTermAspirations}::jsonb,
             ai_advice = #{aiAdvice},
             update_time = CURRENT_TIMESTAMP
-        WHERE id = #{id}
+        WHERE id = #{id} AND user_id = #{userId}
+    </update>
+
+    <update id="updateAiAdviceByIdAndUserId">
+        UPDATE ai_career_plan.goal SET
+            ai_advice = #{aiAdvice},
+            update_time = CURRENT_TIMESTAMP
+        WHERE id = #{id} AND user_id = #{userId}
     </update>
 
     <delete id="deleteByIdAndUserId">

@@ -11,6 +11,27 @@ export interface PathNode {
   isCurrentLevel: boolean
 }
 
+export interface RoadmapRagEvidence {
+  documentType?: string
+  jobId?: number | null
+  chunkId?: string
+  score?: number
+  source?: string
+}
+
+export interface RoadmapRagDiagnostics {
+  queries?: string[]
+  filters?: {
+    excludeSameCategory?: boolean
+    documentTypes?: string[]
+    [key: string]: unknown
+  }
+  fusion?: string
+  reranker?: string
+  candidateCount?: number
+  [key: string]: unknown
+}
+
 /** 垂直晋升路径推荐 */
 export interface VerticalPathRecommendation {
   categoryCode: string
@@ -32,6 +53,7 @@ export interface LateralPathRecommendation {
   requiredSkills: string[]
   possessedSkills: string[]
   aiRecommendationReason: string
+  evidence?: RoadmapRagEvidence[]
   pathNodes: PathNode[]
 }
 
@@ -40,6 +62,7 @@ export interface CareerPathRecommendation {
   currentJob: string
   verticalPath: VerticalPathRecommendation
   lateralPaths: LateralPathRecommendation[]
+  ragDiagnostics?: RoadmapRagDiagnostics
   generatedAt: string
 }
 

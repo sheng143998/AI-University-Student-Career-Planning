@@ -4,6 +4,7 @@ import com.itsheng.pojo.dto.GoalCreateDTO;
 import com.itsheng.pojo.dto.GoalMilestoneCreateDTO;
 import com.itsheng.pojo.dto.GoalMilestoneUpdateDTO;
 import com.itsheng.pojo.dto.GoalUpdateDTO;
+import com.itsheng.pojo.vo.AiAdviceVO;
 import com.itsheng.pojo.vo.GoalDetailVO;
 import com.itsheng.pojo.vo.GoalsOverviewVO;
 import com.itsheng.pojo.vo.IdVO;
@@ -15,6 +16,8 @@ public interface GoalsService {
     IdVO createGoal(GoalCreateDTO dto);
     
     GoalDetailVO getGoalDetail(Long goalId);
+
+    AiAdviceVO generateAiAdvice(Long goalId);
     
     void updateGoal(Long goalId, GoalUpdateDTO dto);
     
@@ -22,5 +25,5 @@ public interface GoalsService {
     
     IdVO createMilestone(Long goalId, GoalMilestoneCreateDTO dto);
     
-    void updateMilestone(Long milestoneId, GoalMilestoneUpdateDTO dto);
+    void updateMilestone(Long goalId, Long milestoneId, GoalMilestoneUpdateDTO dto);
 }

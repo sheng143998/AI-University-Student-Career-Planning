@@ -653,3 +653,220 @@ user_roadmap_steps (职业发展路径表)
 | 5.3 | 获取学生能力画像 | GET | /api/resume/capability-profile | 获取能力画像（完整度/竞争力/各维度评分） |
 | 5.4 | 简历预览 | GET | /api/resume/analysis/{id}/preview | 内嵌预览简历 |
 | 5.5 | 获取预览 URL | GET | /api/resume/analysis/{id}/preview-url | 获取 OSS 签名 URL |
+
+---
+
+## 2026-06-12 Resume-AI Python RAG Contract
+
+### Change Summary
+
+Resume upload and public Java API paths remain unchanged. Java keeps authentication, file validation, OSS upload, base text extraction, async status tracking, and database writes. Resume AI/RAG analysis moves behind a Python HTTP boundary at `POST /api/v1/resume/analyze`.
+
+This migration is a deterministic fallback implementation. It does not claim production pgvector semantic retrieval, Dashscope LLM generation, cross-encoder reranking, or offline RAG quality evaluation.
+
+### Public Java API
+
+| Method | Path | Auth | Purpose |
+| :--- | :--- | :--- | :--- |
+| POST | `/api/resume/upload` | JWT | Upload resume, create `user_vector_store`, start async Python-backed analysis |
+| GET | `/api/resume/analysis/{id}` | JWT | Poll async status and final analysis result |
+| GET | `/api/resume/analysis` | JWT | List current user's resume analyses |
+| GET | `/api/resume/capability-profile` | JWT | Get latest capability profile for current user |
+| GET | `/api/resume/analysis/{id}/preview` | JWT | Stream resume file preview |
+| GET | `/api/resume/analysis/{id}/preview-url` | JWT | Return signed preview URL |
+
+All `vectorStoreId` entry points must preserve current-user ownership checks. If a legacy path lacks a strict `vectorStoreId + userId` mapper query, this must be recorded as a remaining risk and not hidden by the Python migration.
+
+### Java To Python Boundary
+
+Java calls Python only through HTTP. Java must not import Python modules or reimplement Resume AI/RAG with Spring AI `ChatClient`, `VectorStore`, or `OpenAiEmbeddingModel`.
+
+Python endpoint:
+
+```http
+POST /api/v1/resume/analyze
+Content-Type: application/json
+```
+
+Resume Python base URL priority:
+
+1. `FUCHUANG_AI_PYTHON_RESUME_BASE_URL`
+2. `fuchuang.ai.python.resume-base-url`
+3. `FUCHUANG_AI_PYTHON_BASE_URL`
+4. `fuchuang.ai.python.base-url`
+5. `http://127.0.0.1:8091`
+
+Resume Python timeout priority:
+
+1. `FUCHUANG_AI_PYTHON_RESUME_TIMEOUT_SECONDS`
+2. `fuchuang.ai.python.resume-timeout-seconds`
+3. `fuchuang.ai.python.timeout-seconds`
+4. `30`
+
+Retry rule: Java does not retry. The async task marks the analysis as `failed` when Python is unavailable, times out, or returns an invalid response.
+
+Idempotency key: `vectorStoreId + userId`. Repeated calls for the same pair must be safe to process and overwrite the same analysis row. Java owns database persistence.
+
+Java enforces this in the service and mapper layer for this migration: before Python analysis starts, Java queries the latest `resume_analysis_result` by `vector_store_id + user_id`; if a row exists, Java resets that row to `processing` and later updates by `id + user_id`; if no row exists, Java inserts one row and uses the generated `id` for progress, completion, and failure updates. This pass does not add a database migration or unique constraint.
+
+### Python Request Schema
+
+```json
+{
+  "vector_store_id": "37a77bb4-08e0-47c2-b504-5137b1e4ebc9",
+  "user_id": 1001,
+  "resume_text": "sanitized extracted resume text",
+  "file_type": "pdf",
+  "original_file_name": "resume.pdf",
+  "resume_file_path": "https://oss.example/resume.pdf",
+  "metadata": {
+    "source": "resume_upload",
+    "visibility": "user",
+    "document_type": "resume"
+  }
+}
+```
+
+Required fields: `vector_store_id`, `user_id`, `resume_text`. Empty or whitespace-only `resume_text` is invalid and maps to Java upload/analysis failure.
+
+### Python Success Response Schema
+
+```json
+{
+  "status": "completed",
+  "parsed_data": {
+    "name": "",
+    "target_role": "AI Agent Intern",
+    "location": "",
+    "current_role": "",
+    "skills": ["Python", "RAG"],
+    "experience_years": 0,
+    "match_score": 70,
+    "education": [],
+    "experience": []
+  },
+  "scores": {
+    "keyword_match": 70,
+    "layout": 70,
+    "skill_depth": 70,
+    "experience": 60
+  },
+  "highlights": [
+    "Evidence-backed resume highlight"
+  ],
+  "suggestions": [
+    {
+      "type": "SKILL",
+      "content": "Add measurable RAG project outcomes."
+    }
+  ],
+  "capability_profile": {
+    "overall_score": 70,
+    "completeness_score": 70,
+    "competitiveness_score": 65,
+    "capability_scores": {
+      "professional_skill": 70,
+      "certificate": 50,
+      "innovation": 65,
+      "learning": 75,
+      "resilience": 65,
+      "communication": 65,
+      "internship": 60
+    },
+    "professional_skills": [
+      {
+        "name": "Python",
+        "proficiency": 3,
+        "years": 1,
+        "evidence": "Detected from resume evidence"
+      }
+    ],
+    "certificates": [],
+    "soft_skills": {},
+    "ai_evaluation": "Deterministic fallback evaluation based on extracted evidence."
+  },
+  "rag_diagnostics": {
+    "chunk_count": 4,
+    "summary_index_count": 5,
+    "metadata_filters": {
+      "user_id": 1001,
+      "document_type": "resume",
+      "visibility": "user"
+    },
+    "queries": ["resume skills", "target role", "project evidence"],
+    "retrieval": {
+      "bm25": true,
+      "embedding_fallback": "hash",
+      "fusion": "rrf",
+      "reranker": "deterministic"
+    },
+    "selected_evidence_ids": ["chunk-0"],
+    "sensitive_text_included": false
+  }
+}
+```
+
+`rag_diagnostics` must not contain full resume text, raw prompts, raw Python responses, tokens, keys, or OSS credentials. Evidence references should use ids, section labels, or short sanitized snippets only.
+
+### RAG Capability Acceptance
+
+The Python fallback must expose testable behavior for:
+
+- Recursive chunking by section, paragraph, sentence, and size budget.
+- Document and section summary index records.
+- Metadata filtering by `user_id`, `document_type`, `vector_store_id`, and visibility.
+- Multi-Query expansion for career intent, skill evidence, gap analysis, and role matching.
+- BM25 plus deterministic hash-embedding hybrid retrieval.
+- RAG-Fusion via reciprocal rank fusion.
+- Deterministic fallback reranker.
+- Evidence/citation ids returned to diagnostics.
+- Sanitized diagnostics without full resume text.
+
+### Java Persistence Contract
+
+Java creates or upserts `user_vector_store` after text extraction and before returning the upload id. This write stores `id`, `user_id`, `content`, `resume_file_path`, `vector_type='resume'`, `metadata`, `create_time`, and `update_time`. Java must not write a fake embedding value.
+
+Java inserts `resume_analysis_result` with `status='processing'` and `progress=0`, then updates it to:
+
+- `completed`, `progress=100`, with `parsed_data`, `scores`, `highlights`, and `suggestions` from Python.
+- `failed`, `progress=0`, with safe empty JSON fields when Python fails or the response is invalid.
+
+Java persists `capability_profile` from the Python `capability_profile` object. Dashboard data generation may reuse the persisted profile and analysis record, but this migration does not move Dashboard generation.
+
+### Error Mapping
+
+| Python/Boundary Case | Java Handling |
+| :--- | :--- |
+| Empty resume text before Python call | Reject upload or mark analysis failed with `progress=0` |
+| Python HTTP 400 | Mark failed; log status and safe message only |
+| Python HTTP 5xx | Mark failed; log status only |
+| Timeout | Mark failed; no retry |
+| Connection refused/unavailable | Mark failed; no retry |
+| Empty response body | Mark failed |
+| Invalid JSON | Mark failed |
+| Schema missing required result fields | Mark failed |
+| `status != completed` | Mark failed unless explicitly documented |
+
+Logs must use ids, counts, status codes, and diagnostic ids. Logs must not print raw resume text, raw Python response, raw AI response, JWT tokens, API keys, or OSS credentials.
+
+### Frontend Impact
+
+`website/src/api/resume.ts` continues to call the Java API only. The frontend keeps polling `GET /api/resume/analysis/{id}` by `status` and `progress`; it must not depend on `resume_content` to finish polling.
+
+No direct browser call to Python is supported.
+
+### Verification Gate
+
+Required verification for this migration:
+
+- Python unit tests: `python -B -m unittest discover -s ai_service -p "test_resume*.py"` exits 0, runs `N > 0`, and has 0 failures, 0 errors, 0 skipped.
+- Python HTTP smoke starts `ai_service.resume_ai_service`, verifies valid payload returns HTTP 200 with the documented schema, verifies invalid payload returns HTTP 400, and cleans up the process.
+- Java tests cover Python client success, timeout, HTTP 5xx, empty response, invalid JSON, schema failure, Resume success flow, Resume failure flow, and `user_vector_store` insert/upsert behavior.
+- `mvn -pl server -am -DskipTests compile` passes.
+- Frontend build runs only if `website/src/api/resume.ts` changes; otherwise record why it was not needed.
+- Static contract gate confirms this document, Python schema/response, and Java client parsing logic agree.
+- `git diff --check` runs before commit and `git diff --check origin/master..HEAD` runs after commit.
+- Secret/PII gate fails on unredacted secrets, raw resume body, raw Python response, token/key, or OSS credential in code, logs, tests, or `tests-log`.
+- Scope gate allows only Resume/Python/documentation/test/log/Obsidian files and denies `database/`, `application*.yml`, non-Resume modules, `ai-service/`, cache, and build artifacts.
+
+If `tests-log/ai-rag-automation` does not exist, create it. Each run must add `tests-log/ai-rag-automation/yyyy-MM-dd-HHmm-resume-python-rag.md` with command, cwd, time, exit code, key output, sample request, actual result, failure repair, sub-agent review, remaining risk, and associated files/commit.

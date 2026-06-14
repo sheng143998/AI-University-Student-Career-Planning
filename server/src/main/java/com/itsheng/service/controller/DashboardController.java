@@ -2,6 +2,7 @@ package com.itsheng.service.controller;
 
 import com.itsheng.common.context.BaseContext;
 import com.itsheng.common.result.Result;
+import com.itsheng.service.client.PythonDashboardAiClient;
 import com.itsheng.service.service.DashboardService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -51,7 +52,12 @@ public class DashboardController {
         Long userId = BaseContext.getUserId();
         log.info("用户 ID:{}, 获取职业发展路径", userId);
 
-        Map<String, Object> result = dashboardService.getRoadmap(userId);
+        Map<String, Object> result;
+        try {
+            result = dashboardService.getRoadmap(userId);
+        } catch (PythonDashboardAiClient.DashboardAiException e) {
+            return Result.error(e.getUserMessage());
+        }
         if (result == null) {
             return Result.error("请先上传简历以生成职业规划");
         }

@@ -5,6 +5,14 @@
 
 ---
 
+## 变更记录
+
+| 日期 | 变更 | 影响范围 |
+| :--- | :--- | :--- |
+| 2026-06-09 | 新增目标 AI 建议生成接口，统一 Java 到 Python Goals-RAG 内部路径为 `/internal/goals/advice`，响应扩展 `evidenceReferences` 与 `retrievalDiagnostics` | `/api/goals/{id}/ai-advice/generate`、`AiAdvice`、`website/src/api/goals.ts` |
+
+---
+
 ## 接口列表
 
 | 接口名 | 方法 | 路径 | 说明 |
@@ -12,6 +20,7 @@
 | 获取目标总览 | GET | `/api/goals/overview` | 含主目标/里程碑/成功准则/并行目标 |
 | 创建目标 | POST | `/api/goals` | 新增目标 |
 | 获取目标详情 | GET | `/api/goals/{id}` | 含里程碑/成功准则/AI 建议 |
+| 生成目标 AI 建议 | POST | `/api/goals/{id}/ai-advice/generate` | 通过 Python Goals-RAG 生成建议 |
 | 更新目标 | PUT | `/api/goals/{id}` | 更新字段 |
 | 删除目标 | DELETE | `/api/goals/{id}` | 删除 |
 | 创建里程碑 | POST | `/api/goals/{id}/milestones` | 里程碑 |
@@ -125,6 +134,163 @@
   }
 }
 ```
+
+---
+
+### 生成目标 AI 建议
+- **请求方法**: `POST`
+- **请求路径**: `/api/goals/{id}/ai-advice/generate`
+- **鉴权**: 需要（JWT Token）
+- **路径参数**:
+
+| 参数 | 类型 | 必须 | 说明 |
+| :--- | :--- | :--- | :--- |
+| id | number | 是 | 目标 ID。Java 必须用 `BaseContext.userId` 校验该目标属于当前用户 |
+
+- **请求体**: 无
+- **用途**: 为当前用户指定目标生成或刷新 AI 建议。Java 负责鉴权、目标归属校验、上下文脱敏和落库；Python 负责 Goals-RAG 检索、融合排序和建议生成。
+- **成功响应示例**:
+```json
+{
+  "code": 1,
+  "msg": null,
+  "data": {
+    "content": "当前目标「成为 AI 应用开发工程师」状态为 IN_PROGRESS，进度约45%。建议优先补齐 RAG 项目证据。",
+    "evidenceReferences": [
+      {
+        "sourceType": "milestone",
+        "sourceId": "goal_7:milestone_1:chunk:0",
+        "reason": "完成 RAG 项目 实现检索、重排和评估",
+        "score": 0.98
+      }
+    ],
+    "retrievalDiagnostics": {
+      "expandedQueries": [
+        "成为 AI 应用开发工程师 目标拆解 下一步",
+        "成为 AI 应用开发工程师 技能差距 里程碑"
+      ],
+      "metadataFilters": {
+        "userId": "10001",
+        "goalId": "7",
+        "documentTypes": ["goal", "milestone", "successCriteria"],
+        "visibilityScope": "USER_PRIVATE"
+      },
+      "retrieval": "multi_query+bm25+embedding",
+      "fusion": "rag_fusion_rrf",
+      "reranker": "deterministic_fallback",
+      "chunking": "recursive",
+      "summaryIndexCount": 4,
+      "candidateCount": 4,
+      "selectedEvidenceCount": 3,
+      "emptyRetrievalFallback": false,
+      "scoreNormalization": "minmax_0_1"
+    }
+  }
+}
+```
+
+- **失败响应示例**:
+```json
+{ "code": 0, "msg": "目标不存在", "data": null }
+```
+```json
+{ "code": 0, "msg": "目标AI建议生成失败，请检查目标上下文", "data": null }
+```
+```json
+{ "code": 0, "msg": "目标AI建议服务超时，请稍后重试", "data": null }
+```
+```json
+{ "code": 0, "msg": "目标AI建议服务暂不可用", "data": null }
+```
+
+#### Java 到 Python 调用说明
+
+Java 在目标归属校验通过后调用：
+
+`POST /internal/goals/advice`
+
+- **Python 服务地址**: `fuchuang.ai.python.base-url`，默认 `http://127.0.0.1:8090`。
+- **超时**: 请求超时默认 20 秒；连接超时 10 秒。实现使用通用 `fuchuang.ai.python.timeout-seconds`，不要求修改 `application*.yml`。
+- **重试**: Java 不自动重试，避免重复覆盖 `goal.ai_advice`。
+- **幂等/覆盖语义**: 重复调用会重新生成建议，并只按 `goal_id + user_id` 覆盖当前目标的 `ai_advice` 文本内容。
+- **持久化边界**: `goal.ai_advice` 只保存 `content`；`evidenceReferences` 和 `retrievalDiagnostics` 只在本次生成响应返回，不改数据库表。`overview/detail` 从数据库读取时只稳定返回 `content`。Goals 普通目标更新、里程碑更新、AI tool 目标更新和里程碑完成也统一走 `id + user_id` SQL 条件，作为本接口 RAG payload 与 AI tool 用户隔离的必要 Java 安全胶水。
+- **数据脱敏**: Java 不传完整简历/JD 原文；只传目标、里程碑、成功准则和长期愿景的短摘要，并过滤手机号、邮箱、token-like 字符串和嵌套对象内容。
+- **Python RAG 口径**: 当前为可运行 deterministic fallback，包含递归切块、摘要索引、`userId/goalId/documentTypes/visibilityScope` 元数据过滤；其中 `documentTypes` 会真实过滤候选 summary records 与 evidence references，而不只是写入 diagnostics。检索流程包含 Multi-Query、BM25 + hash embedding 混合检索、score normalization、RAG-Fusion/RRF、确定性重排、证据引用和诊断字段。该接口不声明真实 pgvector、Dashscope LLM、cross-encoder 或离线质量评估已完成。
+
+Java 请求示例：
+```json
+{
+  "userId": "10001",
+  "goal": {
+    "id": "7",
+    "title": "成为 AI 应用开发工程师",
+    "desc": "补齐 Python RAG 与工程化能力",
+    "status": "IN_PROGRESS",
+    "progress": 45,
+    "eta": "2026年9月",
+    "isPrimary": true
+  },
+  "milestones": [
+    { "id": "1", "title": "完成 RAG 项目", "desc": "实现检索、重排和评估", "status": "IN_PROGRESS", "progress": 40, "order": 1 }
+  ],
+  "successCriteria": {
+    "salary": "15k-25k",
+    "companies": ["字节跳动"],
+    "cities": ["杭州"]
+  },
+  "longTermAspirations": [
+    { "title": "AI 应用工程师", "desc": "能独立落地 RAG 系统" }
+  ],
+  "retrievalOptions": {
+    "chunking": "recursive",
+    "summaryIndex": true,
+    "metadataFilters": {
+      "userId": "10001",
+      "goalId": "7",
+      "documentTypes": ["goal", "milestone", "successCriteria"],
+      "visibilityScope": "USER_PRIVATE"
+    },
+    "multiQuery": true,
+    "hybridSearch": ["bm25", "embedding"],
+    "fusion": "rag_fusion_rrf",
+    "rankingModel": "deterministic_fallback"
+  }
+}
+```
+
+Python 响应字段必须使用 camelCase：
+
+| 字段 | 类型 | 说明 |
+| :--- | :--- | :--- |
+| content | string | 生成的 AI 建议文本 |
+| evidenceReferences | object[] | 证据引用，不包含完整原文 |
+| retrievalDiagnostics | object | 检索诊断，仅包含 query/filter/count/score 等可审计元数据 |
+
+错误映射：
+
+| Python/调用异常 | Java 外部响应 |
+| :--- | :--- |
+| `400` / `422` | `{"code":0,"msg":"目标AI建议生成失败，请检查目标上下文"}` |
+| `504` 或 Java 请求超时 | `{"code":0,"msg":"目标AI建议服务超时，请稍后重试"}` |
+| 连接失败、`5xx`、非 JSON | `{"code":0,"msg":"目标AI建议服务暂不可用"}` |
+| `content` 缺失或空字符串 | `{"code":0,"msg":"目标AI建议生成结果为空"}` |
+| empty retrieval | Python 返回 `emptyRetrievalFallback=true` 的成功响应，Java 仍保存并返回 fallback 建议 |
+| 鉴权失败 | 由全局 JWT 拦截器处理，不调用 Python |
+| 目标不存在或跨用户目标 | `{"code":0,"msg":"目标不存在"}`，不调用 Python |
+| 目标或里程碑更新跨用户 | 先按 `id + user_id` 查询；写入时使用 `updateByIdAndUserId`，SQL 层再次约束 `user_id` |
+
+#### 前端影响
+
+- `website/src/api/goals.ts` 中 `AiAdvice` 扩展 `evidenceReferences?` 和 `retrievalDiagnostics?`。
+- 新增 `generateGoalAiAdvice(goalId)`，调用 `POST /api/goals/{id}/ai-advice/generate`。
+- 当前最小闭环只增加 API client，不要求改 Goals 页面 UI。
+
+#### 测试口径
+
+- Python: `python -B -m pytest -q -p no:cacheprovider ai_service/test_goals_rag_service.py --tb=short` 与 `python -B -m unittest discover -s ai_service -p "test_goals_rag_service.py"`，覆盖递归切块、摘要索引、metadata filter 防伪、`documentTypes` 真实过滤候选证据、Multi-Query、BM25+embedding、RAG-Fusion/RRF、重排、HTTP handler、PII 过滤和旧 endpoint 清理。
+- Java: `mvn -pl server -am -Dtest=PythonGoalsAdviceClientTest,GoalsServiceImplTest,GoalsControllerTest -Dsurefire.failIfNoSpecifiedTests=false test`，并校验 surefire 报告中三个测试类 tests > 0。
+- Frontend: `cd website && npm run build`。
+- Smoke: 启动 Python 8090 聚合服务后 POST `/internal/goals/advice`，确认三字段、metadata filters 和旧版 Goals advice 公网风格路径不再可用。
 
 ---
 
@@ -256,6 +422,8 @@
 | 字段 | 类型 | 说明 |
 | :--- | :--- | :--- |
 | content | string | AI建议内容 |
+| evidenceReferences | object[] | 非必须；仅生成接口实时返回的 RAG 证据引用，overview/detail 可为空 |
+| retrievalDiagnostics | object | 非必须；仅生成接口实时返回的检索诊断，overview/detail 可为空 |
 
 ## 建表语句
 
@@ -330,3 +498,7 @@ COMMENT ON COLUMN ai_career_plan.goal_milestone.progress IS '进度：0-100';
 COMMENT ON COLUMN ai_career_plan.goal_milestone.sort_order IS '排序顺序';
 ```
 
+## 2026-06-09 里程碑父目标一致性补充
+
+- `PATCH /api/goals/{id}/milestones/{ms_id}` 必须同时校验 `goal_id = id`、`id = ms_id`、`user_id = BaseContext.userId`。
+- 当 `ms_id` 属于当前用户但不属于路径中的 `id` 时，不应更新该里程碑；该约束用于保持 REST 资源层级、AI tool 用户隔离胶水与 Goals-RAG payload 来源一致。

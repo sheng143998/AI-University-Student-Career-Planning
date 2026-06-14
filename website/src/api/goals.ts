@@ -38,8 +38,26 @@ export interface LongTermAspiration {
   desc: string
 }
 
+export interface GoalAdviceEvidenceReference {
+  sourceType: string
+  sourceId: string
+  reason: string
+  score?: number
+}
+
+export interface GoalAdviceRetrievalDiagnostics {
+  expandedQueries?: string[]
+  metadataFilters?: Record<string, unknown>
+  retrieval?: string
+  fusion?: string
+  reranker?: string
+  [key: string]: unknown
+}
+
 export interface AiAdvice {
   content: string
+  evidenceReferences?: GoalAdviceEvidenceReference[]
+  retrievalDiagnostics?: GoalAdviceRetrievalDiagnostics
 }
 
 export interface GoalsOverview {
@@ -141,6 +159,16 @@ export async function getGoalDetail(goalId: string): Promise<ApiResult<GoalDetai
     credentials: 'include',
   })
   return parseApiResponse<GoalDetail>(res)
+}
+
+/** 生成目标 AI 建议 */
+export async function generateGoalAiAdvice(goalId: string): Promise<ApiResult<AiAdvice>> {
+  const res = await fetch(`${apiBase()}/api/goals/${goalId}/ai-advice/generate`, {
+    method: 'POST',
+    headers: headersAuth(),
+    credentials: 'include',
+  })
+  return parseApiResponse<AiAdvice>(res)
 }
 
 /** 更新目标 */

@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.itsheng.common.context.BaseContext;
 import com.itsheng.common.constant.ResumeConstant;
-import com.itsheng.common.constant.SystemConstants;
 import com.itsheng.common.exception.FileUploadException;
 import com.itsheng.common.exception.FileNotFoundException;
 import com.itsheng.common.exception.ResumeAnalysisException;
@@ -22,6 +21,7 @@ import com.itsheng.pojo.entity.UserVectorStore;
 import com.itsheng.pojo.vo.CapabilityProfileVO;
 import com.itsheng.pojo.vo.ResumeAnalysisResultVO;
 import com.itsheng.pojo.vo.ResumeUploadVO;
+import com.itsheng.service.client.PythonResumeAiClient;
 import com.itsheng.service.controller.CommonController;
 import com.itsheng.service.mapper.JobCategoryMapper;
 import com.itsheng.service.mapper.ResumeMapper;
@@ -29,29 +29,23 @@ import com.itsheng.service.mapper.StudentCapabilityProfileMapper;
 import com.itsheng.service.mapper.UserCareerDataMapper;
 import com.itsheng.service.mapper.UserRoadmapStepsMapper;
 import com.itsheng.service.mapper.UserVectorStoreMapper;
-import com.itsheng.service.service.JobVectorSearchService;
 import com.itsheng.service.service.ResumeOcrService;
 import com.itsheng.service.service.ResumeService;
 import com.itsheng.common.utils.AliOssUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.document.Document;
 import org.springframework.ai.reader.ExtractedTextFormatter;
 import org.springframework.ai.reader.pdf.PagePdfDocumentReader;
 import org.springframework.ai.reader.pdf.config.PdfDocumentReaderConfig;
 import org.springframework.ai.reader.tika.TikaDocumentReader;
 import org.springframework.ai.transformer.splitter.TokenTextSplitter;
-import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -70,17 +64,14 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ResumeServiceImpl implements ResumeService {
 
-    private final VectorStore pgVectorStore;
-    private final OpenAiEmbeddingModel embeddingModel;
     private final CommonController commonController;
     private final UserVectorStoreMapper userVectorStoreMapper;
     private final ResumeMapper resumeMapper;
     private final StudentCapabilityProfileMapper capabilityProfileMapper;
     private final AliOssUtil aliOssUtil;
-    private final ChatClient resumeAnalysisChatClient;
+    private final PythonResumeAiClient pythonResumeAiClient;
     private final ObjectMapper objectMapper;
     private final JobCategoryMapper jobCategoryMapper;
-    private final JobVectorSearchService jobVectorSearchService;
     private final UserCareerDataMapper userCareerDataMapper;
     private final UserRoadmapStepsMapper userRoadmapStepsMapper;
     private final ResumeOcrService resumeOcrService;
@@ -135,7 +126,7 @@ public class ResumeServiceImpl implements ResumeService {
                 throw new FileUploadException("文件上传到 OSS 失败");
             }
             String fileUrl = uploadResult.getData();
-            log.info("文件已上传到 OSS: {}", fileUrl);
+            log.info("简历文件已上传到 OSS，userId={}, fileType={}", userId, fileType);
 
             // 解析简历内容
             byte[] fileBytes = file.getBytes();
@@ -143,30 +134,9 @@ public class ResumeServiceImpl implements ResumeService {
             log.debug("简历解析完成：userId={}, fileType={}, documentCount={}", userId, fileType, documents.size());
 
             if (documents.isEmpty()) {
-                log.warn("简历解析后未生成任何文档片段，终止后续流程，userId={}, fileUrl={}", userId, fileUrl);
+                log.warn("简历解析后未生成任何文档片段，终止后续流程，userId={}", userId);
                 throw new FileUploadException("RESUME_TEXT_EXTRACTION_FAILED: 简历未识别到有效内容，请上传可编辑文本版 PDF 或 DOCX");
             }
-
-            // 将简历内容分批添加到向量存储（通义千问限制 batch size 最大为 10）
-            int batchSize = 10;
-            int totalDocuments = documents.size();
-            for (int i = 0; i < totalDocuments; i += batchSize) {
-                List<Document> batch = documents.subList(i, Math.min(i + batchSize, totalDocuments));
-                pgVectorStore.add(batch);
-                log.info("已添加第 {} 批文档向量 ({}-{} / {})", (i / batchSize) + 1, i + 1, Math.min(i + batchSize, totalDocuments), totalDocuments);
-            }
-            log.info("简历向量已成功添加到向量存储，共{}个文档片段", documents.size());
-
-            // 使用 Mapper 批量更新 user_id 和 resume_file_path 到数据库
-            for (Document doc : documents) {
-                UserVectorStore userVectorStore = UserVectorStore.builder()
-                        .id(doc.getId())
-                        .userId(userId)
-                        .resumeFilePath(fileUrl)
-                        .build();
-                userVectorStoreMapper.update(userVectorStore);
-            }
-            log.info("已更新 user_id 和 resume_file_path 到数据库，userId: {}, filePath: {}", userId, fileUrl);
 
             // 合并所有内容用于返回
             String resumeContent = documents.stream()
@@ -177,12 +147,13 @@ public class ResumeServiceImpl implements ResumeService {
                     resumeContent.length(), effectiveChars);
 
             if (effectiveChars == 0) {
-                log.warn("简历聚合文本为空，终止 AI 分析流程，userId={}, fileUrl={}", userId, fileUrl);
+                log.warn("简历聚合文本为空，终止 AI 分析流程，userId={}", userId);
                 throw new FileUploadException("RESUME_TEXT_EXTRACTION_FAILED: 简历内容为空，无法继续分析");
             }
 
             // 生成主键 ID（UUID 字符串）
             String id = documents.get(0).getId();
+            upsertUserVectorStore(id, userId, resumeContent, fileUrl, fileType, documents.size());
 
             // 异步调用 AI 进行简历解析
             String finalOriginalFilename = originalFilename;
@@ -214,49 +185,34 @@ public class ResumeServiceImpl implements ResumeService {
     @Transactional
     public void analyzeAndSave(String vectorStoreId, Long userId, String resumeContent,
                                String fileType, String originalFileName, String resumeFilePath) {
+        ProgressTracker tracker = null;
+        ResumeAnalysisResult initialRecord = null;
         try {
             log.info("开始 AI 解析简历，vectorStoreId: {}, userId: {}", vectorStoreId, userId);
 
-            // 1. 先插入一条初始记录，状态为 processing，进度为 0
-            ResumeAnalysisResult initialRecord = ResumeAnalysisResult.builder()
-                    .vectorStoreId(vectorStoreId)
-                    .userId(userId)
-                    .fileType(fileType)
-                    .originalFileName(originalFileName)
-                    .resumeFilePath(resumeFilePath)
-                    .status("processing")
-                    .progress(0)
-                    .parsedData("{}")
-                    .scores("{\"keyword_match\":0,\"layout\":0,\"skill_depth\":0,\"experience\":0}")
-                    .highlights("[]")
-                    .suggestions("[]")
-                    .createTime(LocalDateTime.now())
-                    .updateTime(LocalDateTime.now())
-                    .build();
-            resumeMapper.insert(initialRecord);
-            log.info("已插入初始分析记录，analysisId: {}, resumeFilePath: {}", initialRecord.getId(), resumeFilePath);
+            initialRecord = upsertProcessingAnalysisRecord(vectorStoreId, userId, fileType, originalFileName, resumeFilePath);
+            log.info("已准备初始分析记录，analysisId: {}, vectorStoreId: {}", initialRecord.getId(), vectorStoreId);
 
             // 2. 启动异步进度更新任务（每 5 秒更新一次进度）
-            ProgressTracker tracker = new ProgressTracker();
-            tracker.startTracking(vectorStoreId);
+            tracker = new ProgressTracker();
+            tracker.startTracking(initialRecord.getId(), userId, vectorStoreId);
 
-            // 3. 匹配用户目标岗位
-            JobCategory targetJob = matchTargetJob(vectorStoreId, resumeContent);
+            JsonNode pythonResult = pythonResumeAiClient.analyze(buildPythonResumePayload(
+                    vectorStoreId, userId, resumeContent, fileType, originalFileName, resumeFilePath));
+
+            // 3. 根据 Python 解析结果匹配用户目标岗位
+            JsonNode parsedDataNode = pythonResult.path("parsed_data");
+            JobCategory targetJob = matchTargetJobFromParsed(parsedDataNode);
             String targetJobName = targetJob != null ? targetJob.getJobCategoryName() : null;
             Long targetJobId = targetJob != null ? targetJob.getId() : null;
             log.info("目标岗位匹配完成: {}, jobId: {}", targetJobName, targetJobId);
 
-            // 4. 调用 AI 进行简历解析（结合目标岗位）
-            String analysisJson = callAiForAnalysis(resumeContent, targetJob);
-            log.info("AI 返回的解析结果：{}", analysisJson);
-
-            // 5. 停止进度更新
+            // 4. 停止进度更新
             tracker.stopTracking();
 
-            // 6. 解析 JSON 并提取各字段
-            JsonAnalysisResult analysisResult = parseAnalysisJson(analysisJson);
+            JsonAnalysisResult analysisResult = parsePythonAnalysisResult(pythonResult);
 
-            // 7. 更新分析结果记录为完成状态
+            // 5. 更新分析结果记录为完成状态
             ResumeAnalysisResult analysisRecord = ResumeAnalysisResult.builder()
                     .id(initialRecord.getId())
                     .vectorStoreId(vectorStoreId)
@@ -273,25 +229,21 @@ public class ResumeServiceImpl implements ResumeService {
                     .updateTime(LocalDateTime.now())
                     .build();
 
-            // 8. 更新数据库
-            resumeMapper.update(analysisRecord);
+            // 6. 更新数据库
+            resumeMapper.updateByIdAndUserId(analysisRecord);
             log.info("简历分析结果已更新，analysisId: {}", analysisRecord.getId());
 
-            // 9. 调用 AI 生成学生能力画像并保存（结合目标岗位）
+            // 7. 保存 Python 返回的学生能力画像
             try {
-                generateCapabilityProfile(userId, analysisRecord.getId(), resumeContent, targetJob);
+                saveCapabilityProfile(userId, analysisRecord.getId(), pythonResult.path("capability_profile"));
             } catch (Exception e) {
                 log.error("生成学生能力画像失败，userId: {}, analysisId: {}", userId, analysisRecord.getId(), e);
             }
 
-            // 10. 更新 user_vector_store 表的状态为 COMPLETED
-            UserVectorStore userVectorStore = UserVectorStore.builder()
-                    .id(vectorStoreId)
-                    .resumeContent(resumeContent)
-                    .build();
-            userVectorStoreMapper.update(userVectorStore);
+            // 8. 保持 user_vector_store 中的归属与 content-only 文本记录
+            upsertUserVectorStore(vectorStoreId, userId, resumeContent, resumeFilePath, fileType, 1);
 
-            // 11. 自动生成 user_career_data（Dashboard 数据）
+            // 9. 自动生成 user_career_data（Dashboard 数据）
             try {
                 generateUserCareerData(userId, targetJob, targetJobName, targetJobId, analysisRecord);
             } catch (Exception e) {
@@ -301,31 +253,26 @@ public class ResumeServiceImpl implements ResumeService {
             log.info("简历解析完成，vectorStoreId: {}", vectorStoreId);
 
         } catch (Exception e) {
-            log.error("简历 AI 解析失败：{}", e.getMessage(), e);
-            // 更新状态为 failed
-            try {
-                ResumeAnalysisResult failedRecord = ResumeAnalysisResult.builder()
-                        .vectorStoreId(vectorStoreId)
-                        .status("failed")
-                        .progress(0)
-                        .build();
-                resumeMapper.update(failedRecord);
-            } catch (Exception ex) {
-                log.error("更新失败状态失败：{}", ex.getMessage());
+            log.error("简历 AI 解析失败，vectorStoreId: {}, userId: {}, errorType: {}",
+                    vectorStoreId, userId, e.getClass().getSimpleName());
+            if (tracker != null) {
+                tracker.stopTracking();
             }
+            updateFailedAnalysis(initialRecord != null ? initialRecord.getId() : null, vectorStoreId, userId);
             throw new ResumeAnalysisException("简历 AI 解析失败：" + e.getMessage(), e);
         }
     }
 
     @Override
     public ResumeAnalysisResultVO getAnalysisResult(String vectorStoreId) {
+        Long userId = BaseContext.getUserId();
         // 1. 查询分析结果
-        ResumeAnalysisResult result = resumeMapper.selectByVectorStoreId(vectorStoreId);
+        ResumeAnalysisResult result = resumeMapper.selectByVectorStoreIdAndUserId(vectorStoreId, userId);
 
         // 2. 如果尚未分析完成，返回 PROCESSING 状态
         if (result == null) {
             // 尝试从 user_vector_store 获取基本信息
-            UserVectorStore store = userVectorStoreMapper.selectByVectorStoreId(vectorStoreId);
+            UserVectorStore store = userVectorStoreMapper.selectByVectorStoreIdAndUserId(vectorStoreId, userId);
             if (store != null) {
                 return ResumeAnalysisResultVO.builder()
                         .vectorStoreId(vectorStoreId)
@@ -359,12 +306,13 @@ public class ResumeServiceImpl implements ResumeService {
     @Override
     public ResponseEntity<byte[]> preview(String vectorStoreId, String disposition) {
         log.info("开始预览简历，vectorStoreId: {}, disposition: {}", vectorStoreId, disposition);
+        Long userId = BaseContext.getUserId();
 
         // 1. 查询分析结果获取文件路径
-        ResumeAnalysisResult result = resumeMapper.selectByVectorStoreId(vectorStoreId);
+        ResumeAnalysisResult result = resumeMapper.selectByVectorStoreIdAndUserId(vectorStoreId, userId);
         if (result == null || result.getResumeFilePath() == null) {
             // 尝试从 user_vector_store 获取
-            UserVectorStore store = userVectorStoreMapper.selectByVectorStoreId(vectorStoreId);
+            UserVectorStore store = userVectorStoreMapper.selectByVectorStoreIdAndUserId(vectorStoreId, userId);
             if (store == null || store.getResumeFilePath() == null) {
                 log.warn("简历文件不存在或已删除，vectorStoreId: {}", vectorStoreId);
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new byte[0]);
@@ -378,13 +326,14 @@ public class ResumeServiceImpl implements ResumeService {
     @Override
     public String getPreviewUrl(String vectorStoreId) {
         log.info("获取简历预览 URL，vectorStoreId: {}", vectorStoreId);
+        Long userId = BaseContext.getUserId();
 
         // 1. 查询分析结果获取文件路径
-        ResumeAnalysisResult result = resumeMapper.selectByVectorStoreId(vectorStoreId);
+        ResumeAnalysisResult result = resumeMapper.selectByVectorStoreIdAndUserId(vectorStoreId, userId);
         String fileUrl;
         if (result == null || result.getResumeFilePath() == null) {
             // 尝试从 user_vector_store 获取
-            UserVectorStore store = userVectorStoreMapper.selectByVectorStoreId(vectorStoreId);
+            UserVectorStore store = userVectorStoreMapper.selectByVectorStoreIdAndUserId(vectorStoreId, userId);
             if (store == null || store.getResumeFilePath() == null) {
                 log.warn("简历文件不存在或已删除，vectorStoreId: {}", vectorStoreId);
                 throw new FileNotFoundException("简历文件不存在或已删除");
@@ -407,70 +356,11 @@ public class ResumeServiceImpl implements ResumeService {
         return buildCapabilityProfileVO(profile);
     }
 
-    /**
-     * 调用 AI 生成学生能力画像并保存到数据库
-     * @param userId 用户 ID
-     * @param analysisId 分析记录 ID
-     * @param resumeContent 简历内容
-     * @param targetJob 目标岗位（可为 null）
-     */
-    private void generateCapabilityProfile(Long userId, Long analysisId, String resumeContent, JobCategory targetJob) {
-        log.info("开始生成学生能力画像，userId: {}, analysisId: {}, targetJob: {}", userId, analysisId,
-                targetJob != null ? targetJob.getJobCategoryName() : "未匹配");
-
-        String targetJobPrompt = "";
-        if (targetJob != null) {
-            targetJobPrompt = """
-
-                    【目标岗位要求】
-                    - 岗位名称：%s
-                    - 岗位要求技能：%s
-                    - 岗位描述：%s
-
-                    请结合该目标岗位的需求，在7个维度的评分时以岗位要求为参考基准。
-                    60分为及格线，表示学生已经初步具备进入该岗位并工作的能力。
-                    如果学生具备岗位所需的核心技能，评分应适当提高；
-                    如果缺少岗位关键技能，相关维度评分应低于60分。
-                    最低评分为 30 分（例如简历上完全没有相关证书/技能，对应维度给 30 分）。
-                    """.formatted(
-                    targetJob.getJobCategoryName(),
-                    targetJob.getRequiredSkills(),
-                    targetJob.getJobDescription()
-            );
+    private void saveCapabilityProfile(Long userId, Long analysisId, JsonNode rootNode) {
+        if (rootNode == null || !rootNode.isObject()) {
+            log.warn("Python Resume 未返回有效能力画像，userId: {}, analysisId: {}", userId, analysisId);
+            return;
         }
-
-        // 1. 调用 AI 分析
-        String prompt = """
-                请分析以下简历内容，生成学生就业能力画像：
-
-                ===== 简历开始 =====
-                %s
-                ===== 简历结束 =====
-                %s
-
-                评分范围说明：所有评分范围为 30-100 分，最低 30 分（表示完全没有相关内容），60 分为及格（初步具备岗位能力），100 分为优秀。
-                请按照要求的 JSON 格式返回能力画像，直接返回 JSON 对象，不要包含任何 markdown 标记或额外说明。
-                """.formatted(resumeContent, targetJobPrompt);
-
-        ChatResponse response = resumeAnalysisChatClient.prompt()
-                .system(SystemConstants.CAPABILITY_PROFILE_PROMPT)
-                .user(prompt)
-                .call()
-                .chatResponse();
-
-        String capabilityJson = response.getResult().getOutput().getText();
-        log.info("AI 返回的能力画像 JSON：{}", capabilityJson);
-
-        // 2. 解析 JSON
-        String cleanedJson = cleanJsonResponse(capabilityJson);
-        JsonNode rootNode;
-        try {
-            rootNode = objectMapper.readTree(cleanedJson);
-        } catch (JsonProcessingException e) {
-            throw new ResumeAnalysisException("能力画像 JSON 解析失败：" + e.getMessage(), e);
-        }
-
-        // 3. 构建实体
         try {
             StudentCapabilityProfile profile = StudentCapabilityProfile.builder()
                     .userId(userId)
@@ -478,16 +368,15 @@ public class ResumeServiceImpl implements ResumeService {
                     .overallScore(getIntValue(rootNode, "overall_score", 0))
                     .completenessScore(getIntValue(rootNode, "completeness_score", 0))
                     .competitivenessScore(getIntValue(rootNode, "competitiveness_score", 0))
-                    .capabilityScores(objectMapper.writeValueAsString(rootNode.get("capability_scores")))
-                    .professionalSkills(objectMapper.writeValueAsString(rootNode.get("professional_skills")))
-                    .certificates(objectMapper.writeValueAsString(rootNode.get("certificates")))
-                    .softSkills(objectMapper.writeValueAsString(rootNode.get("soft_skills")))
+                    .capabilityScores(writeJson(rootNode.get("capability_scores"), "{}"))
+                    .professionalSkills(writeJson(rootNode.get("professional_skills"), "[]"))
+                    .certificates(writeJson(rootNode.get("certificates"), "[]"))
+                    .softSkills(writeJson(rootNode.get("soft_skills"), "{}"))
                     .aiEvaluation(getStringValue(rootNode, "ai_evaluation", ""))
                     .generatedAt(LocalDateTime.now())
                     .updatedAt(LocalDateTime.now())
                     .build();
 
-            // 4. 插入数据库
             capabilityProfileMapper.insert(profile);
             log.info("学生能力画像已保存，profileId: {}, userId: {}", profile.getId(), userId);
         } catch (JsonProcessingException e) {
@@ -1180,125 +1069,121 @@ public class ResumeServiceImpl implements ResumeService {
         return text.replaceAll("\\s+", "").length();
     }
 
-    /**
-     * 调用 AI 进行简历解析（结合目标岗位）
-     */
-    private String callAiForAnalysis(String resumeContent, JobCategory targetJob) {
-        String targetJobInfo = "";
-        if (targetJob != null) {
-            // 获取晋升路径信息（下一级岗位）
-            String promotionPathInfo = buildPromotionPathInfo(targetJob);
-
-            targetJobInfo = """
-
-                    【用户目标岗位信息】
-                    - 岗位名称：%s
-                    - 岗位级别：%s
-                    - 岗位要求技能：%s
-                    - 岗位描述：%s
-                    %s
-
-                    请结合该目标岗位的要求，在 suggestions 字段中给出针对性的优化建议。
-                    建议编写要求：
-                    1. 重点编写用户当前技能与目标岗位要求技能之间的差距，给出具体的学习建议
-                    2. 建议应聚焦于通用技能的学习建议（如编程语言、框架、工具等），不要泛泛而谈
-                    3. 用户已有的技能可以给出进阶学习建议（如从"会使用"到"深入理解原理"）
-                    4. %s
-                    5. 每条建议要具体、可执行，指出学什么、怎么学
-                    """.formatted(
-                    targetJob.getJobCategoryName(),
-                    targetJob.getJobLevelName(),
-                    targetJob.getRequiredSkills(),
-                    targetJob.getJobDescription(),
-                    promotionPathInfo,
-                    promotionPathInfo.isEmpty()
-                            ? "如果存在下一级晋升路径，可以加一两条晋升岗位需要的技能学习建议"
-                            : "已提供下一级晋升路径信息，请结合该信息给出 1-2 条晋升技能学习建议"
-            );
-        }
-
-        String userPrompt = """
-            请分析以下简历内容：
-
-            ===== 简历开始 =====
-            %s
-            ===== 简历结束 =====
-            %s
-
-            请按照要求的 JSON 格式返回分析结果，直接返回 JSON 对象，不要包含任何 markdown 标记或额外说明。
-            """.formatted(resumeContent, targetJobInfo);
-
-        ChatResponse response = resumeAnalysisChatClient.prompt()
-                .system(SystemConstants.RESUME_ANALYSIS_PROMPT)
-                .user(userPrompt)
-                .call()
-                .chatResponse();
-
-        return response.getResult().getOutput().getText();
+    private Map<String, Object> buildPythonResumePayload(String vectorStoreId, Long userId, String resumeContent,
+                                                         String fileType, String originalFileName,
+                                                         String resumeFilePath) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("visibility", "user");
+        metadata.put("source", "resume_upload");
+        metadata.put("document_type", "resume");
+        return Map.of(
+                "vector_store_id", vectorStoreId,
+                "user_id", userId,
+                "resume_text", resumeContent,
+                "file_type", fileType,
+                "original_file_name", originalFileName == null ? "" : originalFileName,
+                "resume_file_path", resumeFilePath == null ? "" : resumeFilePath,
+                "metadata", metadata
+        );
     }
 
-    /**
-     * 构建晋升路径信息（同一岗位类别的下一级岗位）
-     */
-    private String buildPromotionPathInfo(JobCategory targetJob) {
+    private ResumeAnalysisResult upsertProcessingAnalysisRecord(String vectorStoreId, Long userId, String fileType,
+                                                                String originalFileName, String resumeFilePath) {
+        ResumeAnalysisResult existing = resumeMapper.selectByVectorStoreIdAndUserId(vectorStoreId, userId);
+        ResumeAnalysisResult record = ResumeAnalysisResult.builder()
+                .id(existing != null ? existing.getId() : null)
+                .vectorStoreId(vectorStoreId)
+                .userId(userId)
+                .fileType(fileType)
+                .originalFileName(originalFileName)
+                .resumeFilePath(resumeFilePath)
+                .status("processing")
+                .progress(0)
+                .parsedData("{}")
+                .scores("{\"keyword_match\":0,\"layout\":0,\"skill_depth\":0,\"experience\":0}")
+                .highlights("[]")
+                .suggestions("[]")
+                .createTime(existing == null ? LocalDateTime.now() : existing.getCreateTime())
+                .updateTime(LocalDateTime.now())
+                .build();
+        if (existing == null) {
+            resumeMapper.insert(record);
+        } else {
+            resumeMapper.updateByIdAndUserId(record);
+        }
+        return record;
+    }
+
+    private void upsertUserVectorStore(String id, Long userId, String resumeContent, String resumeFilePath,
+                                       String fileType, int chunkCount) {
         try {
-            // 从 job_category_code 中去掉级别后缀，获取基础类别编码
-            String baseCategoryCode = targetJob.getJobCategoryCode()
-                    .replaceAll("_(INTERNSHIP|JUNIOR|MID|SENIOR)$", "");
-
-            // 查询该类别的所有级别岗位
-            List<JobCategory> allLevels = jobCategoryMapper.selectVerticalPathByCategoryCode(baseCategoryCode);
-
-            if (allLevels == null || allLevels.isEmpty()) {
-                return "";
-            }
-
-            // 找到当前级别的索引，获取下一级
-            List<String> levelOrder = List.of("INTERNSHIP", "JUNIOR", "MID", "SENIOR");
-            int currentIndex = levelOrder.indexOf(targetJob.getJobLevel());
-
-            if (currentIndex >= 0 && currentIndex < levelOrder.size() - 1) {
-                String nextLevel = levelOrder.get(currentIndex + 1);
-                // 找到下一级岗位
-                for (JobCategory job : allLevels) {
-                    if (nextLevel.equals(job.getJobLevel())) {
-                        return String.format("""
-
-                                【下一级晋升路径信息】
-                                - 岗位名称：%s
-                                - 岗位级别：%s
-                                - 要求技能：%s
-                                """,
-                                job.getJobCategoryName(),
-                                job.getJobLevelName(),
-                                job.getRequiredSkills());
-                    }
-                }
-            }
-
-            return "";
-        } catch (Exception e) {
-            log.warn("获取晋升路径信息失败: {}", e.getMessage());
-            return "";
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            metadata.put("document_type", "resume");
+            metadata.put("visibility", "user");
+            metadata.put("source", "resume_upload");
+            metadata.put("file_type", fileType);
+            metadata.put("chunk_count", chunkCount);
+            UserVectorStore store = UserVectorStore.builder()
+                    .id(id)
+                    .userId(userId)
+                    .resumeContent(resumeContent)
+                    .resumeFilePath(resumeFilePath)
+                    .vectorType("resume")
+                    .metadata(objectMapper.writeValueAsString(metadata))
+                    .createTime(LocalDateTime.now())
+                    .updateTime(LocalDateTime.now())
+                    .build();
+            userVectorStoreMapper.upsert(store);
+            log.info("简历文本索引记录已写入，vectorStoreId: {}, userId: {}, chunkCount: {}", id, userId, chunkCount);
+        } catch (JsonProcessingException e) {
+            throw new ResumeAnalysisException("简历索引元数据序列化失败：" + e.getMessage(), e);
         }
     }
 
-    /**
-     * 匹配用户目标岗位
-     * 1. 先从简历中提取用户技能
-     * 2. 如果 job 表中存在该岗位，根据技能匹配度选择最接近的级别
-     * 3. 如果不存在，将简历向量化后与 job_vector_store 比较，找相似度最高的岗位
-     */
-    private JobCategory matchTargetJob(String vectorStoreId, String resumeContent) {
+    private void updateFailedAnalysis(Long analysisId, String vectorStoreId, Long userId) {
         try {
-            // 先从简历中提取用户技能
-            List<String> userSkills = extractSkillsFromResume(resumeContent);
-            log.info("从简历中提取到 {} 个技能: {}", userSkills.size(), userSkills);
+            ResumeAnalysisResult failedRecord = ResumeAnalysisResult.builder()
+                    .id(analysisId)
+                    .vectorStoreId(vectorStoreId)
+                    .userId(userId)
+                    .status("failed")
+                    .progress(0)
+                    .parsedData("{}")
+                    .scores("{\"keyword_match\":0,\"layout\":0,\"skill_depth\":0,\"experience\":0}")
+                    .highlights("[]")
+                    .suggestions("[]")
+                    .updateTime(LocalDateTime.now())
+                    .build();
+            if (analysisId != null) {
+                resumeMapper.updateByIdAndUserId(failedRecord);
+            } else {
+                log.warn("缺少 analysisId，跳过失败状态写回，vectorStoreId: {}, userId: {}", vectorStoreId, userId);
+            }
+        } catch (Exception ex) {
+            log.error("更新失败状态失败：{}", ex.getMessage());
+        }
+    }
 
-            // 先尝试从 AI 解析的简历中提取 target_role
-            String parsedRole = extractTargetRoleFromResume(resumeContent);
+    private JsonAnalysisResult parsePythonAnalysisResult(JsonNode rootNode) throws JsonProcessingException {
+        JsonAnalysisResult result = new JsonAnalysisResult();
+        result.parsedDataJson = writeJson(rootNode.get("parsed_data"), "{}");
+        result.scoresJson = writeJson(rootNode.get("scores"), "{\"keyword_match\":0,\"layout\":0,\"skill_depth\":0,\"experience\":0}");
+        result.highlightsJson = writeJson(rootNode.get("highlights"), "[]");
+        result.suggestionsJson = writeJson(rootNode.get("suggestions"), "[]");
+        return result;
+    }
 
-            // 策略 1：如果 job 表中存在用户目标岗位，根据技能匹配度选择级别
+    private String writeJson(JsonNode node, String fallback) throws JsonProcessingException {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return fallback;
+        }
+        return objectMapper.writeValueAsString(node);
+    }
+
+    private JobCategory matchTargetJobFromParsed(JsonNode parsedDataNode) {
+        try {
+            String parsedRole = parsedDataNode != null ? parsedDataNode.path("target_role").asText(null) : null;
+            List<String> userSkills = extractSkillsFromParsed(parsedDataNode);
             if (parsedRole != null && !parsedRole.isEmpty() && !"null".equals(parsedRole)) {
                 log.info("从简历中提取到目标岗位: {}，尝试在 job 表中查找", parsedRole);
                 List<JobCategory> matchedJobs = jobCategoryMapper.searchByKeyword(parsedRole, 10);
@@ -1311,24 +1196,6 @@ public class ResumeServiceImpl implements ResumeService {
                 }
             }
 
-            // 策略 2：job 表不存在，使用向量搜索匹配最相似岗位
-            log.info("job 表中未找到匹配岗位，开始向量相似度搜索");
-
-            // 获取简历的 embedding 向量
-            UserVectorStore userVector = userVectorStoreMapper.selectByVectorStoreId(vectorStoreId);
-            if (resumeContent != null && !resumeContent.isBlank()) {
-                String resumeVector = buildJobSearchQuery(parsedRole, userSkills, resumeContent);
-                List<JobCategory> similarJobs = jobVectorSearchService.searchSimilarJobs(resumeVector, 5);
-
-                if (similarJobs != null && !similarJobs.isEmpty()) {
-                    // 根据技能匹配度选择最接近的级别
-                    JobCategory bestMatch = selectBestSkillMatchJob(similarJobs, userSkills);
-                    log.info("向量搜索找到最相似岗位: {} (id={}, level={})",
-                            bestMatch.getJobCategoryName(), bestMatch.getId(), bestMatch.getJobLevel());
-                    return bestMatch;
-                }
-            }
-
             log.warn("未能匹配到目标岗位");
             return null;
 
@@ -1338,61 +1205,18 @@ public class ResumeServiceImpl implements ResumeService {
         }
     }
 
-    /**
-     * 从简历中提取技能列表（通过 AI）
-     */
-    private String buildJobSearchQuery(String parsedRole, List<String> userSkills, String resumeContent) {
-        List<String> parts = new ArrayList<>();
-        if (parsedRole != null && !parsedRole.isBlank() && !"null".equalsIgnoreCase(parsedRole.trim())) {
-            parts.add("目标岗位：" + parsedRole.trim());
-        }
-        if (userSkills != null && !userSkills.isEmpty()) {
-            List<String> limitedSkills = userSkills.stream()
-                    .filter(Objects::nonNull)
-                    .map(String::trim)
-                    .filter(skill -> !skill.isBlank())
-                    .limit(10)
-                    .toList();
-            if (!limitedSkills.isEmpty()) {
-                parts.add("技能：" + String.join("、", limitedSkills));
-            }
-        }
-        if (parts.isEmpty() && resumeContent != null && !resumeContent.isBlank()) {
-            parts.add(resumeContent.length() > 500 ? resumeContent.substring(0, 500) : resumeContent);
-        }
-        return String.join("\n", parts);
-    }
-
-    private List<String> extractSkillsFromResume(String resumeContent) {
-        try {
-            String prompt = """
-                    请从以下简历内容中提取候选人的技能列表。
-                    只返回技能名称，每行一个。如果找不到技能信息，返回 "none"。
-
-                    ===== 简历开始 =====
-                    %s
-                    ===== 简历结束 =====
-                    """.formatted(resumeContent);
-
-            ChatResponse response = resumeAnalysisChatClient.prompt()
-                    .user(prompt)
-                    .call()
-                    .chatResponse();
-
-            String result = response.getResult().getOutput().getText().trim();
-            if ("none".equals(result) || result.isEmpty()) {
-                return Collections.emptyList();
-            }
-
-            return Arrays.stream(result.split("\n"))
-                    .map(String::trim)
-                    .filter(s -> !s.isEmpty() && !"none".equals(s.toLowerCase()))
-                    .collect(Collectors.toList());
-
-        } catch (Exception e) {
-            log.warn("提取技能失败: {}", e.getMessage());
+    private List<String> extractSkillsFromParsed(JsonNode parsedDataNode) {
+        if (parsedDataNode == null || !parsedDataNode.has("skills") || !parsedDataNode.get("skills").isArray()) {
             return Collections.emptyList();
         }
+        List<String> skills = new ArrayList<>();
+        parsedDataNode.get("skills").forEach(node -> {
+            String skill = node.asText("");
+            if (!skill.isBlank()) {
+                skills.add(skill.trim());
+            }
+        });
+        return skills;
     }
 
     /**
@@ -1439,114 +1263,6 @@ public class ResumeServiceImpl implements ResumeService {
         }
 
         return bestJob != null ? bestJob : jobs.get(0);
-    }
-
-    /**
-     * 从简历内容中提取目标岗位名称（通过 AI 快速解析）
-     */
-    private String extractTargetRoleFromResume(String resumeContent) {
-        try {
-            String prompt = """
-                    请从以下简历内容中提取候选人的求职意向/目标岗位名称。
-                    只返回岗位名称，不要返回其他任何内容。如果找不到目标岗位信息，返回 "null"。
-
-                    ===== 简历开始 =====
-                    %s
-                    ===== 简历结束 =====
-                    """.formatted(resumeContent);
-
-            ChatResponse response = resumeAnalysisChatClient.prompt()
-                    .user(prompt)
-                    .call()
-                    .chatResponse();
-
-            String result = response.getResult().getOutput().getText().trim();
-            if ("null".equals(result) || result.isEmpty()) {
-                return null;
-            }
-            return result;
-
-        } catch (Exception e) {
-            log.warn("提取目标岗位失败: {}", e.getMessage());
-            return null;
-        }
-    }
-
-    /**
-     * 解析 AI 返回的 JSON 结果
-     * 处理可能的 markdown 代码块包装和字段缺失情况
-     */
-    private JsonAnalysisResult parseAnalysisJson(String json) throws JsonProcessingException {
-        JsonAnalysisResult result = new JsonAnalysisResult();
-
-        // 清理可能存在的 markdown 代码块标记
-        String cleanedJson = cleanJsonResponse(json);
-        log.debug("清理后的 JSON: {}", cleanedJson);
-
-        // 使用 ObjectMapper 解析 JSON
-        var rootNode = objectMapper.readTree(cleanedJson);
-
-        // 提取 parsed_data 并转为 JSON 字符串（缺失时返回空对象）
-        var parsedDataNode = rootNode.get("parsed_data");
-        result.parsedDataJson = parsedDataNode != null && !parsedDataNode.isMissingNode()
-                ? objectMapper.writeValueAsString(parsedDataNode)
-                : "{}";
-
-        // 提取 scores 并转为 JSON 字符串（缺失时返回默认评分）
-        var scoresNode = rootNode.get("scores");
-        if (scoresNode != null && !scoresNode.isMissingNode()) {
-            result.scoresJson = objectMapper.writeValueAsString(scoresNode);
-        } else {
-            // 返回默认评分
-            result.scoresJson = "{\"keyword_match\":0,\"layout\":0,\"skill_depth\":0,\"experience\":0}";
-        }
-
-        // 提取 highlights 并转为 JSON 字符串（缺失时返回空数组）
-        var highlightsNode = rootNode.get("highlights");
-        result.highlightsJson = highlightsNode != null && !highlightsNode.isMissingNode()
-                ? objectMapper.writeValueAsString(highlightsNode)
-                : "[]";
-
-        // 提取 suggestions 并转为 JSON 字符串（缺失时返回空数组）
-        var suggestionsNode = rootNode.get("suggestions");
-        result.suggestionsJson = suggestionsNode != null && !suggestionsNode.isMissingNode()
-                ? objectMapper.writeValueAsString(suggestionsNode)
-                : "[]";
-
-        return result;
-    }
-
-    /**
-     * 清理 AI 返回的 JSON 响应，移除 markdown 代码块标记
-     */
-    private String cleanJsonResponse(String response) {
-        if (response == null || response.trim().isEmpty()) {
-            return "{}";
-        }
-
-        String cleaned = response.trim();
-
-        // 移除开头的 ```json 或 ``` 标记
-        if (cleaned.startsWith("```json")) {
-            cleaned = cleaned.substring(7);
-        } else if (cleaned.startsWith("```")) {
-            cleaned = cleaned.substring(3);
-        }
-
-        // 移除结尾的 ``` 标记
-        if (cleaned.endsWith("```")) {
-            cleaned = cleaned.substring(0, cleaned.length() - 3);
-        }
-
-        // 找到第一个 { 和最后一个 } 之间的内容
-        int startIndex = cleaned.indexOf('{');
-        int endIndex = cleaned.lastIndexOf('}');
-
-        if (startIndex >= 0 && endIndex > startIndex) {
-            cleaned = cleaned.substring(startIndex, endIndex + 1);
-        }
-
-        return cleaned.trim();
     }
 
     /**
@@ -1691,12 +1407,16 @@ public class ResumeServiceImpl implements ResumeService {
      */
     private class ProgressTracker {
         private volatile boolean running = true;
+        private Long analysisId;
+        private Long userId;
         private String vectorStoreId;
         private Thread trackThread;
         private final Random random = new Random();
 
-        public void startTracking(String vectorStoreId) {
+        public void startTracking(Long analysisId, Long userId, String vectorStoreId) {
+            this.analysisId = analysisId;
             this.vectorStoreId = vectorStoreId;
+            this.userId = userId;
             trackThread = new Thread(() -> {
                 int progress = 0;
                 int updateCount = 0;
@@ -1722,11 +1442,15 @@ public class ResumeServiceImpl implements ResumeService {
                         }
                         progress = Math.min(progress + increment, 95);
                         ResumeAnalysisResult progressRecord = ResumeAnalysisResult.builder()
+                                .id(analysisId)
                                 .vectorStoreId(vectorStoreId)
+                                .userId(userId)
                                 .status("processing")
                                 .progress(progress)
                                 .build();
-                        resumeMapper.update(progressRecord);
+                        if (analysisId != null) {
+                            resumeMapper.updateByIdAndUserId(progressRecord);
+                        }
                         log.debug("更新分析进度：vectorStoreId={}, progress={}, updateCount={}", vectorStoreId, progress, updateCount);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();

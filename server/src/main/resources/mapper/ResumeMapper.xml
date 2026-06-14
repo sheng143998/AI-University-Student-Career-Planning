@@ -61,6 +61,15 @@
         WHERE vector_store_id = #{vectorStoreId}
     </select>
 
+    <select id="selectByVectorStoreIdAndUserId" resultMap="ResumeMap">
+        SELECT *
+        FROM ai_career_plan.resume_analysis_result
+        WHERE vector_store_id = #{vectorStoreId}
+          AND user_id = #{userId}
+        ORDER BY id DESC
+        LIMIT 1
+    </select>
+
     <!-- 按分析记录ID + 用户ID查询 -->
     <select id="selectByIdAndUserId" resultMap="ResumeMap">
         SELECT *
@@ -96,6 +105,25 @@
             <if test="updateTime != null">update_time = #{updateTime},</if>
         </set>
         WHERE vector_store_id = #{vectorStoreId}
+        <if test="userId != null">
+            AND user_id = #{userId}
+        </if>
+    </update>
+
+    <update id="updateByIdAndUserId" parameterType="com.itsheng.pojo.entity.ResumeAnalysisResult">
+        UPDATE ai_career_plan.resume_analysis_result
+        <set>
+            <if test="parsedData != null">parsed_data = #{parsedData}::jsonb,</if>
+            <if test="scores != null">scores = #{scores}::jsonb,</if>
+            <if test="highlights != null">highlights = #{highlights}::jsonb,</if>
+            <if test="suggestions != null">suggestions = #{suggestions}::jsonb,</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="progress != null">progress = #{progress},</if>
+            <if test="resumeFilePath != null">resume_file_path = #{resumeFilePath},</if>
+            <if test="updateTime != null">update_time = #{updateTime},</if>
+        </set>
+        WHERE id = #{id}
+          AND user_id = #{userId}
     </update>
 
 </mapper>

@@ -329,3 +329,127 @@ GET /api/roadmap/graph 或 /api/roadmap/nodes/{id}
 2. 建立岗位间的关联图谱
 3. 垂直岗位图谱：涵盖岗位描述、岗位晋升路径关联信息
 4. 换岗路径图谱：至少提供 5 个岗位的换岗路径，每个岗位的换岗路径不少于 2 条
+
+---
+
+## 2026-06-14 Roadmap-RAG 集成迁移补充
+
+### 变更摘要
+
+Roadmap 个性化职业路径推荐继续保持 Java 对外接口不变：前端调用
+`GET /api/roadmap/recommendations/personalized`，Java 负责 JWT 鉴权、`BaseContext.userId`
+上下文、岗位和简历摘要组装、`Result<T>` 包装、Redis 缓存和本地相似度降级。
+横向换岗推荐中的 RAG 检索、证据选择和诊断输出迁移到统一 Python 聚合服务
+`ai-service`，不再提交旧 `ai_service/` Roadmap 新能力。
+
+### 对外接口
+
+- **请求方法**: `GET`
+- **请求路径**: `/api/roadmap/recommendations/personalized`
+- **鉴权**: 需要登录，Java 从 JWT 中解析当前用户 ID。
+- **前端影响**: `website/src/api/roadmapRecommendation.ts` 增加 `evidence` 和
+  `ragDiagnostics` 类型；前端仍只调用 Java，不直连 Python。
+
+成功响应继续遵循 `Result<T>`：
+
+```json
+{
+  "code": 1,
+  "msg": "success",
+  "data": {
+    "currentJob": "Frontend Engineer",
+    "verticalPath": {},
+    "lateralPaths": [
+      {
+        "targetJobId": 2,
+        "targetJobName": "AI Application Engineer",
+        "targetCategoryCode": "AI_APP",
+        "matchScore": 0.86,
+        "transitionDifficulty": 3,
+        "estimatedMonths": 15,
+        "requiredSkills": ["RAG"],
+        "possessedSkills": ["Python"],
+        "aiRecommendationReason": "基于 Roadmap-RAG 证据推荐",
+        "evidence": [
+          {
+            "documentType": "job",
+            "jobId": 2,
+            "chunkId": "job:2:summary",
+            "score": 0.03,
+            "source": "summary_index"
+          }
+        ],
+        "pathNodes": []
+      }
+    ],
+    "ragDiagnostics": {
+      "queries": ["Frontend Engineer transition learning path"],
+      "filters": {
+        "excludeSameCategory": true,
+        "documentTypes": ["job", "resume_summary", "jd_summary"]
+      },
+      "fusion": "rrf",
+      "reranker": "deterministic-fallback",
+      "candidateCount": 3
+    },
+    "generatedAt": "2026-06-14T08:00:00"
+  }
+}
+```
+
+### Java 到 Python 契约
+
+- **Python endpoint**: `POST /api/roadmap/recommendations/personalized`
+- **Python 实现位置**: `ai-service/career_ai/roadmap_rag_service.py`
+- **Python 聚合入口**: `ai-service/app/main.py`
+- **Python base URL**: `fuchuang.ai.python.base-url`，默认 `http://127.0.0.1:8090`
+- **超时优先级**:
+  `FUCHUANG_AI_PYTHON_ROADMAP_TIMEOUT_SECONDS` >
+  `FUCHUANG_PYTHON_AI_ROADMAP_TIMEOUT_SECONDS` >
+  `fuchuang.ai.python.roadmap-timeout-seconds` >
+  `fuchuang.ai.python.timeout-seconds` > `8`
+- **重试规则**: Java 不自动重试。该接口为读取型推荐接口，幂等性由
+  `roadmap:recommendations:personalized` 缓存和当前用户上下文控制。
+- **错误映射**:
+  - Python HTTP 5xx、连接失败、非法 JSON、schema 字段类型错误：Java 记录 warn，
+    使用本地相似度 fallback，不向前端暴露 Python 内部异常。
+  - Python timeout：Java 使用本地 fallback，并在日志中保留超时类型。
+  - Python 返回空推荐：Java 使用本地 fallback。
+  - Python 只返回 1 条横向推荐：Java 保留 Python 推荐并用本地 fallback 补足，
+    `ragDiagnostics.supplementedBy=local-similarity-fallback`。
+
+### Python 处理要求
+
+Python Roadmap-RAG 使用 deterministic fallback 实现以下能力，便于在无真实
+pgvector、Dashscope embedding/LLM 或 cross-encoder 环境下稳定验证：
+
+1. 递归切块，按段落、句子和字符预算拆分岗位、简历摘要和 JD 摘要。
+2. 构建 summary index，并保留 `userId`、`documentType`、`jobId`、
+   `categoryCode`、`baseCategoryCode`、`level`、`section`、`source`、
+   `visibilityScope` 等 metadata。
+3. Multi-Query 覆盖当前岗位、技能差距、目标岗位、JD 要求和横向转型路径表达。
+4. BM25 与 embedding-style 哈希向量召回融合，使用 RRF 生成可解释排序。
+5. 返回 `evidence` 和 `diagnostics` 白名单字段，不返回 raw resume、raw JD、
+   prompt、API key、手机号、邮箱或完整敏感文本。
+
+### 测试口径
+
+- Python 在 `ai-service` 目录执行：
+  - `python -B -m py_compile app/main.py career_ai/roadmap_rag_service.py tests/test_roadmap_rag_service.py`
+  - `python -B -m pytest tests/test_roadmap_rag_service.py -q -p no:cacheprovider`
+  - `python -B -m pytest tests -q -p no:cacheprovider`
+- Java：
+  - `mvn -pl server -am -Dtest=PythonRoadmapRagClientTest,RoadmapServiceImplTest,RoadmapControllerTest test`
+  - 若本轮未纳入 `RoadmapControllerTest`，测试日志必须说明原因，且不得声称覆盖 controller hardening。
+  - `mvn -pl server -am -DskipTests compile`
+- Frontend：
+  - `cd website && npm run build`
+- 静态门禁：
+  - `git diff --check`、`git diff --cached --check`、提交后 `git diff --check origin/master..HEAD` 必须无输出。
+  - `git diff --name-only --diff-filter=U` 必须无输出；`MERGE_HEAD`、`CHERRY_PICK_HEAD`、`REVERT_HEAD`、`REBASE_HEAD`、`sequencer`、`rebase-apply`、`rebase-merge` 均不得存在。
+  - `RoadmapControllerTest.java` 若被 `.gitignore` 命中，必须使用精确 `git add -f` 纳入，并通过 `git diff --cached --name-status` 或提交后 `git diff --name-status origin/master..HEAD` 证明已提交。
+  - `ai-service/tests/test_roadmap_rag_service.py` 不得出现 `from ai_service`、`import ai_service` 或 `MarketAiHandler`。
+  - 本轮提交不得包含旧 `ai_service/**` Roadmap 新能力、`website/src/views/Roadmap.vue`、`JwtTokenInterceptor.java` 或构建产物。
+  - 本轮提交不得包含 `application*.yml`、`database/**`、`deploy/**`、`target/**`、`website/dist/**`、`website/node_modules/**`、`__pycache__/**`、`*.pyc` 或 `.env*`。
+  - staged diff 必须通过 secret scan；测试中如需覆盖 token-like 脱敏，应使用运行时拼接或明确 test-only allowlist，避免静态 `sk-*` 哨兵被误判为真实密钥。
+  - 接口文档、测试日志、Obsidian 记录和本轮 staged 文本文件不得出现 mojibake 特征。

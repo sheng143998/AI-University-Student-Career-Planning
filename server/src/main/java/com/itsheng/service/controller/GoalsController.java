@@ -1,10 +1,12 @@
 package com.itsheng.service.controller;
 
 import com.itsheng.common.result.Result;
+import com.itsheng.common.exception.BaseException;
 import com.itsheng.pojo.dto.GoalCreateDTO;
 import com.itsheng.pojo.dto.GoalMilestoneCreateDTO;
 import com.itsheng.pojo.dto.GoalMilestoneUpdateDTO;
 import com.itsheng.pojo.dto.GoalUpdateDTO;
+import com.itsheng.pojo.vo.AiAdviceVO;
 import com.itsheng.pojo.vo.GoalDetailVO;
 import com.itsheng.pojo.vo.GoalsOverviewVO;
 import com.itsheng.pojo.vo.IdVO;
@@ -48,6 +50,17 @@ public class GoalsController {
         return Result.success(detail);
     }
 
+    @PostMapping("/{id}/ai-advice/generate")
+    @Operation(summary = "生成目标 AI 建议")
+    public Result<AiAdviceVO> generateAiAdvice(@PathVariable Long id) {
+        log.info("生成目标 AI 建议, id: {}", id);
+        try {
+            return Result.success(goalsService.generateAiAdvice(id));
+        } catch (BaseException e) {
+            return Result.error(e.getMessage());
+        }
+    }
+
     @PutMapping("/{id}")
     @Operation(summary = "更新目标")
     public Result<Void> update(@PathVariable Long id, @RequestBody GoalUpdateDTO dto) {
@@ -76,7 +89,7 @@ public class GoalsController {
     @Operation(summary = "更新里程碑")
     public Result<Void> updateMilestone(@PathVariable Long id, @PathVariable Long msId, @RequestBody GoalMilestoneUpdateDTO dto) {
         log.info("更新里程碑, goalId: {}, milestoneId: {}, dto: {}", id, msId, dto);
-        goalsService.updateMilestone(msId, dto);
+        goalsService.updateMilestone(id, msId, dto);
         return Result.success();
     }
 }

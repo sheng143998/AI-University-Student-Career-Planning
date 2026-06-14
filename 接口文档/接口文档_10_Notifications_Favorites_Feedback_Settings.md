@@ -191,7 +191,7 @@
 ```json
 {
   "target_type": "CHAT_MESSAGE",
-  "target_id": "msg_10001_20260608_001",
+  "target_id": "1001",
   "rating": 1,
   "reason_tags": ["HELPFUL", "EVIDENCE_RELEVANT"],
   "comment": "回答引用的岗位要求比较准确，但希望补充学习路径。",
@@ -207,7 +207,7 @@
 | 参数名 | 类型 | 是否必须 | 备注 |
 | :--- | :--- | :--- | :--- |
 | target_type | string | 必须 | `CHAT_MESSAGE` / `RESUME_ANALYSIS` / `JOB_MATCH` / `MARKET_INSIGHT` / `REPORT` / `ROADMAP` / `GOAL_ADVICE` / `NOTIFICATION_AI_ADVICE` |
-| target_id | string | 必须 | 被反馈的业务对象 ID |
+| target_id | string | 必须 | 被反馈的业务对象 ID；`CHAT_MESSAGE` 必须使用数字消息 ID 字符串，例如 `"1001"` |
 | rating | number | 必须 | `1` 正反馈，`0` 中性，`-1` 负反馈 |
 | reason_tags | string[] | 非必须 | 反馈标签，如 `HELPFUL`、`NOT_RELEVANT`、`EVIDENCE_MISSING`、`OUTDATED`、`TOO_GENERIC` |
 | comment | string | 非必须 | 用户补充说明，建议限制 500 字以内 |
@@ -249,7 +249,7 @@ Java 校验登录态和资源归属后，调用 Python 服务：
   "user_id": 10001,
   "target": {
     "type": "CHAT_MESSAGE",
-    "id": "msg_10001_20260608_001",
+    "id": "1001",
     "page": "chat"
   },
   "feedback": {

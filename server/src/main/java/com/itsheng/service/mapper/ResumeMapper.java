@@ -26,6 +26,9 @@ public interface ResumeMapper {
      */
     ResumeAnalysisResult selectByVectorStoreId(@Param("vectorStoreId") String vectorStoreId);
 
+    ResumeAnalysisResult selectByVectorStoreIdAndUserId(@Param("vectorStoreId") String vectorStoreId,
+                                                        @Param("userId") Long userId);
+
     /**
      * 按简历分析记录主键和用户ID查询
      * @param id 简历分析记录ID（resume_analysis_result.id）
@@ -51,4 +54,6 @@ public interface ResumeMapper {
      * @return 影响行数
      */
     int update(ResumeAnalysisResult result);
+
+    int updateByIdAndUserId(ResumeAnalysisResult result);
 }

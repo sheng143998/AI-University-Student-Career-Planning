@@ -1,7 +1,5 @@
 package com.itsheng.service.service.Impl;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.itsheng.common.context.BaseContext;
 import com.itsheng.common.exception.FileUploadException;
 import com.itsheng.pojo.dto.ChatCreateConversationDTO;
@@ -11,16 +9,13 @@ import com.itsheng.pojo.entity.ChatMessage;
 import com.itsheng.pojo.vo.ChatConversationVO;
 import com.itsheng.pojo.vo.ChatDailySuggestionsVO;
 import com.itsheng.pojo.vo.ChatMessageVO;
+import com.itsheng.service.client.PythonChatClient;
 import com.itsheng.service.controller.CommonController;
 import com.itsheng.service.mapper.ChatConversationMapper;
 import com.itsheng.service.mapper.ChatMessageMapper;
 import com.itsheng.service.mapper.UserProfileMapper;
 import com.itsheng.service.service.ChatService;
-import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,9 +25,8 @@ import reactor.core.publisher.Flux;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 聊天服务实现类
@@ -44,29 +38,23 @@ public class ChatServiceImpl implements ChatService {
     private final ChatConversationMapper conversationMapper;
     private final ChatMessageMapper messageMapper;
     private final UserProfileMapper userProfileMapper;
-    private final ChatClient chatClient;
-    @Qualifier("resumeAnalysisChatClient")
-    private final ChatClient statelessChatClient;
+    private final PythonChatClient pythonChatClient;
     private final CommonController commonController;
-    private final ObjectMapper objectMapper;
 
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final int DEFAULT_LIMIT = 20;
+    private static final int CHAT_CONTEXT_LIMIT = 12;
 
     public ChatServiceImpl(ChatConversationMapper conversationMapper,
                            ChatMessageMapper messageMapper,
                            UserProfileMapper userProfileMapper,
-                           @Qualifier("chatClient") ChatClient chatClient,
-                           @Qualifier("resumeAnalysisChatClient") ChatClient statelessChatClient,
-                           CommonController commonController,
-                           ObjectMapper objectMapper) {
+                           PythonChatClient pythonChatClient,
+                           CommonController commonController) {
         this.conversationMapper = conversationMapper;
         this.messageMapper = messageMapper;
         this.userProfileMapper = userProfileMapper;
-        this.chatClient = chatClient;
-        this.statelessChatClient = statelessChatClient;
+        this.pythonChatClient = pythonChatClient;
         this.commonController = commonController;
-        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -131,7 +119,8 @@ public class ChatServiceImpl implements ChatService {
     @Transactional
     public Flux<String> sendMessage(ChatSendMessageDTO dto) {
         Long userId = BaseContext.getUserId();
-        log.info("sendMessage 接收到的参数: conversationId={}, resumeId={}, content={}", dto.getConversationId(), dto.getResumeId(), dto.getContent());
+        log.info("sendMessage received: conversationId={}, resumeId={}, contentLength={}",
+                dto.getConversationId(), dto.getResumeId(), dto.getContent() == null ? 0 : dto.getContent().length());
 
         // 验证会话归属
         ChatConversation conversation = conversationMapper.selectById(dto.getConversationId());
@@ -153,25 +142,19 @@ public class ChatServiceImpl implements ChatService {
         // 更新会话最后消息时间
         conversationMapper.updateLastMessageAt(dto.getConversationId(), now);
 
-        // 调用 AI
-        String chatId = String.valueOf(dto.getConversationId());
-        Map<String, Object> toolContext = new HashMap<>();
-        toolContext.put("userId", userId);
-        if (dto.getResumeId() != null) {
-            toolContext.put("resumeId", dto.getResumeId());
-            log.info("sendMessage 传递 resumeId: {}", dto.getResumeId());
-        }
-
-        // 使用非流式调用，避免 Spring AI 流式聚合器在工具调用时 toolName=null 的问题
-        // （流式模式下工具调用参数分片到达，MessageAggregator 聚合时 toolName 可能为 null）
-        String responseContent = chatClient.prompt()
-                .user(dto.getContent())
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, chatId))
-                .toolContext(toolContext)
-                .call()
-                .content();
-
-        String finalContent = responseContent != null ? responseContent : "";
+        // 调用 Python RAG 服务生成 AI 回复
+        List<ChatMessage> history = messageMapper.selectRecentByConversationId(dto.getConversationId(), CHAT_CONTEXT_LIMIT);
+        Collections.reverse(history);
+        String parsedDataJson = resolveParsedDataJson(dto.getResumeId(), userId);
+        PythonChatClient.ChatCompletionResult completion = pythonChatClient.complete(
+                userId,
+                dto.getConversationId(),
+                dto.getContent(),
+                dto.getResumeId(),
+                history,
+                parsedDataJson
+        );
+        String finalContent = completion.getContent() != null ? completion.getContent() : "";
 
         // 保存 AI 响应
         ChatMessage assistantMessage = ChatMessage.builder()
@@ -186,24 +169,29 @@ public class ChatServiceImpl implements ChatService {
 
         // 如果标题是默认的"新对话"，根据用户消息生成新标题
         if ("新对话".equals(conversation.getTitle())) {
-            generateAndUpdateTitle(dto.getConversationId(), dto.getContent());
+            generateAndUpdateTitle(dto.getConversationId(), dto.getContent(), completion.getTitle());
         }
 
         // 将完整响应拆分为字符逐个推送，模拟流式打字机效果
         return Flux.fromArray(finalContent.split(""));
     }
+
+    private String resolveParsedDataJson(Long resumeId, Long userId) {
+        if (resumeId != null) {
+            return userProfileMapper.selectParsedDataByResumeId(resumeId, userId);
+        }
+        return userProfileMapper.selectLatestParsedDataByUserId(userId);
+    }
     
     /**
      * 根据用户消息生成对话标题
      */
-    private void generateAndUpdateTitle(Long conversationId, String userMessage) {
+    private void generateAndUpdateTitle(Long conversationId, String userMessage, String pythonTitle) {
         try {
-            String prompt = "请根据以下用户问题，生成一个简短的对话标题（不超过15个字，只返回标题文字，不要加引号或其他符号）：\n\n" + userMessage;
-            String title = statelessChatClient.prompt()
-                    .user(prompt)
-                    .call()
-                    .content();
-            
+            String title = pythonTitle;
+            if (title == null || title.isBlank()) {
+                title = userMessage;
+            }
             // 清理标题（去掉可能的引号、换行等）
             title = title.replaceAll("[\"'\\n\\r]", "").trim();
             if (title.length() > 20) {
@@ -256,15 +244,8 @@ public class ChatServiceImpl implements ChatService {
             return buildDefaultSuggestions();
         }
 
-        // 调用 AI 生成基于简历的建议和快捷提问
-        String prompt = buildDailySuggestionsPrompt(parsedDataJson);
-
         try {
-            String aiResponse = statelessChatClient.prompt()
-                    .user(prompt)
-                    .call()
-                    .content();
-            return parseDailySuggestions(aiResponse);
+            return pythonChatClient.dailySuggestions(userId, resumeId, parsedDataJson);
         } catch (Exception e) {
             log.error("生成每日建议失败", e);
             return buildDefaultSuggestions();
@@ -299,90 +280,6 @@ public class ChatServiceImpl implements ChatService {
         // 当前返回占位文本，后续对接 ASR 服务
         log.info("语音转写功能待接入，文件名: {}", file.getOriginalFilename());
         return "语音转写功能待接入，请稍后使用或改用文字输入。";
-    }
-
-    /**
-     * 构建每日建议提示词
-     */
-    private String buildDailySuggestionsPrompt(String parsedDataJson) {
-        return """
-            你是一位专业的职业规划顾问。根据用户的简历解析数据，生成今日建议和推荐提问。
-
-            用户简历解析数据：
-            %s
-
-            请以 JSON 格式返回，结构如下：
-            {
-              "suggestions": [
-                {"title": "建议标题1", "text": "建议内容1"},
-                {"title": "建议标题2", "text": "建议内容2"},
-                {"title": "建议标题3", "text": "建议内容3"}
-              ],
-              "quickQuestions": [
-                {"title": "问题标题1", "text": "完整问题1"},
-                {"title": "问题标题2", "text": "完整问题2"},
-                {"title": "问题标题3", "text": "完整问题3"}
-              ]
-            }
-
-            要求：
-            1. suggestions 提供 3 条针对用户简历的职业发展建议
-            2. quickQuestions 提供 3 个用户可能想问 AI 的问题
-            3. 只返回 JSON，不要包含其他说明文字
-            """.formatted(parsedDataJson);
-    }
-
-    /**
-     * 解析 AI 返回的每日建议 JSON
-     */
-    private ChatDailySuggestionsVO parseDailySuggestions(String aiResponse) {
-        try {
-            // 清理可能的 markdown 代码块标记
-            String json = aiResponse;
-            if (json.startsWith("```json")) {
-                json = json.substring(7);
-            }
-            if (json.startsWith("```")) {
-                json = json.substring(3);
-            }
-            if (json.endsWith("```")) {
-                json = json.substring(0, json.length() - 3);
-            }
-            json = json.trim();
-
-            JsonNode root = objectMapper.readTree(json);
-
-            List<ChatDailySuggestionsVO.SuggestionItem> suggestions = new ArrayList<>();
-            JsonNode suggestionsNode = root.get("suggestions");
-            if (suggestionsNode != null && suggestionsNode.isArray()) {
-                for (JsonNode node : suggestionsNode) {
-                    suggestions.add(ChatDailySuggestionsVO.SuggestionItem.builder()
-                            .title(node.has("title") ? node.get("title").asText() : "")
-                            .text(node.has("text") ? node.get("text").asText() : "")
-                            .build());
-                }
-            }
-
-            List<ChatDailySuggestionsVO.QuickQuestion> quickQuestions = new ArrayList<>();
-            JsonNode quickQuestionsNode = root.get("quickQuestions");
-            if (quickQuestionsNode != null && quickQuestionsNode.isArray()) {
-                for (JsonNode node : quickQuestionsNode) {
-                    quickQuestions.add(ChatDailySuggestionsVO.QuickQuestion.builder()
-                            .title(node.has("title") ? node.get("title").asText() : "")
-                            .text(node.has("text") ? node.get("text").asText() : "")
-                            .build());
-                }
-            }
-
-            return ChatDailySuggestionsVO.builder()
-                    .suggestions(suggestions)
-                    .quickQuestions(quickQuestions)
-                    .build();
-
-        } catch (JsonProcessingException e) {
-            log.error("解析每日建议 JSON 失败: {}", aiResponse, e);
-            return buildDefaultSuggestions();
-        }
     }
 
     /**

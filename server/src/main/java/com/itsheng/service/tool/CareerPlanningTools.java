@@ -346,7 +346,7 @@ public class CareerPlanningTools {
             }
 
             List<Map<String, Object>> goalItems = goals.stream()
-                    .map(this::buildGoalPayload)
+                    .map(goal -> buildGoalPayload(userId, goal))
                     .toList();
 
             Map<String, Object> payload = new LinkedHashMap<>();
@@ -444,7 +444,7 @@ public class CareerPlanningTools {
                         changed = true;
                     }
                     if (changed) {
-                        goalMapper.update(targetGoal);
+                        goalMapper.updateByIdAndUserId(targetGoal);
                         log.debug("updateGoal: 目标更新写入数据库");
                     } else {
                         log.debug("updateGoal: 无字段变更，跳过数据库更新");
@@ -467,8 +467,8 @@ public class CareerPlanningTools {
                     }
                     targetGoal.setStatus("DONE");
                     targetGoal.setProgress(100);
-                    goalMapper.update(targetGoal);
-                    markMilestonesDone(targetGoal.getId());
+                    goalMapper.updateByIdAndUserId(targetGoal);
+                    markMilestonesDone(userId, targetGoal.getId());
                     log.debug("updateGoal: 目标已标记完成, goalId={}", goalId);
                     message = "目标已标记为完成";
                 }
@@ -482,7 +482,7 @@ public class CareerPlanningTools {
                         log.warn("updateGoal: 未找到对应目标, goalId={}, userId={}", goalId, userId);
                         return failure("未找到对应目标");
                     }
-                    goalMilestoneMapper.deleteByGoalId(goalId);
+                    goalMilestoneMapper.deleteByGoalIdAndUserId(goalId, userId);
                     goalMapper.deleteByIdAndUserId(goalId, userId);
                     log.debug("updateGoal: 目标删除成功, goalId={}", goalId);
 
@@ -503,7 +503,7 @@ public class CareerPlanningTools {
             payload.put("success", true);
             payload.put("action", normalizedAction);
             payload.put("message", message);
-            payload.put("goal", refreshedGoal == null ? Map.of() : buildGoalPayload(refreshedGoal));
+            payload.put("goal", refreshedGoal == null ? Map.of() : buildGoalPayload(userId, refreshedGoal));
             return toJson(payload);
         } catch (Exception e) {
             log.error("updateGoal 执行失败", e);
@@ -1417,8 +1417,8 @@ public class CareerPlanningTools {
         return goals;
     }
 
-    private Map<String, Object> buildGoalPayload(Goal goal) {
-        List<GoalMilestone> milestones = goalMilestoneMapper.findByGoalId(goal.getId());
+    private Map<String, Object> buildGoalPayload(Long userId, Goal goal) {
+        List<GoalMilestone> milestones = goalMilestoneMapper.findByGoalIdAndUserId(goal.getId(), userId);
         int milestoneTotal = milestones.size();
         int milestoneCompleted = (int) milestones.stream()
                 .filter(item -> "DONE".equalsIgnoreCase(item.getStatus()))
@@ -1555,7 +1555,7 @@ public class CareerPlanningTools {
     }
 
     private void replaceMilestones(Long userId, Long goalId, List<Map<String, Object>> milestoneSpecs) {
-        goalMilestoneMapper.deleteByGoalId(goalId);
+        goalMilestoneMapper.deleteByGoalIdAndUserId(goalId, userId);
         for (int i = 0; i < milestoneSpecs.size(); i++) {
             Map<String, Object> spec = milestoneSpecs.get(i);
             String title = String.valueOf(spec.getOrDefault("title", "")).trim();
@@ -1577,12 +1577,12 @@ public class CareerPlanningTools {
         }
     }
 
-    private void markMilestonesDone(Long goalId) {
-        List<GoalMilestone> milestones = goalMilestoneMapper.findByGoalId(goalId);
+    private void markMilestonesDone(Long userId, Long goalId) {
+        List<GoalMilestone> milestones = goalMilestoneMapper.findByGoalIdAndUserId(goalId, userId);
         for (GoalMilestone milestone : milestones) {
             milestone.setStatus("DONE");
             milestone.setProgress(100);
-            goalMilestoneMapper.update(milestone);
+            goalMilestoneMapper.updateByIdAndUserId(milestone);
         }
     }
 

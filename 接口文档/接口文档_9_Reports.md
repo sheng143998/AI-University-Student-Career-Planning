@@ -1,674 +1,456 @@
 # 职引 AI - Reports 模块接口文档
 
-## 模块概述
+## 变更摘要
 
-职业发展报告相关接口，包括报告生成、获取、详情查看、编辑优化和 PDF 下载。
-本模块基于学生能力画像和岗位画像匹配，由 AI 生成职业生涯发展报告。
+- 日期：2026-06-12
+- 本轮范围：Reports 生成链路的 AI 建议与证据支撑迁移到 Python Reports-RAG 服务。
+- Java 对外接口保持现有 `/api/reports/**` 路径和 `Result<T>` 包装：`code=1` 表示成功，`code=0` 表示失败。
+- Java 内部新增对 Python 的 `POST /api/v1/reports/generate-support` 调用，用于生成 `aiSuggestions`、`evidenceRefs`、`ragDiagnostics`。
+- 本轮 Python 实现是 deterministic/lightweight RAG fallback：递归切分、摘要索引、元数据过滤、Multi-Query、BM25 + hash embedding-like hybrid、RRF/rerank fallback。它不声明真实 pgvector、生产 embedding、LLM 或 cross-encoder 已完成。
+- 旧目录 `ai_service/` 不属于本轮实现范围；Reports 新服务放在短横线目录 `ai-service/`。
 
----
+## 认证与边界
 
-## 数据模型
+- 外部接口由 Java Spring Boot 暴露，仍受 JWT 拦截器保护。
+- Python Reports-RAG 只作为 Java 内部下游服务，不直接向前端开放。
+- Java 负责用户鉴权、报告状态、数据库落库、PDF 生成和下游失败 fallback。
+- Python 只返回 AI 建议、证据引用和检索诊断，不落库、不处理 JWT、不访问 OSS。
 
-### career_reports 表（职业生涯发展报告表）
+## 当前支持的 Java 外部接口
 
-| 字段名 | 类型 | 说明 |
-|--------|------|------|
-| id | BIGSERIAL | 主键 |
-| report_no | VARCHAR(50) | 报告编号（唯一） |
-| user_id | BIGINT | 用户 ID |
-| student_capability_id | BIGINT | 关联学生能力画像 ID |
-| target_job_profile_id | BIGINT | 目标岗位画像 ID |
-| match_score | INT | 人岗匹配总分 (0-100) |
-| match_details | JSONB | 匹配详情（各维度得分） |
-| self_discovery | JSONB | 自我认知模块内容 |
-| target_job | JSONB | 职业目标设定(从user_career_job中获取target_job) |
-| development_path | JSONB | 职业发展路径（从user_career_date中获取用户更新时间距离当前时间最近的列，然后获取target_job字段，然后再从job表中获取job_category_name与target_job相同，但是job_level不同的，（由INTERNSHIP -> JUNIOR -> MID -> SENIOR）(如果存在的话） |
-| action_plan | JSONB | 行动计划(从goal表中获取) |
-| ai_suggestions | TEXT | AI 建议(从resume_analysis_result表中suggestions字段获取即可) |
-| status | VARCHAR(20) | 状态：DRAFT/PROCESSING/COMPLETED/ARCHIVED/FAILED |
-| is_editable | BOOLEAN | 是否允许编辑 |
-| pdf_file_path | VARCHAR(500) | 生成 PDF 的 OSS 路径 |
-| created_at | DATETIME | 创建时间 |
-| updated_at | DATETIME | 更新时间 |
+| 方法 | 路径 | 认证 | 说明 |
+| --- | --- | --- | --- |
+| POST | `/api/reports/generate` | 需要 | 创建 `PROCESSING` 报告并触发内容生成 |
+| GET | `/api/reports/latest` | 需要 | 获取当前用户最新报告 |
+| GET | `/api/reports/{id}` | 需要 | 获取报告详情 |
+| PUT | `/api/reports/{id}` | 需要 | 编辑可编辑报告的部分内容 |
+| GET | `/api/reports/{id}/download` | 需要 | 下载 PDF |
+| DELETE | `/api/reports/{id}` | 需要 | 删除报告 |
 
-#### match_details 字段结构示例
+> `GET /api/reports` 和 `POST /api/reports/{id}/regenerate` 当前 Controller 未实现，本轮不纳入最小闭环；前端不得依赖这两个路径。
 
-```json
-{
-  "overall": 85,
-  "basic_requirements": 90,      // 基础要求匹配分
-  "professional_skills": 82,     // 职业技能匹配分
-  "professional_quality": 80,    // 职业素养匹配分
-  "development_potential": 85    // 发展潜力匹配分
-}
-```
+## 9.1 生成职业报告
 
-#### self_discovery 字段结构示例
+- 方法：`POST`
+- 路径：`/api/reports/generate`
+- 认证：需要
+- 请求体：可为空。
 
 ```json
 {
-  "title": "自我认知",
-  "capability_summary": "你具备扎实的专业技能和较强的学习能力...",
-  "radar_chart": {
-    "professional_skill": 85,
-    "certificate": 70,
-    "innovation": 80,
-    "learning": 88,
-    "resilience": 75,
-    "communication": 82,
-    "internship": 78
-  },
-  "strengths": ["学习能力强", "专业技能扎实", "创新意识好"],
-  "weaknesses": ["证书较少", "实战经验不足"]
-}
-```
-
-#### career_goal 字段结构示例
-
-```json
-{
-  "title": "职业目标设定",
-  "short_term": {
-    "period": "1-2 年",
-    "goal": "初级 UI/视觉设计师",
-    "description": "掌握核心设计技能，完成 3-5 个完整项目"
-  },
-  "medium_term": {
-    "period": "3-5 年",
-    "goal": "高级 UI 设计师/体验设计组长",
-    "description": "独立负责产品线设计，带领小团队"
-  },
-  "long_term": {
-    "period": "5-10 年",
-    "goal": "设计总监/创意总监",
-    "description": "负责整体设计战略，管理设计团队"
+  "targetJobProfileId": 1001,
+  "careerPreference": {
+    "preferredCity": "深圳",
+    "expectedSalary": "15-25k",
+    "careerDirection": "技术路线"
   }
 }
 ```
 
-#### development_path 字段结构示例
+成功响应：
 
 ```json
 {
-  "title": "职业发展路径",
-  "path_type": "vertical",
-  "steps": [
-    {
-      "order": 1,
-      "title": "初级 UI/视觉设计师",
-      "period": "第 1-2 年",
-      "match_rate": 85,
-      "requirements": ["掌握设计工具", "理解设计理论", "完成作品集"],
-      "status": "current"
-    },
-    {
-      "order": 2,
-      "title": "高级 UI 设计师",
-      "period": "第 3-5 年",
-      "match_rate": 70,
-      "requirements": ["独立完成项目", "带新人", "跨部门协作"],
-      "status": "future"
-    },
-    {
-      "order": 3,
-      "title": "设计总监",
-      "period": "第 5-10 年",
-      "match_rate": 50,
-      "requirements": ["战略规划", "团队管理", "行业影响力"],
-      "status": "future"
-    }
-  ]
-}
-```
-
-#### action_plan 字段结构示例
-
-```json
-{
-  "title": "行动计划",
-  "short_term_plan": {
-    "period": "1-6 个月",
-    "goals": [
-      {
-        "id": "a_001",
-        "title": "完成 Figma 高级教程学习",
-        "type": "learning",
-        "priority": "high",
-        "deadline": "2026-06-30",
-        "status": "pending"
-      },
-      {
-        "id": "a_002",
-        "title": "参与 2 个实际设计项目",
-        "type": "practice",
-        "priority": "high",
-        "deadline": "2026-09-30",
-        "status": "pending"
-      }
-    ]
-  },
-  "medium_term_plan": {
-    "period": "6-12 个月",
-    "goals": [
-      {
-        "id": "a_003",
-        "title": "考取 Adobe 认证专家证书",
-        "type": "certificate",
-        "priority": "medium",
-        "deadline": "2026-12-31",
-        "status": "pending"
-      }
-    ]
-  },
-  "evaluation_cycle": {
-    "type": "quarterly",
-    "metrics": ["技能提升", "项目数量", "作品集质量"]
-  }
-}
-```
-
----
-
-## AI 服务模块
-
-### Reports-AI 服务职责
-
-由专门的 **Reports-AI** 服务负责以下分析任务：
-
-1. **人岗匹配分析**：
-   - 基于学生能力画像和岗位画像进行匹配
-   - 从基础要求、职业技能、职业素养、发展潜力 4 个维度分析
-   - 量化呈现契合度与差距
-   - 关键技能匹配准确率不低于 80%
-
-2. **职业目标设定与路径规划**：
-   - 结合职业探索结果与个人意愿制定职业目标
-   - 分析本职业的社会需求与行业发展趋势
-   - 分析企业岗位数据关联性
-   - 构建清晰的职业发展路径
-
-3. **行动计划生成**：
-   - 制定分阶段（短期、中期）的个性化成长计划
-   - 包括学习路径、实践安排（实习、项目等）
-   - 设计评估周期与指标，支持动态调整
-
-4. **报告润色与优化**：
-   - 智能润色报告文字
-   - 内容完整性检查
-   - 支持手动编辑调整
-
----
-
-## 接口列表
-
-| 接口名 | 方法 | 路径 | 说明 |
-| :--- | :--- | :--- | :--- |
-| 生成职业报告 | POST | `/api/reports/generate` | 异步生成报告 |
-| 获取最新报告 | GET | `/api/reports/latest` | 获取用户最新报告概览 |
-| 获取报告列表 | GET | `/api/reports` | 获取用户历史报告列表（默认最近 20 条） |
-| 获取报告详情 | GET | `/api/reports/{id}` | 按 id 获取 |
-| 更新报告内容 | PUT | `/api/reports/{id}` | 编辑报告内容 |
-| 重新生成报告 | POST | `/api/reports/{id}/regenerate` | 基于既有报告参数重新生成（异步） |
-| 下载报告 PDF | GET | `/api/reports/{id}/download` | 二进制流 |
-| 删除报告 | DELETE | `/api/reports/{id}` | 删除报告 |
-
----
-
-## 详细接口定义
-
-### 9.1 生成职业报告
-
-- **请求方法**: `POST`
-- **请求路径**: `/api/reports/generate`
-- **鉴权**: 需要
-- **请求体**:
-```json
-{
-  "target_job_profile_id": 1001,    // 目标岗位画像 ID，不传则使用最匹配岗位
-  "career_preference": {
-    "preferred_city": "深圳",        // 偏好城市（可选）
-    "expected_salary": "15-25k",    // 期望薪资（可选）
-    "career_direction": "技术路线"   // 职业方向偏好（可选）
-  }
-}
-```
-- **响应示例（异步）**:
-```json
-{
-  "code": 200,
-  "msg": "报告生成中，请稍后查看",
+  "code": 1,
+  "msg": null,
   "data": {
-    "report_id": "rpt_20260330_001",
-    "report_no": "CR202603300001",
+    "reportId": 12,
+    "reportNo": "CR202606120001",
     "status": "PROCESSING",
-    "estimated_time": 60
+    "estimatedTime": 60
   }
 }
 ```
 
-**说明**：
-- 报告生成为异步过程，前端需轮询 `/api/reports/{id}` 获取状态
-- 预计生成时间约 60 秒
-- 生成完成后状态变为 `COMPLETED`
-- 若生成失败，推荐后端将 `status` 置为 `FAILED` 并返回失败原因（或使用 `4xx/5xx` 直接返回错误）
+失败响应示例：
 
----
-
-### 9.2 获取最新报告
-
-- **请求方法**: `GET`
-- **请求路径**: `/api/reports/latest`
-- **鉴权**: 需要
-- **响应示例**:
 ```json
 {
-  "code": 200,
-  "msg": "success",
+  "code": 0,
+  "msg": "用户未登录",
+  "data": null
+}
+```
+
+生命周期：
+
+- Java 先创建 `PROCESSING` 报告记录。
+- 内容生成完成后状态更新为 `COMPLETED`。
+- 能力画像或职业数据等前置数据缺失时状态更新为 `FAILED`。
+- Python 下游 400、5xx、超时、不可用、无效 JSON 或空检索不应导致整份报告失败；Java 使用 deterministic fallback 生成建议，并在 `ragDiagnostics` 中标记 `FALLBACK` 原因。
+
+## 9.2 获取最新报告
+
+- 方法：`GET`
+- 路径：`/api/reports/latest`
+- 认证：需要
+
+成功响应：
+
+```json
+{
+  "code": 1,
+  "msg": null,
   "data": {
-    "id": 1,
-    "report_no": "CR202603300001",
+    "id": 12,
+    "reportNo": "CR202606120001",
     "title": "职业生涯发展报告",
     "status": "COMPLETED",
-    "match_score": 85,
-    "target_job": "UI/视觉设计师",
-    "generated_at": "2026-03-30T10:30:00+08:00",
-    "updated_at": "2026-03-30T10:32:00+08:00"
+    "matchScore": 85,
+    "targetJob": "Java 后端开发工程师",
+    "generatedAt": "2026-06-12T10:30:00",
+    "updatedAt": "2026-06-12T10:32:00",
+    "editable": true
   }
 }
 ```
 
----
+## 9.3 获取报告详情
 
-### 9.2.1 获取报告列表
+- 方法：`GET`
+- 路径：`/api/reports/{id}`
+- 认证：需要，只能访问当前用户自己的报告。
 
-- **请求方法**: `GET`
-- **请求路径**: `/api/reports`
-- **鉴权**: 需要
-- **Query 参数**:
-  - `limit`：可选，默认 `20`
-  - `status`：可选，按状态过滤（`DRAFT`/`PROCESSING`/`COMPLETED`/`ARCHIVED`/`FAILED`）
-- **响应示例**:
+成功响应：
+
 ```json
 {
-  "code": 200,
-  "msg": "success",
+  "code": 1,
+  "msg": null,
   "data": {
-    "items": [
-      {
-        "id": 1,
-        "title": "职业生涯发展报告",
-        "status": "COMPLETED",
-        "match_score": 85,
-        "target_job": "UI/视觉设计师",
-        "generated_at": "2026-03-30T10:30:00+08:00"
-      }
-    ]
-  }
-}
-```
-
-**说明**：
-- 默认返回最近 `limit` 条报告（按创建时间倒序）
-- 列表用于前端历史切换，不返回完整 `sections`
-
----
-
-### 9.3 获取报告详情
-
-- **请求方法**: `GET`
-- **请求路径**: `/api/reports/{id}`
-- **鉴权**: 需要
-- **响应示例**:
-```json
-{
-  "code": 200,
-  "msg": "success",
-  "data": {
-    "id": 1,
-    "report_no": "CR202603300001",
+    "id": 12,
+    "reportNo": "CR202606120001",
     "title": "职业生涯发展报告",
     "status": "COMPLETED",
-    "user_id": 1001,
-    "target_job": {
-      "id": 1001,
-      "name": "UI/视觉设计师",
-      "industry": "互联网/科技",
-      "city": "深圳"
+    "userId": 1001,
+    "targetJob": {
+      "id": null,
+      "name": "Java 后端开发工程师",
+      "industry": null,
+      "city": null
     },
-    "match_score": 85,
-    "match_details": {
+    "matchScore": 85,
+    "matchDetails": {
       "overall": 85,
       "basic_requirements": 90,
       "professional_skills": 82,
       "professional_quality": 80,
-      "development_potential": 85
+      "development_potential": 85,
+      "evidence_refs": [
+        {
+          "id": "resume:1001:summary:0",
+          "sourceType": "resume_analysis",
+          "title": "简历分析摘要",
+          "score": 0.91,
+          "snippet": "项目经历和 Java/Spring 能力与目标岗位相关",
+          "metadata": {
+            "documentType": "resume_analysis",
+            "documentId": 44,
+            "reportId": 12,
+            "section": "summary",
+            "chunkIndex": -1
+          }
+        }
+      ],
+      "rag_diagnostics": {
+        "status": "OK",
+        "retrievalMode": "deterministic_fallback",
+        "expandedQueryCount": 4,
+        "candidateCount": 8,
+        "selectedEvidenceCount": 3,
+        "fallbackReason": null
+      }
     },
-    "sections": [
+    "sections": [],
+    "aiSuggestions": "优先补强项目中的高并发、数据库优化和可观测性经验，并将简历中的后端项目按业务结果量化。",
+    "evidenceRefs": [
       {
-        "key": "self_discovery",
-        "title": "自我认知",
-        "content": {
-          "capability_summary": "你具备扎实的专业技能和较强的学习能力...",
-          "radar_chart": {
-            "professional_skill": 85,
-            "certificate": 70,
-            "innovation": 80,
-            "learning": 88,
-            "resilience": 75,
-            "communication": 82,
-            "internship": 78
-          },
-          "strengths": ["学习能力强", "专业技能扎实", "创新意识好"],
-          "weaknesses": ["证书较少", "实战经验不足"]
-        }
-      },
-      {
-        "key": "match_analysis",
-        "title": "人岗匹配分析",
-        "content": {
-          "summary": "你与 UI/视觉设计师岗位的匹配度为 85%，在基础要求和专业技能方面表现良好...",
-          "dimension_analysis": {
-            "basic_requirements": {
-              "score": 90,
-              "description": "学历、专业等基础条件符合要求"
-            },
-            "professional_skills": {
-              "score": 82,
-              "description": "掌握核心设计工具，建议深化专业技能"
-            },
-            "professional_quality": {
-              "score": 80,
-              "description": "具备良好的职业素养和团队协作能力"
-            },
-            "development_potential": {
-              "score": 85,
-              "description": "学习能力强，发展潜力较大"
-            }
-          },
-          "gap_analysis": [
-            {
-              "dimension": "职业技能",
-              "gap": "缺少商业项目实战经验",
-              "suggestion": "建议参与实际设计项目积累经验"
-            },
-            {
-              "dimension": "证书",
-              "gap": "缺少权威设计证书",
-              "suggestion": "建议考取 Adobe 认证专家证书"
-            }
-          ]
-        }
-      },
-      {
-        "key": "career_goal",
-        "title": "职业目标设定",
-        "content": {
-          "short_term": {
-            "period": "1-2 年",
-            "goal": "初级 UI/视觉设计师",
-            "description": "掌握核心设计技能，完成 3-5 个完整项目"
-          },
-          "medium_term": {
-            "period": "3-5 年",
-            "goal": "高级 UI 设计师/体验设计组长",
-            "description": "独立负责产品线设计，带领小团队"
-          },
-          "long_term": {
-            "period": "5-10 年",
-            "goal": "设计总监/创意总监",
-            "description": "负责整体设计战略，管理设计团队"
-          }
-        }
-      },
-      {
-        "key": "development_path",
-        "title": "职业发展路径",
-        "content": {
-          "path_type": "vertical",
-          "steps": [
-            {
-              "order": 1,
-              "title": "初级 UI/视觉设计师",
-              "period": "第 1-2 年",
-              "match_rate": 85,
-              "requirements": ["掌握设计工具", "理解设计理论", "完成作品集"],
-              "status": "current"
-            },
-            {
-              "order": 2,
-              "title": "高级 UI 设计师",
-              "period": "第 3-5 年",
-              "match_rate": 70,
-              "requirements": ["独立完成项目", "带新人", "跨部门协作"],
-              "status": "future"
-            },
-            {
-              "order": 3,
-              "title": "设计总监",
-              "period": "第 5-10 年",
-              "match_rate": 50,
-              "requirements": ["战略规划", "团队管理", "行业影响力"],
-              "status": "future"
-            }
-          ]
-        }
-      },
-      {
-        "key": "action_plan",
-        "title": "行动计划",
-        "content": {
-          "short_term_plan": {
-            "period": "1-6 个月",
-            "goals": [
-              {
-                "id": "a_001",
-                "title": "完成 Figma 高级教程学习",
-                "type": "learning",
-                "priority": "high",
-                "deadline": "2026-06-30",
-                "status": "pending"
-              },
-              {
-                "id": "a_002",
-                "title": "参与 2 个实际设计项目",
-                "type": "practice",
-                "priority": "high",
-                "deadline": "2026-09-30",
-                "status": "pending"
-              }
-            ]
-          },
-          "medium_term_plan": {
-            "period": "6-12 个月",
-            "goals": [
-              {
-                "id": "a_003",
-                "title": "考取 Adobe 认证专家证书",
-                "type": "certificate",
-                "priority": "medium",
-                "deadline": "2026-12-31",
-                "status": "pending"
-              }
-            ]
-          },
-          "evaluation_cycle": {
-            "type": "quarterly",
-            "metrics": ["技能提升", "项目数量", "作品集质量"]
-          }
+        "id": "resume:1001:summary:0",
+        "sourceType": "resume_analysis",
+        "title": "简历分析摘要",
+        "score": 0.91,
+        "snippet": "项目经历和 Java/Spring 能力与目标岗位相关",
+        "metadata": {
+          "documentType": "resume_analysis",
+          "documentId": 44,
+          "reportId": 12,
+          "section": "summary",
+          "chunkIndex": -1
         }
       }
     ],
-    "ai_suggestions": "建议你重点关注实战经验的积累，通过参与实际项目提升设计能力。同时，考取权威证书可以增强简历竞争力。保持学习热情，你的发展前景广阔。",
-    "is_editable": true,
-    "generated_at": "2026-03-30T10:30:00+08:00",
-    "updated_at": "2026-03-30T10:32:00+08:00"
+    "ragDiagnostics": {
+      "status": "OK",
+      "retrievalMode": "deterministic_fallback",
+      "expandedQueryCount": 4,
+      "candidateCount": 8,
+      "selectedEvidenceCount": 3
+    },
+    "editable": true,
+    "generatedAt": "2026-06-12T10:30:00",
+    "updatedAt": "2026-06-12T10:32:00"
   }
 }
 ```
 
----
+错误映射：
 
-### 9.3.1 重新生成报告
-
-- **请求方法**: `POST`
-- **请求路径**: `/api/reports/{id}/regenerate`
-- **鉴权**: 需要
-- **请求体**（可选覆盖参数，不传则沿用原报告生成参数/默认策略）:
 ```json
 {
-  "target_job_profile_id": 1001,
-  "career_preference": {
-    "preferred_city": "深圳",
-    "expected_salary": "15-25k",
-    "career_direction": "技术路线"
-  }
-}
-```
-- **响应示例（异步）**:
-```json
-{
-  "code": 200,
-  "msg": "报告生成中，请稍后查看",
-  "data": {
-    "report_id": "rpt_20260330_002",
-    "report_no": "CR202603300002",
-    "status": "PROCESSING",
-    "estimated_time": 60
-  }
+  "code": 0,
+  "msg": "报告不存在: 12",
+  "data": null
 }
 ```
 
-**说明**：
-- 与 `POST /api/reports/generate` 一样为异步过程，前端轮询 `GET /api/reports/{id}`
-- 推荐用于“重新生成/优化生成”入口
-
----
-
-### 9.4 更新报告内容
-
-- **请求方法**: `PUT`
-- **请求路径**: `/api/reports/{id}`
-- **鉴权**: 需要
-- **请求体**:
 ```json
 {
-  "career_goal": {
-    "short_term": {
-      "period": "1-2 年",
-      "goal": "初级 UI 设计师",
-      "description": "自定义描述..."
-    }
+  "code": 0,
+  "msg": "无权访问该报告",
+  "data": null
+}
+```
+
+## 9.4 更新报告
+
+- 方法：`PUT`
+- 路径：`/api/reports/{id}`
+- 认证：需要。
+- 限制：仅允许更新可编辑报告的 `careerGoal`、`actionPlan`、`targetJob`、`developmentPath` 等前端编辑内容；AI 检索证据和诊断不由前端写入。
+
+成功响应：
+
+```json
+{
+  "code": 1,
+  "msg": null,
+  "data": true
+}
+```
+
+## 9.5 下载 PDF
+
+- 方法：`GET`
+- 路径：`/api/reports/{id}/download`
+- 认证：需要。
+- 成功：返回 `application/pdf` 二进制流。
+- 若报告未完成，Java 返回失败响应或业务异常。
+
+## 9.6 删除报告
+
+- 方法：`DELETE`
+- 路径：`/api/reports/{id}`
+- 认证：需要。
+
+成功响应：
+
+```json
+{
+  "code": 1,
+  "msg": null,
+  "data": true
+}
+```
+
+## Java -> Python 内部契约
+
+### POST /api/v1/reports/generate-support
+
+用途：Java 在报告内容生成过程中调用 Python Reports-RAG，获取 AI 建议、证据引用和检索诊断。
+
+调用规则：
+
+- Base URL：默认复用 `fuchuang.ai.python.base-url`，可通过 `FUCHUANG_AI_PYTHON_REPORTS_BASE_URL` 覆盖。
+- Timeout：默认 8 秒，可通过 `FUCHUANG_AI_PYTHON_REPORTS_TIMEOUT_SECONDS` 覆盖。
+- Retry：无自动重试，避免异步报告生成重复阻塞。
+- Idempotency：`reportId + userId` 作为幂等键；Python 不落库，因此重复请求应返回等价 deterministic 结果。
+- Content-Type：`application/json`。
+
+请求体：
+
+```json
+{
+  "reportId": 12,
+  "userId": 1001,
+  "targetJobName": "Java 后端开发工程师",
+  "capabilityProfile": {
+    "id": 7,
+    "overallScore": 85,
+    "completenessScore": 90,
+    "competitivenessScore": 80,
+    "capabilityScores": {"java": 88, "database": 82},
+    "professionalSkills": ["Java", "Spring Boot", "PostgreSQL"],
+    "softSkills": ["沟通", "学习能力"],
+    "aiEvaluation": "后端基础扎实，项目经验需要进一步量化。"
   },
-  "action_plan": {
-    "short_term_plan": {
-      "goals": [
-        {
-          "id": "a_001",
-          "title": "自定义目标",
-          "type": "learning",
-          "priority": "high",
-          "deadline": "2026-06-30",
-          "status": "pending"
-        }
-      ]
+  "careerData": {
+    "targetJob": "Java 后端开发工程师",
+    "targetJobId": 101,
+    "jobProfile": {"requirements": ["Spring Boot", "数据库优化", "接口设计"]},
+    "matchSummary": {"overall": 85},
+    "actions": []
+  },
+  "resumeAnalysis": {
+    "id": 44,
+    "parsedData": {"projects": ["校园招聘系统"]},
+    "scores": {"backend": 86},
+    "highlights": ["Spring Boot 项目经验"],
+    "suggestions": ["补充性能优化指标"]
+  },
+  "matchDetails": {
+    "overall": 85,
+    "basic_requirements": 90,
+    "professional_skills": 82,
+    "professional_quality": 80,
+    "development_potential": 85
+  },
+  "actionPlan": {
+    "short_term_plan": {"goals": []}
+  },
+  "developmentPath": {
+    "steps": []
+  },
+  "metadataFilters": {
+    "userId": 1001,
+    "visibility": "private",
+    "documentTypes": [
+      "resume_analysis",
+      "career_data",
+      "capability_profile",
+      "match_details",
+      "action_plan",
+      "development_path"
+    ]
+  }
+}
+```
+
+字段来源：
+
+| 字段 | Java 来源 |
+| --- | --- |
+| `reportId` | `career_reports.id` |
+| `userId` | `BaseContext` / service 入参 |
+| `targetJobName` | `user_career_data.target_job` 或 `jobProfile.target_job` |
+| `capabilityProfile` | `student_capability_profile` |
+| `careerData` | `user_career_data` |
+| `resumeAnalysis` | 最新一条 `resume_analysis_result` |
+| `matchDetails` | Java deterministic 匹配分数 |
+| `actionPlan` | Java 生成的行动计划 JSON |
+| `developmentPath` | Java 生成的发展路径 JSON |
+
+成功响应：
+
+```json
+{
+  "status": "OK",
+  "aiSuggestions": "优先补强项目中的高并发、数据库优化和可观测性经验，并将简历中的后端项目按业务结果量化。",
+  "evidenceRefs": [
+    {
+      "id": "resume_analysis:44:chunk:0",
+      "sourceType": "resume_analysis",
+      "title": "简历分析摘要",
+      "score": 0.91,
+      "snippet": "Spring Boot 项目经验与目标岗位要求匹配",
+      "metadata": {
+        "documentType": "resume_analysis",
+        "documentId": 44,
+        "reportId": 12,
+        "section": "summary",
+        "chunkIndex": -1
+      }
     }
+  ],
+  "ragDiagnostics": {
+    "status": "OK",
+    "retrievalMode": "deterministic_fallback",
+    "embeddingMode": "hash_embedding_fallback",
+    "expandedQueryCount": 4,
+    "candidateCount": 8,
+    "selectedEvidenceCount": 3,
+    "scoreNormalization": "min_max",
+    "fusion": "rrf",
+    "reranker": "deterministic_keyword_overlap",
+    "emptyRetrieval": false
   }
 }
 ```
-- **响应示例**:
+
+空检索响应：
+
 ```json
 {
-  "code": 200,
-  "msg": "success",
-  "data": {
-    "updated": true,
-    "updated_at": "2026-03-30T11:00:00+08:00"
+  "status": "EMPTY_RETRIEVAL",
+  "aiSuggestions": "",
+  "evidenceRefs": [],
+  "ragDiagnostics": {
+    "status": "EMPTY_RETRIEVAL",
+    "retrievalMode": "deterministic_fallback",
+    "embeddingMode": "hash_embedding_fallback",
+    "candidateCount": 0,
+    "selectedEvidenceCount": 0,
+    "emptyRetrieval": true
   }
 }
 ```
 
-**说明**：
-- 支持部分更新，仅传递需要修改的字段
-- 可修改 `target_job`、`development_path`、`action_plan` 等内容
-- `self_discovery` 和 `match_analysis` 基于 AI 分析结果，不支持修改
-- 当 `is_editable=false` 时，推荐返回 `403` 或 `409`
+Python 校验失败：
 
----
-
-### 9.5 下载职业报告 PDF
-
-- **请求方法**: `GET`
-- **请求路径**: `/api/reports/{id}/download`
-- **鉴权**: 需要
-- **响应**:
-  - `200` 返回 `application/pdf`（二进制流）
-  - 响应头包含 `Content-Disposition: attachment; filename="职业生涯发展报告.pdf"`
-
----
-
-### 9.6 删除报告
-
-- **请求方法**: `DELETE`
-- **请求路径**: `/api/reports/{id}`
-- **鉴权**: 需要
-- **响应示例**:
 ```json
 {
-  "code": 200,
-  "msg": "success",
-  "data": {
-    "deleted": true
-  }
+  "error": "VALIDATION_ERROR",
+  "message": "reportId and userId are required"
 }
 ```
 
----
+非 JSON：
 
-## 数据流转说明
-
-```
-用户请求生成报告
-    ↓
-POST /api/reports/generate
-    ↓
-Reports-AI 服务：
-  1. 获取学生能力画像
-  2. 获取目标岗位画像
-  3. 进行人岗匹配分析（4 个维度）
-  4. 生成职业目标和路径规划
-  5. 制定行动计划
-    ↓
-创建 career_reports 记录
-    ↓
-前端轮询 GET /api/reports/{id} 直到状态为 COMPLETED
-    ↓
-用户查看/编辑报告
-    ↓
-可选：下载 PDF / 删除报告
+```json
+{
+  "error": "INVALID_JSON",
+  "message": "request body must be a JSON object"
+}
 ```
 
----
+内部异常：
 
-## 接口列表汇总
+```json
+{
+  "error": "INTERNAL_ERROR",
+  "message": "reports support generation failed"
+}
+```
 
-| 接口编号 | 接口名 | 方法 | 路径 | 说明 |
-| :--- | :--- | :--- | :--- | :--- |
-| 9.1 | 生成职业报告 | POST | /api/reports/generate | 异步生成职业生涯发展报告 |
-| 9.2.1 | 获取报告列表 | GET | /api/reports | 获取用户历史报告列表（默认最近 20 条） |
-| 9.2 | 获取最新报告 | GET | /api/reports/latest | 获取用户最新报告概览 |
-| 9.3 | 获取报告详情 | GET | /api/reports/{id} | 获取报告完整内容（含 5 个模块） |
-| 9.4 | 更新报告内容 | PUT | /api/reports/{id} | 编辑报告内容（支持手动调整） |
-| 9.3.1 | 重新生成报告 | POST | /api/reports/{id}/regenerate | 基于既有报告参数重新生成（异步） |
-| 9.5 | 下载职业报告 PDF | GET | /api/reports/{id}/download | 下载 PDF 格式报告 |
-| 9.6 | 删除报告 | DELETE | /api/reports/{id} | 删除报告记录 |
+Java 错误映射：
 
----
+| Python 情况 | Java 行为 | `ragDiagnostics.status` |
+| --- | --- | --- |
+| 2xx + `OK` | 使用 Python 建议与证据 | `OK` |
+| 2xx + `EMPTY_RETRIEVAL` | 使用 deterministic fallback 建议，证据为空 | `FALLBACK` |
+| 400 | 使用 fallback，不重试 | `FALLBACK` |
+| 5xx | 使用 fallback，不重试 | `FALLBACK` |
+| Timeout | 使用 fallback，不重试 | `FALLBACK` |
+| 连接失败 | 使用 fallback，不重试 | `FALLBACK` |
+| 响应 JSON 无效或 2xx schema 缺失/状态未知/字段类型错误 | 使用 fallback，不重试 | `FALLBACK` |
 
-## 报告模块功能要求对照
+`evidenceRefs[].snippet` 只能返回经过轻量脱敏的短文本片段，至少遮蔽邮箱、手机号和身份证号；完整简历、职业数据或能力画像原文不得写入诊断日志。
 
-| 大赛要求 | 对应功能 | 接口 |
-|----------|----------|------|
-| 职业探索与岗位匹配 | 人岗匹配度分析，量化呈现契合度与差距 | 9.1 生成、9.3 查询 |
-| 职业目标设定与路径规划 | 职业目标、发展路径、行业趋势分析 | 9.1 生成、9.3 查询 |
-| 行动计划与成果展示 | 分阶段成长计划、评估周期 | 9.1 生成、9.3 查询、9.4 更新 |
-| 编辑优化与导出 | 智能润色、内容编辑、PDF 导出 | 9.4 更新、9.5 下载 |
+## 前端影响
+
+- `website/src/api/reports.ts` 的 `ReportDetail` 增加：
+  - `evidenceRefs?: ReportEvidenceRef[]`
+  - `ragDiagnostics?: ReportRagDiagnostics`
+- 现有轮询、下载、编辑路径不变。
+- 前端可选择展示证据和诊断；不应把诊断视为用户可编辑字段。
+- `ReportUpdateBody` 仅声明 `careerGoal`、`actionPlan`、`targetJob`、`developmentPath` 等可编辑字段；`evidenceRefs`、`ragDiagnostics`、`aiSuggestions`、`matchDetails` 在类型层面禁止由前端写回。
+
+## 测试口径
+
+必须覆盖：
+
+- Python：RAG service 单元测试、HTTP handler 200、400/空 body、非 JSON、handler 5xx、empty retrieval。
+- Java：`PythonReportsAiClientTest` 覆盖 200、400、5xx、timeout、invalid body、empty retrieval、无重试。
+- Java：`ReportServiceImplReportsRagTest` 覆盖 Python 成功、Python 失败 fallback、空检索 fallback、前置数据缺失 `FAILED`。
+- Maven：指定 Reports 测试的 Surefire XML 必须存在，且 `tests>0 failures=0 errors=0 skipped=0`。
+- Frontend：若 `website/src/api/reports.ts` 改动，必须运行 `npm run build`。
+- Runtime smoke：若 Java 8081、Python Reports 服务、PostgreSQL、Redis、OSS/JWT 可用，则请求实际 `/api/reports/generate` 并轮询详情；不可用时逐项记录缺失依赖，不声明端到端通过。
