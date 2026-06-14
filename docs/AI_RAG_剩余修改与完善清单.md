@@ -6,11 +6,11 @@
 
 ## 当前总体状态
 
-当前主工作区 `C:\Users\WhenJayHe\IdeaProjects\AI-University-Student-Career-Planning` 已恢复为 clean，且 `master` 与 `origin/master` 同步在 `313b9be`。历史脏改已备份到 `C:\Users\WhenJayHe\IdeaProjects\AI-University-Student-Career-Planning-backups\main-dirty-20260613-013812`。当前主要风险已经从“主工作区脏改”转为“GitHub PR #1 仍为 draft，等待 CI/人工审查后才能合并”。
+当前主工作区 `C:\Users\WhenJayHe\IdeaProjects\AI-University-Student-Career-Planning` 已恢复为 clean，且 `master` 与 `origin/master` 同步在 PR #1 的 merge commit `63aa2edc419fc5907d1364460f7e28eb818aa93f`。历史脏改已备份到 `C:\Users\WhenJayHe\IdeaProjects\AI-University-Student-Career-Planning-backups\main-dirty-20260613-013812`。此前“主工作区脏改”和“GitHub PR #1 未合并”风险已关闭。
 
-Canonical 运行门禁结论：Python 8090/8091/8092 smoke 通过；Java 8081 首次因 Redis/env 与远端 PostgreSQL DNS 失败；本地临时 pgvector+Redis+最小种子+JWT Roadmap smoke 通过 HTTP 200/code=1/ragDiagnostics.fusion=rrf；PR #1 保持 draft，等待审查/CI/人工确认。
+Canonical 运行门禁结论：Python 8090/8091/8092 smoke 通过；Java 8081 首次因 Redis/env 与远端 PostgreSQL DNS 失败；本地临时 pgvector+Redis+最小种子+JWT Roadmap smoke 通过 HTTP 200/code=1/ragDiagnostics.fusion=rrf；PR #1 已 ready、CI 全绿并合并到 GitHub `master`。
 
-多个 AI/RAG 功能已经在隔离 worktree 中完成本地闭环，并已收敛到 GitHub 候选集成分支 `ai-rag-integration-20260613`。该分支已打开 GitHub PR #1，当前状态为 `OPEN`、`draft`、`mergeable=MERGEABLE`、`mergeStateStatus=CLEAN`，但 `statusCheckRollup=[]`，因此不能改 ready，也不能合并到 `master`。
+多个 AI/RAG 功能已经在隔离 worktree 中完成本地闭环，并已通过 GitHub PR #1 收敛到 `master`。PR #1 最新状态为 `MERGED`，合并时间 `2026-06-14T15:15:29Z`，合并提交 `63aa2edc419fc5907d1364460f7e28eb818aa93f`；远端 `ai-rag-integration-20260613` 分支已删除。
 
 | 模块 | 隔离分支 | ahead | 最新提交 | 状态 |
 | --- | --- | ---: | --- | --- |
@@ -34,18 +34,18 @@ Canonical 运行门禁结论：Python 8090/8091/8092 smoke 通过；Java 8081 �
 
 建议：继续只在隔离集成 worktree 中收敛，确保每次只迁移一个 AI/RAG 最小项。主工作区在最终验证前保持只读。
 
-### 2. 未合并风险已收敛为 GitHub PR #1 审查风险
+### 2. GitHub PR #1 未合并风险已关闭
 
-Resume、Reports、Goals、Dashboard、Chat、Roadmap、Feedback queue 与统一配置文档已经在 `ai-rag-integration-20260613` 中收敛到统一 `ai-service/` 方向。Roadmap 已迁入 `ai-service` 聚合入口，并通过 Python `67 passed`、Java server `88 tests`、Roadmap narrow `19 tests`、前端 build 与子 Agent 复验。这些改动仍未进入 `master`，但已通过单一 GitHub PR 可审查、可追踪。
+Resume、Reports、Goals、Dashboard、Chat、Roadmap、Feedback queue 与统一配置文档已经在 `ai-rag-integration-20260613` 中收敛到统一 `ai-service/` 方向，并通过 PR #1 合并进 GitHub `master`。Roadmap 已迁入 `ai-service` 聚合入口，并通过 Python `67 passed`、Java server `88 tests`、Roadmap narrow `19 tests`、前端 build 与子 Agent 复验。
 
-需要决定每个分支的处理方式：
+后续分支处理方式：
 
-- 保持 `ai-rag-integration-20260613` 为唯一 GitHub 候选集成分支。
+- `ai-rag-integration-20260613` 已作为唯一 GitHub 候选集成分支完成合并，远端分支已删除。
 - 不再直接 merge 旧 `ai_service/**` 分支；旧分支以 `tests-log/ai-rag-automation/2026-06-14-1125-ai-rag-branch-coverage-audit.md` 的覆盖矩阵为归档依据。
 - 旧 Roadmap 分支中的 `JwtTokenInterceptor.java` 与 `website/src/views/Roadmap.vue` 不随集成分支进入，需要时另起最小任务重审。
-- 合并到 `master` 前必须配置并通过 GitHub CI，且由人工确认 runtime smoke 证据可接受。
+- 后续新功能仍必须先通过接口文档、测试日志、CI 和必要的 runtime smoke 证据，再进入 `master`。
 
-### 3. 运行门禁已经补充，但不能替代 CI/人工 ready 判断
+### 3. 运行门禁已经补充，但仍不能替代生产 runtime smoke
 
 已记录的运行门禁证据：
 
@@ -55,8 +55,9 @@ Resume、Reports、Goals、Dashboard、Chat、Roadmap、Feedback queue 与统一
 - Frontend `npm run build`: passed, 125 modules transformed
 - Python 8090/8091/8092 smoke 通过
 - Java 8081 + 临时 pgvector + Redis + JWT Roadmap smoke 通过 HTTP 200、`code=1`、`ragDiagnostics.fusion=rrf`
+- GitHub PR #1 CI 全绿：Workflow lint、Python tests、Maven tests、Frontend build 均通过。
 
-限制：本轮只更新文档、测试日志和 PR body，不修改业务代码，因此不重跑全量业务测试。上述证据说明合并后运行风险已显著降低，但不能替代 GitHub CI 和人工审查。
+限制：上述证据说明合并后运行风险已显著降低，但仍不能替代长期环境中的真实 Java 8081 + Python 8090/8091/8092 + Redis + PostgreSQL/pgvector + JWT 运行时 smoke、真实模型调用和离线 RAG 质量评估。
 
 ## P1：功能还不够完善的地方
 
@@ -143,14 +144,14 @@ Resume 分支已完成 Python fallback RAG，但仍有后续完善项：
 
 ### 11. 测试日志和 Obsidian 记录需要统一索引
 
-现在已有多份 `tests-log/ai-rag-automation/*.md` 和 Obsidian 使用记录。`tests-log/ai-rag-automation/2026-06-14-1125-ai-rag-branch-coverage-audit.md` 已作为分支覆盖审计索引，后续仍需要在 PR/MR 合并前后维护最终总索引：
+现在已有多份 `tests-log/ai-rag-automation/*.md` 和 Obsidian 使用记录。`tests-log/ai-rag-automation/2026-06-14-1125-ai-rag-branch-coverage-audit.md` 已作为分支覆盖审计索引，后续仍需要在 GitHub PR 合并前后维护最终总索引：
 
 - 每个接口文档对应哪个分支、哪个提交、哪份测试日志。
 - 哪些分支已合并，哪些只是本地闭环。
 - 哪些 runtime smoke 未执行。
 - 哪些测试是 fallback 级别，哪些是真实服务级别。
 
-### 12. 配置命名和端口已形成当前定稿，仍需随 PR/MR 复核
+### 12. 配置命名和端口已形成当前定稿，仍需随 GitHub PR 复核
 
 当前端口分工已经写入 `docs/AI_RAG_配置与端口说明.md`，并按 `ai-rag-integration-20260613` 的实际代码复核：
 
@@ -167,7 +168,11 @@ Resume 分支已完成 Python fallback RAG，但仍有后续完善项：
 - `FUCHUANG_AI_PYTHON_REPORTS_BASE_URL`
 - 各模块 timeout 配置。
 
-剩余风险不是“端口未定稿”，而是合并前仍需用真实 Java `8081` + Python `8090/8091/8092` + Redis + PostgreSQL/pgvector + JWT 环境做 runtime smoke，确认配置在运行时生效。
+剩余风险不是“端口未定稿”，而是后续仍需用真实 Java `8081` + Python `8090/8091/8092` + Redis + PostgreSQL/pgvector + JWT 环境做 runtime smoke，确认配置在运行时生效。
+
+### 12.1 常用 CLI 工具环境已补齐，后续新增工具仍需登记
+
+本轮已复核 `winget`、`git`、`gh`、`rg`、`actionlint`、`jq`、`yq`、`uv`、`go`、`java`、`mvn`、`node`、`npm`、`python`、`pip`、`docker` 均可在当前环境直接找到。用户级 PATH 已包含 `C:\Users\WhenJayHe\bin`、WindowsApps、winget 包目录、`C:\Users\WhenJayHe\sdk\go1.26.4\bin` 与 `C:\Users\WhenJayHe\go\bin`；用户级 `GOROOT` / `GOPATH` 已持久化。后续新增常用工具时仍需记录安装来源、版本、PATH 或环境变量。
 
 ### 13. 需要补真实安全和隐私审计
 
@@ -183,18 +188,16 @@ Resume 分支已完成 Python fallback RAG，但仍有后续完善项：
 
 推荐顺序：
 
-1. 先冻结主工作区，不继续直接开发。
-2. 以 `ai-rag-integration-20260613` 为唯一候选集成分支，不再逐个 merge 旧隔离分支。
-3. 推送集成分支并开 PR/MR，让远端保留可审查的 13 个提交。
-4. 合并前补真实端到端 smoke；如果无法运行，必须在 PR/MR 和测试日志中写明替代验证与剩余风险。
-5. 旧隔离分支只按覆盖矩阵归档，不能直接 merge 到 `master`。
+1. 继续冻结主工作区的非 AI/RAG 临时改动，不直接恢复旧备份。
+2. 旧隔离分支只按覆盖矩阵归档，不再直接 merge 到 `master`。
+3. 后续每个新优化项都单独开最小分支或最小提交，避免再次出现大批分支长期未合并。
+4. 新优化项合并前补真实端到端 smoke；如果无法运行，必须在 PR、测试日志和 Obsidian 记录中写明替代验证与剩余风险。
 
 ## 建议下一步
 
-最优先不是继续写新功能，而是做一次“集成收敛”：
+最优先不是继续写新功能，而是基于已合并的 `master` 做运行时验收：
 
-1. 推送 `ai-rag-integration-20260613` 并开 PR/MR，而不是继续从旧分支 cherry-pick。
-2. 针对 PR/MR 运行 Java 8081 + Python 8090/8091/8092 + Redis/JWT 的最小 runtime smoke。
-3. 明确旧 Roadmap 分支的 `JwtTokenInterceptor.java` 和 `Roadmap.vue` 是否仍需要；需要则另起最小任务重审。
-4. PR/MR 通过后再合并到 `master`，并立即复跑 Python/Java/frontend 全量验证。
-5. 再推进 Market/JD ingestion、Interface 10 feedback/settings、生产级 pgvector/Dashscope/评估闭环。
+1. 针对当前 `master` 运行 Java 8081 + Python 8090/8091/8092 + Redis/JWT 的最小 runtime smoke。
+2. 明确旧 Roadmap 分支的 `JwtTokenInterceptor.java` 和 `Roadmap.vue` 是否仍需要；需要则另起最小任务重审。
+3. 再推进 Market/JD ingestion、Interface 10 feedback/settings、生产级 pgvector/Dashscope/评估闭环。
+4. 为真实 pgvector、Dashscope/Qwen、cross-encoder 和离线评估补独立接口文档、测试和测试日志。
