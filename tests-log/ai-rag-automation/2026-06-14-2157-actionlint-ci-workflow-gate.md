@@ -78,7 +78,8 @@ yq '.name' '.github\workflows\ai-rag-ci.yml'
 
 ## 剩余风险
 
-- 该 workflow 已通过本地 `actionlint`，且 CI 内包含 actionlint job；GitHub Actions 云端实际运行结果仍需推送后由 PR checks 验证。
+- GitHub Actions 第一次运行中 `Maven tests` 曾失败，失败点为 `ChatControllerDebugEndpointEnabledTest` 异步 `Flux<String>` 响应只读到部分正文 `st`；已改为 `asyncDispatch` 并推送修复。
+- 最新 PR #1 checks 已全部通过：Workflow lint、Python tests、Maven tests、Frontend build 均为 SUCCESS；PR 仍保持 draft。
 - 当前 worktree 仍只新增 `.github/workflows/ai-rag-ci.yml`、本测试日志和一个 ChatControllerDebugEndpointEnabledTest 修复；尚未提交。
 
 ## 优化建议
