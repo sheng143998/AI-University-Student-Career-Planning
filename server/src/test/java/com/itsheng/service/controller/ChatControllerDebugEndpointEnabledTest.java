@@ -28,7 +28,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class ChatControllerDebugEndpointEnabledTest {
@@ -49,9 +51,14 @@ class ChatControllerDebugEndpointEnabledTest {
                             .content("stub answer")
                             .build());
 
-            MvcResult result = MockMvcBuilders.webAppContextSetup((WebApplicationContext) context.getSourceApplicationContext())
-                    .build()
+            var mockMvc = MockMvcBuilders.webAppContextSetup((WebApplicationContext) context.getSourceApplicationContext())
+                    .build();
+            MvcResult asyncResult = mockMvc
                     .perform(get("/ai/chat").param("prompt", "career advice").param("chatId", "42"))
+                    .andExpect(request().asyncStarted())
+                    .andReturn();
+            MvcResult result = mockMvc
+                    .perform(asyncDispatch(asyncResult))
                     .andExpect(status().isOk())
                     .andExpect(content().contentType("text/html;charset=utf-8"))
                     .andReturn();
@@ -82,9 +89,14 @@ class ChatControllerDebugEndpointEnabledTest {
                                     .content("e")
                                     .build());
 
-                    MvcResult result = MockMvcBuilders.webAppContextSetup((WebApplicationContext) context.getSourceApplicationContext())
-                            .build()
+                    var mockMvc = MockMvcBuilders.webAppContextSetup((WebApplicationContext) context.getSourceApplicationContext())
+                            .build();
+                    MvcResult asyncResult = mockMvc
                             .perform(get("/ai/chat").param("prompt", "env advice").param("chatId", "7"))
+                            .andExpect(request().asyncStarted())
+                            .andReturn();
+                    MvcResult result = mockMvc
+                            .perform(asyncDispatch(asyncResult))
                             .andExpect(status().isOk())
                             .andExpect(content().contentType("text/html;charset=utf-8"))
                             .andReturn();
