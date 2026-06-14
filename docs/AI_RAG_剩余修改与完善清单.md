@@ -6,13 +6,15 @@
 
 ## 当前总体状态
 
-当前主工作区 `C:\Users\WhenJayHe\IdeaProjects\AI-University-Student-Career-Planning` 已恢复为 clean，且 `master` 与 `origin/master` 同步在 `313b9be`。历史脏改已备份到 `C:\Users\WhenJayHe\IdeaProjects\AI-University-Student-Career-Planning-backups\main-dirty-20260613-013812`。当前主要风险已经从“主工作区脏改”转为“多个隔离分支尚未合并/归档”。
+当前主工作区 `C:\Users\WhenJayHe\IdeaProjects\AI-University-Student-Career-Planning` 已恢复为 clean，且 `master` 与 `origin/master` 同步在 `313b9be`。历史脏改已备份到 `C:\Users\WhenJayHe\IdeaProjects\AI-University-Student-Career-Planning-backups\main-dirty-20260613-013812`。当前主要风险已经从“主工作区脏改”转为“GitHub PR #1 仍为 draft，等待 CI/人工审查后才能合并”。
 
-多个 AI/RAG 功能已经在隔离 worktree 中完成本地闭环，但还没有 merge 到 `master`。当前统一候选集成分支为 `ai-rag-integration-20260613`；Roadmap 功能集成快照为 `2ceba44 feat: integrate roadmap rag into ai service`，其后的文档/审计收口提交会继续推进该分支，最终以远端分支 HEAD 和 PR/MR 为准：
+Canonical 运行门禁结论：Python 8090/8091/8092 smoke 通过；Java 8081 首次因 Redis/env 与远端 PostgreSQL DNS 失败；本地临时 pgvector+Redis+最小种子+JWT Roadmap smoke 通过 HTTP 200/code=1/ragDiagnostics.fusion=rrf；PR #1 保持 draft，等待审查/CI/人工确认。
+
+多个 AI/RAG 功能已经在隔离 worktree 中完成本地闭环，并已收敛到 GitHub 候选集成分支 `ai-rag-integration-20260613`。该分支已打开 GitHub PR #1，当前状态为 `OPEN`、`draft`、`mergeable=MERGEABLE`、`mergeStateStatus=CLEAN`，但 `statusCheckRollup=[]`，因此不能改 ready，也不能合并到 `master`。
 
 | 模块 | 隔离分支 | ahead | 最新提交 | 状态 |
 | --- | --- | ---: | --- | --- |
-| Chat | `ai-rag-chat-python-boundary` | 3 | `46451df test: verify chat debug env binding` | 功能已进入 `ai-rag-integration-20260613`，旧分支待归档/删除决策 |
+| Chat | `ai-rag-chat-python-boundary` | 3 | `46451df test: verify chat debug env binding` | 功能已进入 `ai-rag-integration-20260613`，旧分支只作归档参考 |
 | Dashboard | `ai-rag-dashboard-target-job-match` | 1 | `713eb90 feat: route dashboard target matching through python rag` | 已迁移进 `ai-rag-integration-20260613` 的 `ai-service/`，旧 `ai_service/**` 分支不直接合并 |
 | Goals | `ai-rag-goals-advice-python-rag` | 1 | `e0d6ae6 feat: route goals advice through python rag` | 功能已进入 `ai-rag-integration-20260613`，旧 `ai_service/**` 分支不直接合并 |
 | Reports | `ai-rag-reports-python-rag` | 2 | `958fcd9 test: close reports rag post-commit gate` | patch 等价已进入 `ai-rag-integration-20260613` |
@@ -32,29 +34,29 @@
 
 建议：继续只在隔离集成 worktree 中收敛，确保每次只迁移一个 AI/RAG 最小项。主工作区在最终验证前保持只读。
 
-### 2. 所有本地闭环分支仍未 push/merge/PR
+### 2. 未合并风险已收敛为 GitHub PR #1 审查风险
 
-Resume、Reports、Goals、Dashboard、Chat、Roadmap、Feedback queue 与统一配置文档已经在 `ai-rag-integration-20260613` 中收敛到统一 `ai-service/` 方向。Roadmap 已于 `2ceba44` 迁入 `ai-service` 聚合入口，并通过 Python `67 passed`、Java server `88 tests`、前端 build 与子 Agent 复验；后续 `8b0329b` 及之后的提交仅收口文档和审计日志。这些改动仍未进入 `master`。
+Resume、Reports、Goals、Dashboard、Chat、Roadmap、Feedback queue 与统一配置文档已经在 `ai-rag-integration-20260613` 中收敛到统一 `ai-service/` 方向。Roadmap 已迁入 `ai-service` 聚合入口，并通过 Python `67 passed`、Java server `88 tests`、Roadmap narrow `19 tests`、前端 build 与子 Agent 复验。这些改动仍未进入 `master`，但已通过单一 GitHub PR 可审查、可追踪。
 
 需要决定每个分支的处理方式：
 
-- 推送 `ai-rag-integration-20260613` 到远端并开 PR/MR。
+- 保持 `ai-rag-integration-20260613` 为唯一 GitHub 候选集成分支。
 - 不再直接 merge 旧 `ai_service/**` 分支；旧分支以 `tests-log/ai-rag-automation/2026-06-14-1125-ai-rag-branch-coverage-audit.md` 的覆盖矩阵为归档依据。
 - 旧 Roadmap 分支中的 `JwtTokenInterceptor.java` 与 `website/src/views/Roadmap.vue` 不随集成分支进入，需要时另起最小任务重审。
-- 合并到 `master` 前先完成 runtime smoke 或明确记录无法运行原因。
+- 合并到 `master` 前必须配置并通过 GitHub CI，且由人工确认 runtime smoke 证据可接受。
 
-### 3. Java + Python + DB + Redis + OSS/JWT 端到端 smoke 基本都未跑
+### 3. 运行门禁已经补充，但不能替代 CI/人工 ready 判断
 
-当前多数模块只完成了单元测试、窄集成测试、编译和 HTTP handler smoke。还缺真实运行链路：
+已记录的运行门禁证据：
 
-- Java `8081` 启动。
-- Python AI/RAG 服务端口启动，例如 Resume `8091`、Chat `8092`、Reports/Dashboard 等。
-- PostgreSQL + pgvector 可用。
-- Redis 可用。
-- OSS/JWT/测试用户和测试文件准备好。
-- 前端通过真实 Java API 调用并轮询状态。
+- Python `ai-service` tests: `67 passed`
+- Java server tests: `88 tests`, 0 failures/errors/skipped
+- Roadmap narrow Java tests: `19 tests`, 0 failures/errors/skipped
+- Frontend `npm run build`: passed, 125 modules transformed
+- Python 8090/8091/8092 smoke 通过
+- Java 8081 + 临时 pgvector + Redis + JWT Roadmap smoke 通过 HTTP 200、`code=1`、`ragDiagnostics.fusion=rrf`
 
-这一步不补，不能宣称“端到端可上线”。
+限制：本轮只更新文档、测试日志和 PR body，不修改业务代码，因此不重跑全量业务测试。上述证据说明合并后运行风险已显著降低，但不能替代 GitHub CI 和人工审查。
 
 ## P1：功能还不够完善的地方
 
