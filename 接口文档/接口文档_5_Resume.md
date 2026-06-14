@@ -859,14 +859,14 @@ No direct browser call to Python is supported.
 
 Required verification for this migration:
 
-- Python unit tests: `python -B -m unittest discover -s ai_service -p "test_resume*.py"` exits 0, runs `N > 0`, and has 0 failures, 0 errors, 0 skipped.
-- Python HTTP smoke starts `ai_service.resume_ai_service`, verifies valid payload returns HTTP 200 with the documented schema, verifies invalid payload returns HTTP 400, and cleans up the process.
+- Python unit tests: `$env:PYTHONPATH='ai-service'; python -B -m pytest ai-service/tests/test_resume_analysis_service.py -q -p no:cacheprovider` exits 0, runs `N > 0`, and has 0 failures, 0 errors, 0 skipped.
+- Python HTTP smoke starts `career_ai.resume_analysis_service` from the `ai-service` directory, verifies valid payload returns HTTP 200 with the documented schema, verifies invalid payload returns HTTP 400, and cleans up the process.
 - Java tests cover Python client success, timeout, HTTP 5xx, empty response, invalid JSON, schema failure, Resume success flow, Resume failure flow, and `user_vector_store` insert/upsert behavior.
 - `mvn -pl server -am -DskipTests compile` passes.
 - Frontend build runs only if `website/src/api/resume.ts` changes; otherwise record why it was not needed.
 - Static contract gate confirms this document, Python schema/response, and Java client parsing logic agree.
 - `git diff --check` runs before commit and `git diff --check origin/master..HEAD` runs after commit.
-- Secret/PII gate fails on unredacted secrets, raw resume body, raw Python response, token/key, or OSS credential in code, logs, tests, or `tests-log`.
-- Scope gate allows only Resume/Python/documentation/test/log/Obsidian files and denies `database/`, `application*.yml`, non-Resume modules, `ai-service/`, cache, and build artifacts.
+- Secret/PII gate fails on unredacted secrets, raw resume body, raw Python response, token/key, or OSS credential in code, logs, or tests.
+- Scope gate allows only Resume/Python/documentation/test/log/Obsidian files and denies `database/`, `application*.yml`, non-Resume modules, legacy `ai_service/`, cache, and build artifacts.
 
-If `tests-log/ai-rag-automation` does not exist, create it. Each run must add `tests-log/ai-rag-automation/yyyy-MM-dd-HHmm-resume-python-rag.md` with command, cwd, time, exit code, key output, sample request, actual result, failure repair, sub-agent review, remaining risk, and associated files/commit.
+If detailed automation logs are needed, keep them in local notes or the developer's personal workspace instead of committing them to the GitHub runtime repository. Formal acceptance evidence should be summarized in this document or in a stable `docs/` page.

@@ -448,7 +448,7 @@ pgvector、Dashscope embedding/LLM 或 cross-encoder 环境下稳定验证：
   - `git diff --check`、`git diff --cached --check`、提交后 `git diff --check origin/master..HEAD` 必须无输出。
   - `git diff --name-only --diff-filter=U` 必须无输出；`MERGE_HEAD`、`CHERRY_PICK_HEAD`、`REVERT_HEAD`、`REBASE_HEAD`、`sequencer`、`rebase-apply`、`rebase-merge` 均不得存在。
   - `RoadmapControllerTest.java` 若被 `.gitignore` 命中，必须使用精确 `git add -f` 纳入，并通过 `git diff --cached --name-status` 或提交后 `git diff --name-status origin/master..HEAD` 证明已提交。
-  - `ai-service/tests/test_roadmap_rag_service.py` 不得出现 `from ai_service`、`import ai_service` 或 `MarketAiHandler`。
+  - `ai-service/tests/test_roadmap_rag_service.py` 不得出现旧目录 import 或旧 handler alias。
   - 本轮提交不得包含旧 `ai_service/**` Roadmap 新能力、`website/src/views/Roadmap.vue`、`JwtTokenInterceptor.java` 或构建产物。
   - 本轮提交不得包含 `application*.yml`、`database/**`、`deploy/**`、`target/**`、`website/dist/**`、`website/node_modules/**`、`__pycache__/**`、`*.pyc` 或 `.env*`。
   - staged diff 必须通过 secret scan；测试中如需覆盖 token-like 脱敏，应使用运行时拼接或明确 test-only allowlist，避免静态 `sk-*` 哨兵被误判为真实密钥。

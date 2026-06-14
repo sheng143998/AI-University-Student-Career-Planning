@@ -19,6 +19,8 @@ The same `app.main` entrypoint can be started on different ports. Java routes by
 ## Endpoints
 
 - `POST /api/v1/reports/generate-support`
+- `POST /api/v1/market/insight`
+- `POST /api/v1/market/soft-skills`
 - `POST /internal/goals/advice`
 - `POST /internal/dashboard/target-job/match`
 - `POST /api/v1/chat/complete`

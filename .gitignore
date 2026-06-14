@@ -1,12 +1,38 @@
-**/target/
-.idea
+# IDE / local editor state
+.idea/
+.vscode/
 *.iml
-*.class
-*Test.java
-**/test/
 
-# Website
+# Java build output
+**/target/
+*.class
+
+# Python local state
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+ai-service/data/
+
+# Website dependencies and build output
 website/node_modules/
 website/dist/
 website/.env*
 website/*.log
+
+# Local build packages and archives
+前后端打包文件/
+*.rar
+*.zip
+*.7z
+*.tar
+*.tar.gz
+
+# Personal resumes, OCR exports, and local coding-tool caches
+jianli/
+.autocp
+
+# Generated verification notes belong outside the runtime repository
+tests-log/
+docs/obsidian-usage-records/

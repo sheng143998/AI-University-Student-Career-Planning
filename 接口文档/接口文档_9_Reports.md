@@ -7,7 +7,7 @@
 - Java 对外接口保持现有 `/api/reports/**` 路径和 `Result<T>` 包装：`code=1` 表示成功，`code=0` 表示失败。
 - Java 内部新增对 Python 的 `POST /api/v1/reports/generate-support` 调用，用于生成 `aiSuggestions`、`evidenceRefs`、`ragDiagnostics`。
 - 本轮 Python 实现是 deterministic/lightweight RAG fallback：递归切分、摘要索引、元数据过滤、Multi-Query、BM25 + hash embedding-like hybrid、RRF/rerank fallback。它不声明真实 pgvector、生产 embedding、LLM 或 cross-encoder 已完成。
-- 旧目录 `ai_service/` 不属于本轮实现范围；Reports 新服务放在短横线目录 `ai-service/`。
+- 旧目录 `ai_service/` 已移除；Reports 新服务放在短横线目录 `ai-service/`。
 
 ## 认证与边界
 

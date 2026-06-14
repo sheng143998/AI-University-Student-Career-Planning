@@ -1,7 +1,7 @@
 ﻿# AI/RAG 剩余修改与完善清单
 
 生成时间：2026-06-13
-更新：2026-06-14
+更新：2026-06-15
 范围：AI-University-Student-Career-Planning 的 AI/RAG Python 化、Java-Python 集成、接口文档、测试与运行验收。
 
 ## 当前总体状态
@@ -15,20 +15,20 @@ Canonical 运行门禁结论：Python 8090/8091/8092 smoke 通过；Java 8081 �
 | 模块 | 隔离分支 | ahead | 最新提交 | 状态 |
 | --- | --- | ---: | --- | --- |
 | Chat | `ai-rag-chat-python-boundary` | 3 | `46451df test: verify chat debug env binding` | 功能已进入 `ai-rag-integration-20260613`，旧分支只作归档参考 |
-| Dashboard | `ai-rag-dashboard-target-job-match` | 1 | `713eb90 feat: route dashboard target matching through python rag` | 已迁移进 `ai-rag-integration-20260613` 的 `ai-service/`，旧 `ai_service/**` 分支不直接合并 |
-| Goals | `ai-rag-goals-advice-python-rag` | 1 | `e0d6ae6 feat: route goals advice through python rag` | 功能已进入 `ai-rag-integration-20260613`，旧 `ai_service/**` 分支不直接合并 |
+| Dashboard | `ai-rag-dashboard-target-job-match` | 1 | `713eb90 feat: route dashboard target matching through python rag` | 已迁移进 `ai-service/`，旧 `ai_service/**` 分支不直接合并 |
+| Goals | `ai-rag-goals-advice-python-rag` | 1 | `e0d6ae6 feat: route goals advice through python rag` | 功能已进入 `ai-service/`，旧 `ai_service/**` 分支不直接合并 |
 | Reports | `ai-rag-reports-python-rag` | 2 | `958fcd9 test: close reports rag post-commit gate` | patch 等价已进入 `ai-rag-integration-20260613` |
-| Resume | `ai-rag-resume-python-rag` | 1 | `2f60cde feat: route resume analysis through python rag` | 已迁移进 `ai-rag-integration-20260613` 的 `ai-service/`，旧 `ai_service/**` 分支不直接合并 |
+| Resume | `ai-rag-resume-python-rag` | 1 | `2f60cde feat: route resume analysis through python rag` | 已迁移进 `ai-service/`，旧 `ai_service/**` 分支不直接合并 |
 | Roadmap | `ai-rag-roadmap-python-rag` | 3 | `9b10a7a test: harden roadmap current-job cache handling` | 核心能力已迁入 `ai-rag-integration-20260613`；旧分支的 `JwtTokenInterceptor.java` 与 `Roadmap.vue` 未覆盖，需单独评估 |
 
 ## P0：必须先处理的风险
 
 ### 1. 主工作区脏改已经隔离，仍需防止回流
 
-主工作区当前 clean。后续需要避免旧备份、旧 `ai_service/` 分支实现、配置文件改动和构建产物重新回流到 `master`。仍需决定：
+主工作区当前 clean。后续需要避免旧备份、旧 `ai_service/` 分支实现、配置文件改动和构建产物重新回流到 `master`。
 
 - 哪些隔离 worktree 分支要 push/merge。
-- 旧分支里的 `ai_service/` 新能力如何继续迁到统一 `ai-service/`。
+- 旧分支里的 `ai_service/` 新能力不得直接回流；需要时必须重建到统一 `ai-service/`。
 - `application.yml`、`application-dev.yml` 的历史改动如需恢复，必须单独审查，禁止随 AI/RAG 合并。
 - `database/*.sql`、打包产物、`.codex-temp*`、`.m2-codex`、`.claude` 等只保留在备份或本地忽略范围，不纳入 AI/RAG 提交。
 
@@ -36,12 +36,12 @@ Canonical 运行门禁结论：Python 8090/8091/8092 smoke 通过；Java 8081 �
 
 ### 2. GitHub PR #1 未合并风险已关闭
 
-Resume、Reports、Goals、Dashboard、Chat、Roadmap、Feedback queue 与统一配置文档已经在 `ai-rag-integration-20260613` 中收敛到统一 `ai-service/` 方向，并通过 PR #1 合并进 GitHub `master`。Roadmap 已迁入 `ai-service` 聚合入口，并通过 Python `67 passed`、Java server `88 tests`、Roadmap narrow `19 tests`、前端 build 与子 Agent 复验。
+Resume、Reports、Goals、Dashboard、Chat、Roadmap、Market fallback、Feedback queue 与统一配置文档已经收敛到统一 `ai-service/` 方向。Roadmap 已迁入 `ai-service` 聚合入口，并通过 Python `71 passed`、Java server `88 tests`、Roadmap narrow `19 tests`、前端 build 与子 Agent 复验。
 
 后续分支处理方式：
 
 - `ai-rag-integration-20260613` 已作为唯一 GitHub 候选集成分支完成合并，远端分支已删除。
-- 不再直接 merge 旧 `ai_service/**` 分支；旧分支以 `tests-log/ai-rag-automation/2026-06-14-1125-ai-rag-branch-coverage-audit.md` 的覆盖矩阵为归档依据。
+- 不再直接 merge 旧 `ai_service/**` 分支；旧分支覆盖矩阵作为本地归档依据，不再随 GitHub 仓库提交。
 - 旧 Roadmap 分支中的 `JwtTokenInterceptor.java` 与 `website/src/views/Roadmap.vue` 不随集成分支进入，需要时另起最小任务重审。
 - 后续新功能仍必须先通过接口文档、测试日志、CI 和必要的 runtime smoke 证据，再进入 `master`。
 
@@ -49,7 +49,7 @@ Resume、Reports、Goals、Dashboard、Chat、Roadmap、Feedback queue 与统一
 
 已记录的运行门禁证据：
 
-- Python `ai-service` tests: `67 passed`
+- Python `ai-service` tests: `71 passed`
 - Java server tests: `88 tests`, 0 failures/errors/skipped
 - Roadmap narrow Java tests: `19 tests`, 0 failures/errors/skipped
 - Frontend `npm run build`: passed, 125 modules transformed
@@ -74,14 +74,9 @@ Resume、Reports、Goals、Dashboard、Chat、Roadmap、Feedback queue 与统一
 - 离线评估集和 RAG 质量指标。
 - 召回、重排、生成的可观测日志和脱敏审计。
 
-### 5. Python 服务目录需要统一
+### 5. Python 服务目录已统一，后续需防回流
 
-当前历史仓库里仍出现两个目录概念：
-
-- `ai_service/`
-- `ai-service/`
-
-集成分支新增能力应统一落到 `ai-service/`。Dashboard 与 Roadmap 已按此规则迁移；Market 仍需继续迁移，不能把新增能力继续留在旧 `ai_service/`。统一布局为：
+当前运行目录统一为 `ai-service/`，旧 `ai_service/` 目录已移除。新增能力必须继续落到 `ai-service/`，不能重新创建旧目录。统一布局为：
 
 - `app/`：HTTP 入口。
 - `rag/`：chunker、summary index、retriever、fusion、reranker。
@@ -89,7 +84,7 @@ Resume、Reports、Goals、Dashboard、Chat、Roadmap、Feedback queue 与统一
 - `tests/`：单元和集成测试。
 - `.env.example` / README：端口、模型、DB、Redis、环境变量。
 
-否则后续合并分支时会出现路径冲突和运维混乱。
+否则后续合并分支时会再次出现路径冲突和运维混乱。
 
 ### 6. Interface 10 反馈与设置闭环仍需继续核对
 
@@ -109,7 +104,7 @@ Resume、Reports、Goals、Dashboard、Chat、Roadmap、Feedback queue 与统一
 - 招聘 JD ingestion 是否从 Java 转到 Python。
 - JD 分块、摘要索引、metadata filter 是否落地。
 - job_vector_store 是否仍有 Java fake embedding 或空向量风险。
-- 市场趋势分析是否有真实数据源和 Python RAG 支撑。
+- 市场趋势分析是否有真实数据源和 Python RAG 支撑；当前仅有 `ai-service` deterministic fallback。
 - Dashboard/Roadmap 是否依赖同一套岗位知识库，避免重复实现。
 
 ### 8. Resume 闭环仍缺真实 PDF/OCR 和数据库约束
@@ -144,7 +139,7 @@ Resume 分支已完成 Python fallback RAG，但仍有后续完善项：
 
 ### 11. 测试日志和 Obsidian 记录需要统一索引
 
-现在已有多份 `tests-log/ai-rag-automation/*.md` 和 Obsidian 使用记录。`tests-log/ai-rag-automation/2026-06-14-1125-ai-rag-branch-coverage-audit.md` 已作为分支覆盖审计索引，后续仍需要在 GitHub PR 合并前后维护最终总索引：
+自动化运行日志和 Obsidian 使用记录保留在本地工作区或个人笔记中，不再作为 GitHub 运行仓库内容提交。后续仍需要在 GitHub PR 合并前后维护最终总索引，但索引应放在当前文档或正式 `docs/` 文档中：
 
 - 每个接口文档对应哪个分支、哪个提交、哪份测试日志。
 - 哪些分支已合并，哪些只是本地闭环。

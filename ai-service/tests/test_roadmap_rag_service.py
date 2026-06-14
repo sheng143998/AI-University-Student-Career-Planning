@@ -211,7 +211,7 @@ class RoadmapRagServiceTest(unittest.TestCase):
         self.assertNotIn(doc_marker, serialized)
         self.assertEqual({"excludeSameCategory", "documentTypes"}, set(result["diagnostics"]["filters"]))
 
-    def test_ai_service_handler_exposes_roadmap_endpoint(self):
+    def test_handler_exposes_roadmap_endpoint(self):
         handler = object.__new__(AiServiceHandler)
         handler.path = "/api/roadmap/recommendations/personalized"
         handler._read_json = Mock(return_value=_payload())

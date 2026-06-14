@@ -287,7 +287,7 @@ Python 响应字段必须使用 camelCase：
 
 #### 测试口径
 
-- Python: `python -B -m pytest -q -p no:cacheprovider ai_service/test_goals_rag_service.py --tb=short` 与 `python -B -m unittest discover -s ai_service -p "test_goals_rag_service.py"`，覆盖递归切块、摘要索引、metadata filter 防伪、`documentTypes` 真实过滤候选证据、Multi-Query、BM25+embedding、RAG-Fusion/RRF、重排、HTTP handler、PII 过滤和旧 endpoint 清理。
+- Python: `$env:PYTHONPATH='ai-service'; python -B -m pytest -q -p no:cacheprovider ai-service/tests/test_goals_advice_service.py --tb=short` 与 `$env:PYTHONPATH='ai-service'; python -B -m pytest ai-service/tests -q -p no:cacheprovider`，覆盖递归切块、摘要索引、metadata filter 防伪、`documentTypes` 真实过滤候选证据、Multi-Query、BM25+embedding、RAG-Fusion/RRF、重排、HTTP handler、PII 过滤和旧 endpoint 清理。
 - Java: `mvn -pl server -am -Dtest=PythonGoalsAdviceClientTest,GoalsServiceImplTest,GoalsControllerTest -Dsurefire.failIfNoSpecifiedTests=false test`，并校验 surefire 报告中三个测试类 tests > 0。
 - Frontend: `cd website && npm run build`。
 - Smoke: 启动 Python 8090 聚合服务后 POST `/internal/goals/advice`，确认三字段、metadata filters 和旧版 Goals advice 公网风格路径不再可用。

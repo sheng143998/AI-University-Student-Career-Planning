@@ -472,4 +472,4 @@ Python 响应：
 - Python RAG 服务只接收脱敏后的用户 ID、反馈标签、证据引用 ID 和 trace ID，不接收完整私密简历正文。
 - 后续实现时必须为 `target_type + target_id` 做用户归属校验，防止跨用户反馈或推断他人 AI 结果。
 - 前端影响：新增类型化客户端 `website/src/api/aiRagFeedback.ts`，仅封装 `/api/feedback/ai-rag`、`GET /api/settings/ai-rag`、`PUT /api/settings/ai-rag`，不要求普通页面改造。
-- 验证命令建议：后端新增 Java 集成时运行 `mvn test`；Python 新增反馈处理时运行 `pytest ai_service`；前端新增反馈入口时运行 `cd website && npm run build`。
+- 验证命令建议：后端新增 Java 集成时运行 `mvn test`；Python 新增反馈处理时运行 `$env:PYTHONPATH='ai-service'; python -B -m pytest ai-service/tests/test_feedback_service.py -q -p no:cacheprovider`；前端新增反馈入口时运行 `cd website && npm run build`。

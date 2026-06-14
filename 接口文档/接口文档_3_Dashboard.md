@@ -408,7 +408,7 @@ Dashboard 对外仍只暴露 Java Spring Boot `/api/dashboard/**` 接口，前�
 - 每个查询执行 BM25 和 deterministic embedding 检索，保留候选分数。
 - 使用 Reciprocal Rank Fusion 融合多路结果，默认 reranker 为 `deterministic-fallback`。
 - 响应必须返回 `retrieval` diagnostics 和 `evidence_refs`；`evidence_refs.source_id` 只能引用 `summary_level=chunk` 的岗位原始证据，不返回 document/section summary id；`query_variants` 不得包含连续原始简历正文片段、邮箱、手机号或 token-like 值。Java/Python 日志只记录脱敏后的融合方法、候选数和 evidence id 等摘要，不记录完整简历正文、请求体或完整 retrieval 对象。
-- `ai-service/app/main.py` 是当前 8090 聚合入口，本轮为 `/internal/dashboard/target-job/match` 挂载 Dashboard endpoint，并仅对 Dashboard endpoint 返回统一 `VALIDATION_ERROR`。旧 `ai_service/market_ai_service.py` 只作为历史迁移来源保留，Dashboard 新能力不得继续落在旧目录。
+- `ai-service/app/main.py` 是当前 8090 聚合入口，本轮为 `/internal/dashboard/target-job/match` 挂载 Dashboard endpoint，并仅对 Dashboard endpoint 返回统一 `VALIDATION_ERROR`。旧 `ai_service/` 目录已移除，Dashboard 新能力不得继续落在旧目录。
 
 ### Java 错误映射
 
@@ -432,4 +432,4 @@ mvn -pl server -Dtest=DashboardControllerTest test
 mvn -pl server -am -DskipTests compile
 ```
 
-若本地未安装 pytest，则使用 unittest 并在 `tests-log/ai-rag-automation/` 的 Dashboard 专项日志中记录降级原因。Runtime smoke 应优先验证 8090 Python 服务启动和 `/internal/dashboard/target-job/match` sample request；Java 端到端 smoke 依赖 Redis、PostgreSQL/pgvector、Java 8081、Python 8090 和 `OPENAI_API_KEY`，条件不齐时只能记录未执行原因，不能声明端到端通过。
+若本地未安装 pytest，则使用 unittest 并在本地验证记录中说明降级原因，不将临时自动化日志提交到 GitHub 运行仓库。Runtime smoke 应优先验证 8090 Python 服务启动和 `/internal/dashboard/target-job/match` sample request；Java 端到端 smoke 依赖 Redis、PostgreSQL/pgvector、Java 8081、Python 8090 和 `OPENAI_API_KEY`，条件不齐时只能记录未执行原因，不能声明端到端通过。

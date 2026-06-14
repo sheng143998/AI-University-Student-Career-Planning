@@ -5,6 +5,12 @@
 市场探索相关接口，包括岗位画像列表、市场趋势、AI 深度洞察、热门岗位和岗位详情。
 本模块基于企业 1w 条就业数据，由 Dashboard-AI 服务分析生成市场趋势和岗位画像。
 
+## 变更记录
+
+| 日期 | 变更 |
+| :--- | :--- |
+| 2026-06-15 | 将历史 `ai_service/market_ai_service.py` 的 Market fallback 能力迁入统一 `ai-service/app/main.py` 聚合入口，旧目录删除；前端仍只访问 Java `/api/market/**`。 |
+
 ---
 
 ## 数据模型
@@ -43,6 +49,17 @@
    - 求职建议生成
 
 **注**：当前企业 1w 条就业数据尚未提供，市场趋势数据暂为空。待数据提供后，由 Dashboard-AI 服务完成分析。
+
+### Python 内部 fallback 边界
+
+Java 对外保持 `/api/market/**`，前端禁止直连 Python。统一 Python 聚合服务 `ai-service/app/main.py` 当前提供以下内部 fallback 端点，用于后续 Java-Python Market 集成或本地验证：
+
+| Python endpoint | 方法 | 用途 |
+| :--- | :--- | :--- |
+| `/api/v1/market/insight` | POST | 根据岗位样本生成确定性 Market insight fallback，返回 `MarketInsightContentVO` 同构字段 |
+| `/api/v1/market/soft-skills` | POST | 根据岗位能力分生成 soft skills fallback，返回 `SoftSkillItemVO[]` 同构字段 |
+
+当前实现仍是 deterministic fallback，不声明真实企业 1w 数据、pgvector、Dashscope 生成或离线质量评估已经完成。
 
 ---
 

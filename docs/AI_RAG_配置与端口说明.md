@@ -4,22 +4,24 @@
 范围：Java backend 与 Python AI/RAG 服务之间的端口分工、配置键、环境变量与超时优先级。
 对应清单：`docs/AI_RAG_剩余修改与完善清单.md` P2-12。
 
-所有内容基于 `ai-rag-integration-20260613` 集成分支实际代码核对（`PythonAiProperties`、各 `Python*Client`、`ai-service/`）。Dashboard 已迁入聚合服务；Roadmap 已在 2026-06-14 迁入聚合服务；Market 尚未纳入本集成分支，保留为后续迁移项。
+所有内容基于当前 `master` 实际代码核对（`PythonAiProperties`、各 `Python*Client`、`ai-service/`）。Dashboard、Roadmap、Market fallback、Reports、Goals、RAG feedback 均已收敛到统一 `ai-service/` 聚合目录。
 
 ## 1. 端口分工（定稿）
 
 | 服务 | 端口 | 入口 | 职责 |
 | --- | --- | --- | --- |
 | Java backend | `8081` | `server`（Spring Boot） | 鉴权、业务、对前端唯一入口 |
-| Python 聚合 AI 服务 | `8090` | `ai-service/app/main.py`（`AI_SERVICE_HOST` / `AI_SERVICE_PORT`） | Reports、Goals、Dashboard、Roadmap、RAG feedback、偏好校验 |
+| Python 聚合 AI 服务 | `8090` | `ai-service/app/main.py`（`AI_SERVICE_HOST` / `AI_SERVICE_PORT`） | Reports、Goals、Dashboard、Roadmap、Market fallback、RAG feedback、偏好校验 |
 | Python Resume AI 服务 | `8091` | `ai-service/career_ai/resume_analysis_service.py` | 简历分析 |
 | Python Chat AI 服务 | `8092` | `ai-service/app/main.py`（`AI_SERVICE_HOST` / `AI_SERVICE_PORT`） | Chat complete、每日建议 |
 
-**决策**：除 Resume（8091）和 Chat（8092）独立端口外，已集成的 Reports、Goals、Dashboard、Roadmap、Feedback 统一聚合在 8090。Market 因旧 `ai_service/` 入口冲突暂缓，不在本集成分支声明已暴露。
+**决策**：除 Resume（8091）和 Chat（8092）独立端口外，已集成的 Reports、Goals、Dashboard、Roadmap、Market fallback、Feedback 统一聚合在 8090。旧 `ai_service/` 目录已移除，后续不得再以该目录承接新增能力。
 
 聚合服务（8090）当前暴露的路由：
 
 - `POST /api/v1/reports/generate-support`
+- `POST /api/v1/market/insight`
+- `POST /api/v1/market/soft-skills`
 - `POST /internal/goals/advice`
 - `POST /internal/dashboard/target-job/match`
 - `POST /api/roadmap/recommendations/personalized`
@@ -103,7 +105,7 @@ AI_SERVICE_PORT=8090 python -m app.main
 ## 4. 已知命名债务（暂不改动，列入后续收敛）
 
 1. **环境变量前缀不统一**：超时类 legacy 变量是 `FUCHUANG_PYTHON_AI_*`，base-url 类是 `FUCHUANG_AI_PYTHON_*`，两套前缀并存。新增配置一律使用 `FUCHUANG_AI_PYTHON_*`。
-2. **Market 尚未迁入本集成分支的 `ai-service/`**：旧分支仍依赖 `ai_service/market_ai_service.py`，直接合并会冲突，需独立迁移。
+2. **Market 仍是 fallback 能力**：`/api/v1/market/insight` 与 `/api/v1/market/soft-skills` 已迁入 `ai-service/` 聚合入口，但还没有接入真实 JD ingestion、pgvector/Dashscope 或离线评估集。
 3. **通用超时默认值不一致**：yml 默认 20s，Goals 默认 20s，Reports 默认 8s，Roadmap 默认 8s；以显式配置为准。
 
 ## 5. 本地启动速查

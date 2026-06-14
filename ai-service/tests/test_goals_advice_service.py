@@ -10,7 +10,7 @@ from career_ai.goals_advice_service import (
     rag_fusion,
     recursive_chunks,
 )
-from app.main import ReportsHandler as MarketAiHandler
+from app.main import AiServiceHandler
 from http.server import ThreadingHTTPServer
 
 
@@ -128,7 +128,7 @@ class GoalsRagServiceTest(unittest.TestCase):
 class GoalsRagHttpHandlerTest(unittest.TestCase):
 
     def setUp(self):
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), MarketAiHandler)
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), AiServiceHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.port = self.server.server_address[1]

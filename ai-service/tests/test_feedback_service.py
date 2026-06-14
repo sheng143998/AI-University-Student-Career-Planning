@@ -126,7 +126,7 @@ class FeedbackServiceTest(unittest.TestCase):
             lines = [line for line in fh if line.strip()]
         self.assertEqual(1, len(lines))
 
-    def test_ai_service_handler_exposes_feedback_endpoints(self):
+    def test_handler_exposes_feedback_endpoints(self):
         handler = object.__new__(AiServiceHandler)
         handler.path = "/internal/rag/feedback"
         handler._read_json = Mock(

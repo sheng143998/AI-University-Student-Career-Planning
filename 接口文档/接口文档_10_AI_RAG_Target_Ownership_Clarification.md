@@ -38,6 +38,6 @@ Java must not forward full resume text, full JD text, full prompts, or other pri
 Run these checks when this contract changes:
 
 ```powershell
-python -m unittest discover -s ai_service -p "test_rag_feedback_service.py"
+$env:PYTHONPATH='ai-service'; python -B -m pytest ai-service/tests/test_feedback_service.py -q -p no:cacheprovider
 mvn -pl server -am -DskipTests compile
 ```
