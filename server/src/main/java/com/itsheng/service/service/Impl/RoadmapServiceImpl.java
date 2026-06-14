@@ -4,18 +4,18 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.itsheng.common.context.BaseContext;
+import com.itsheng.common.exception.BaseException;
 import com.itsheng.pojo.dto.ResumeParsedData;
 import com.itsheng.pojo.entity.JobCategory;
 import com.itsheng.pojo.vo.*;
+import com.itsheng.service.client.PythonRoadmapRagClient;
 import com.itsheng.service.mapper.JobCategoryMapper;
-import com.itsheng.service.mapper.ResumeMapper;
 import com.itsheng.service.mapper.UserProfileMapper;
 import com.itsheng.service.service.RoadmapService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -38,11 +38,18 @@ public class RoadmapServiceImpl implements RoadmapService {
     private final JobCategoryMapper jobCategoryMapper;
     private final ObjectMapper objectMapper;
     private final UserProfileMapper userProfileMapper;
-    private final ResumeMapper resumeMapper;
-    private final ChatClient chatClient;
+    private final PythonRoadmapRagClient pythonRoadmapRagClient;
     private final StringRedisTemplate redisTemplate;
+    private final CacheManager cacheManager;
 
     private static final String REDIS_KEY_PREFIX = "roadmap:user:current_job:";
+    private static final String PERSONALIZED_RECOMMENDATIONS_CACHE = "roadmap:recommendations:personalized";
+    private static final List<String> SENSITIVE_PATTERNS = List.of(
+            "1[3-9]\\d{9}",
+            "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}",
+            "(?i)(api[_-]?key|secret|token)\\s*[:=]\\s*[A-Za-z0-9_\\-]{8,}",
+            "(?i)\\bsk[-_][A-Za-z0-9_\\-]{8,}\\b"
+    );
 
     /**
      * 级别排序映射
@@ -484,7 +491,7 @@ public class RoadmapServiceImpl implements RoadmapService {
      * 获取个性化职业路径推荐
      */
     @Override
-    @Cacheable(cacheNames = "roadmap:recommendations:personalized", key = "T(com.itsheng.common.context.BaseContext).getUserId()")
+    @Cacheable(cacheNames = PERSONALIZED_RECOMMENDATIONS_CACHE, key = "T(com.itsheng.common.context.BaseContext).getUserId()")
     public CareerPathRecommendationVO getPersonalizedRecommendations() {
         Long userId = BaseContext.getUserId();
         log.info("获取用户 {} 的个性化职业路径推荐", userId);
@@ -509,22 +516,22 @@ public class RoadmapServiceImpl implements RoadmapService {
         CareerPathRecommendationVO.VerticalPathRecommendationVO verticalPath =
                 findBestMatchingVerticalPath(effectiveCurrentJob, userSkills, allJobs);
 
-        // 5. 调用大模型RAG生成横向换岗推荐（10条）
-        List<CareerPathRecommendationVO.LateralPathRecommendationVO> lateralPaths =
+        // 5. 调用 Python Roadmap-RAG 生成横向换岗推荐，失败时使用本地相似度降级
+        RoadmapRagResult ragResult =
                 generateLateralPathRecommendationsRAG(effectiveCurrentJob, userSkills, resumeData, allJobs);
 
         return CareerPathRecommendationVO.builder()
                 .currentJob(effectiveCurrentJob)
                 .verticalPath(verticalPath)
-                .lateralPaths(lateralPaths)
+                .lateralPaths(ragResult.lateralPaths())
+                .ragDiagnostics(ragResult.diagnostics())
                 .generatedAt(LocalDateTime.now().format(DateTimeFormatter.ISO_DATE_TIME))
                 .build();
     }
 
     @Override
-    @CacheEvict(cacheNames = "roadmap:recommendations:personalized", key = "T(com.itsheng.common.context.BaseContext).getUserId()")
     public void clearPersonalizedRecommendationsCache() {
-        log.info("Clearing personalized recommendations cache for user: {}", BaseContext.getUserId());
+        evictPersonalizedRecommendationsCache(BaseContext.getUserId(), false);
     }
 
     @Override
@@ -533,10 +540,40 @@ public class RoadmapServiceImpl implements RoadmapService {
         String redisKey = REDIS_KEY_PREFIX + userId;
         try {
             redisTemplate.opsForValue().set(redisKey, currentJob);
-            log.info("Saved user {} current job to Redis: {}", userId, currentJob);
+            evictPersonalizedRecommendationsCache(userId, true);
+            log.info("Saved user {} current job to Redis, currentJobPresent={}, currentJobLength={}",
+                    userId, currentJob != null && !currentJob.isBlank(), currentJobLength(currentJob));
         } catch (Exception e) {
-            log.error("Failed to save user current job to Redis: {}", e.getMessage());
+            log.error("Failed to save user {} current job to Redis/cache, currentJobPresent={}, currentJobLength={}: {}",
+                    userId, currentJob != null && !currentJob.isBlank(), currentJobLength(currentJob), e.getMessage());
+            throw new BaseException("保存当前岗位失败，请稍后重试", e);
         }
+    }
+
+    private void evictPersonalizedRecommendationsCache(Long userId, boolean failOnError) {
+        if (userId == null) {
+            return;
+        }
+        try {
+            Cache cache = cacheManager.getCache(PERSONALIZED_RECOMMENDATIONS_CACHE);
+            if (cache != null) {
+                cache.evict(userId);
+                log.info("Evicted personalized recommendations cache for user: {}", userId);
+            } else if (failOnError) {
+                throw new IllegalStateException("Personalized recommendations cache is not configured");
+            } else {
+                log.warn("Personalized recommendations cache {} is not configured", PERSONALIZED_RECOMMENDATIONS_CACHE);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to evict personalized recommendations cache for user {}: {}", userId, e.getMessage());
+            if (failOnError) {
+                throw new IllegalStateException("Failed to evict personalized recommendations cache", e);
+            }
+        }
+    }
+
+    private int currentJobLength(String currentJob) {
+        return currentJob == null ? 0 : currentJob.length();
     }
 
     @Override
@@ -545,7 +582,8 @@ public class RoadmapServiceImpl implements RoadmapService {
         String redisKey = REDIS_KEY_PREFIX + userId;
         try {
             String currentJob = redisTemplate.opsForValue().get(redisKey);
-            log.info("Retrieved user {} current job from Redis: {}", userId, currentJob);
+            log.info("Retrieved user {} current job from Redis, currentJobPresent={}, currentJobLength={}",
+                    userId, currentJob != null && !currentJob.isBlank(), currentJobLength(currentJob));
             return currentJob;
         } catch (Exception e) {
             log.error("Failed to get user current job from Redis: {}", e.getMessage());
@@ -591,7 +629,9 @@ public class RoadmapServiceImpl implements RoadmapService {
 
             for (JobCategory job : categoryJobs) {
                 BigDecimal similarity = calculateJobSimilarity(currentJob, userSkills, job);
-                log.info("岗位 {} 与 {} 的相似度: {}", job.getJobCategoryName(), currentJob, similarity);
+                log.info("岗位 {} 与当前岗位相似度: {}, currentJobPresent={}, currentJobLength={}",
+                        job.getJobCategoryName(), similarity,
+                        currentJob != null && !currentJob.isBlank(), currentJobLength(currentJob));
                 if (similarity.compareTo(maxSimilarity) > 0) {
                     maxSimilarity = similarity;
                     bestMatch = job;
@@ -796,152 +836,249 @@ public class RoadmapServiceImpl implements RoadmapService {
     }
 
     /**
-     * 使用大模型RAG生成横向换岗推荐
+     * 调用 Python Roadmap-RAG 生成横向换岗推荐
      */
-    private List<CareerPathRecommendationVO.LateralPathRecommendationVO> generateLateralPathRecommendationsRAG(
+    private RoadmapRagResult generateLateralPathRecommendationsRAG(
             String currentJob, List<String> userSkills, ResumeParsedData resumeData, List<JobCategory> allJobs) {
+        try {
+            Map<String, Object> payload = buildRoadmapRagPayload(currentJob, userSkills, resumeData, allJobs);
+            JsonNode rootNode = pythonRoadmapRagClient.generatePersonalizedRecommendations(payload);
+            RoadmapRagResult result = parseRoadmapRagResult(rootNode, allJobs);
+            if (result.lateralPaths().size() >= 2) {
+                return result;
+            }
+            if (!result.lateralPaths().isEmpty()) {
+                List<CareerPathRecommendationVO.LateralPathRecommendationVO> supplemented =
+                        new ArrayList<>(result.lateralPaths());
+                supplemented.addAll(generateFallbackLateralRecommendations(currentJob, userSkills, allJobs, supplemented));
+                if (supplemented.size() >= 2) {
+                    Map<String, Object> diagnostics = new LinkedHashMap<>(result.diagnostics());
+                    diagnostics.put("supplementedBy", "local-similarity-fallback");
+                    return new RoadmapRagResult(supplemented, diagnostics);
+                }
+            }
+            log.warn("Python Roadmap-RAG 返回空推荐，使用本地相似度降级");
+        } catch (RuntimeException e) {
+            log.warn("Python Roadmap-RAG 调用失败，使用本地相似度降级: {}", e.getMessage());
+        }
+        return fallbackRoadmapRagResult(currentJob, userSkills, allJobs);
+    }
+
+    private Map<String, Object> buildRoadmapRagPayload(
+            String currentJob, List<String> userSkills, ResumeParsedData resumeData, List<JobCategory> allJobs) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("userId", BaseContext.getUserId());
+        payload.put("currentJob", currentJob);
+        payload.put("userSkills", safeStringList(userSkills));
+        payload.put("resumeData", buildSafeResumeSummary(resumeData));
+        payload.put("jobs", allJobs.stream().map(this::buildJobCandidate).collect(Collectors.toList()));
+
+        Map<String, Object> filters = new LinkedHashMap<>();
+        filters.put("excludeSameCategory", true);
+        filters.put("documentTypes", List.of("job", "resume_summary", "jd_summary"));
+        Map<String, Object> retrieval = new LinkedHashMap<>();
+        retrieval.put("topK", 10);
+        retrieval.put("filters", filters);
+        payload.put("retrieval", retrieval);
+        return payload;
+    }
+
+    private Map<String, Object> buildSafeResumeSummary(ResumeParsedData resumeData) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        if (resumeData == null) {
+            return summary;
+        }
+        summary.put("target_role", resumeData.getTargetRole());
+        summary.put("current_role", resumeData.getCurrentRole());
+        summary.put("experience_years", resumeData.getExperienceYears());
+        summary.put("skills", safeStringList(resumeData.getSkills()));
+        summary.put("match_score", resumeData.getMatchScore());
+        return summary;
+    }
+
+    private Map<String, Object> buildJobCandidate(JobCategory job) {
+        Map<String, Object> candidate = new LinkedHashMap<>();
+        candidate.put("id", job.getId());
+        candidate.put("categoryCode", job.getJobCategoryCode());
+        candidate.put("baseCategoryCode", extractBaseCategoryCode(job.getJobCategoryCode()));
+        candidate.put("name", job.getJobCategoryName());
+        candidate.put("level", job.getJobLevel());
+        candidate.put("levelName", job.getJobLevelName());
+        candidate.put("requiredSkills", parseJsonToList(job.getRequiredSkills()));
+        candidate.put("description", job.getJobDescription());
+        candidate.put("profile", job.getJobProfile());
+        candidate.put("salaryRange", formatSalaryRange(job));
+        return candidate;
+    }
+
+    private RoadmapRagResult parseRoadmapRagResult(JsonNode rootNode, List<JobCategory> allJobs) {
+        if (rootNode == null || !rootNode.isObject()) {
+            throw new IllegalArgumentException("Python Roadmap-RAG response must be an object");
+        }
+        JsonNode lateralPathsNode = rootNode.get("lateralPaths");
+        if (lateralPathsNode == null || !lateralPathsNode.isArray()) {
+            throw new IllegalArgumentException("Python Roadmap-RAG response missing lateralPaths array");
+        }
 
         List<CareerPathRecommendationVO.LateralPathRecommendationVO> recommendations = new ArrayList<>();
-
-        try {
-            // 构建RAG提示词
-            StringBuilder jobDatabase = new StringBuilder();
-            jobDatabase.append("# 职业数据库\n\n");
-
-            // 按类别分组，每类只取一个代表性岗位
-            Map<String, JobCategory> representativeJobs = new HashMap<>();
-            for (JobCategory job : allJobs) {
-                String baseCode = extractBaseCategoryCode(job.getJobCategoryCode());
-                if (!representativeJobs.containsKey(baseCode)) {
-                    representativeJobs.put(baseCode, job);
-                }
+        for (JsonNode recNode : lateralPathsNode) {
+            if (recNode == null || !recNode.isObject()) {
+                continue;
             }
-
-            representativeJobs.values().forEach(job -> {
-                jobDatabase.append(String.format("- %s: %s\n  级别: %s\n  技能要求: %s\n\n",
-                        extractBaseCategoryCode(job.getJobCategoryCode()),
-                        job.getJobCategoryName(),
-                        job.getJobLevelName(),
-                        job.getRequiredSkills()));
-            });
-
-            // 构建用户画像
-            String userProfile = String.format("""
-                            # 用户画像
-                            
-                            当前岗位: %s
-                            技能列表: %s
-                            工作年限: %s
-                            目标岗位: %s
-                            """,
-                    currentJob,
-                    String.join(", ", userSkills != null ? userSkills : new ArrayList<>()),
-                    resumeData != null && resumeData.getExperienceYears() != null ? resumeData.getExperienceYears() + "年" : "未知",
-                    resumeData != null && resumeData.getTargetRole() != null ? resumeData.getTargetRole() : "未设置");
-
-            String systemPrompt = """
-                    你是一位资深的职业规划顾问。基于提供的职业数据库和用户画像，为用户推荐10条可行的横向换岗（转型）路径。
-
-                    要求：
-                    1. 推荐的路径必须来自提供的职业数据库
-                    2. 考虑用户当前技能与目标岗位的匹配度
-                    3. 评估转型难度（1-5分，5分最难）
-                    4. 列出需要补充的技能
-                    5. 给出AI推荐理由
-
-                    请严格按以下JSON格式返回，不要包含任何markdown标记：
-                    {
-                        "recommendations": [
-                            {
-                                "targetCategoryCode": "目标类别编码",
-                                "targetJobName": "目标岗位名称",
-                                "matchScore": 0.85,
-                                "transitionDifficulty": 3,
-                                "estimatedMonths": 12,
-                                "requiredSkills": ["需要补充的技能1", "技能2"],
-                                "possessedSkills": ["用户已有的技能1", "技能2"],
-                                "aiRecommendationReason": "推荐理由"
-                            }
-                        ]
-                    }
-                    """;
-
-            String userPrompt = jobDatabase.toString() + "\n" + userProfile + "\n\n请基于以上信息推荐横向换岗路径。";
-
-            // 调用大模型
-            ChatResponse response = chatClient.prompt()
-                    .system(systemPrompt)
-                    .user(userPrompt)
-                    .call()
-                    .chatResponse();
-
-            String aiResponse = response.getResult().getOutput().getText();
-            log.info("AI换岗推荐响应: {}", aiResponse);
-
-            // 解析AI响应
-            JsonNode rootNode = objectMapper.readTree(cleanJsonResponse(aiResponse));
-            JsonNode recommendationsNode = rootNode.get("recommendations");
-
-            if (recommendationsNode != null && recommendationsNode.isArray()) {
-                for (JsonNode recNode : recommendationsNode) {
-                    String categoryCode = getStringValue(recNode, "targetCategoryCode", "");
-                    String jobName = getStringValue(recNode, "targetJobName", "");
-
-                    // 查找对应岗位的详细信息
-                    JobCategory targetJob = representativeJobs.get(categoryCode);
-                    if (targetJob == null) {
-                        // 从allJobs中查找
-                        targetJob = allJobs.stream()
-                                .filter(j -> extractBaseCategoryCode(j.getJobCategoryCode()).equals(categoryCode))
-                                .findFirst()
-                                .orElse(null);
-                    }
-
-                    if (targetJob != null) {
-                        // 获取该类别下的所有级别作为路径节点
-                        String finalCategoryCode = categoryCode;
-                        List<JobCategory> pathJobs = allJobs.stream()
-                                .filter(j -> extractBaseCategoryCode(j.getJobCategoryCode()).equals(finalCategoryCode))
-                                .sorted(Comparator.comparingInt(j -> LEVEL_ORDER.indexOf(j.getJobLevel())))
-                                .collect(Collectors.toList());
-
-                        List<CareerPathRecommendationVO.PathNodeVO> pathNodes = pathJobs.stream()
-                                .map(j -> CareerPathRecommendationVO.PathNodeVO.builder()
-                                        .id(String.valueOf(j.getId()))
-                                        .title(j.getJobCategoryName())
-                                        .levelName(j.getJobLevelName())
-                                        .salaryRange(formatSalaryRange(j))
-                                        .skills(parseJsonToList(j.getRequiredSkills()))
-                                        .isCurrentLevel(false)
-                                        .build())
-                                .collect(Collectors.toList());
-
-                        recommendations.add(CareerPathRecommendationVO.LateralPathRecommendationVO.builder()
-                                .targetJobId(targetJob.getId())
-                                .targetJobName(jobName)
-                                .targetCategoryCode(categoryCode)
-                                .matchScore(new BigDecimal(getStringValue(recNode, "matchScore", "0.7")))
-                                .transitionDifficulty(recNode.get("transitionDifficulty").asInt(3))
-                                .estimatedMonths(recNode.get("estimatedMonths").asInt(12))
-                                .requiredSkills(parseJsonArrayNode(recNode.get("requiredSkills")))
-                                .possessedSkills(parseJsonArrayNode(recNode.get("possessedSkills")))
-                                .aiRecommendationReason(getStringValue(recNode, "aiRecommendationReason", "基于您的技能背景推荐"))
-                                .pathNodes(pathNodes)
-                                .build());
-                    }
-                }
-            }
-
-        } catch (Exception e) {
-            log.error("生成横向换岗推荐失败: {}", e.getMessage(), e);
+            recommendations.add(mapPythonRoadmapRecommendation(recNode, allJobs));
         }
 
-        // 如果AI推荐不足2条，补充基于相似度的推荐
-        if (recommendations.size() < 2) {
-            recommendations.addAll(generateFallbackLateralRecommendations(currentJob, userSkills, allJobs, recommendations));
+        Map<String, Object> diagnostics = sanitizeDiagnostics(rootNode.get("diagnostics"));
+        return new RoadmapRagResult(recommendations, diagnostics);
+    }
+
+    private CareerPathRecommendationVO.LateralPathRecommendationVO mapPythonRoadmapRecommendation(
+            JsonNode recNode, List<JobCategory> allJobs) {
+        String categoryCode = getOptionalTextValue(recNode, "targetCategoryCode", "");
+        Long targetJobId = getLongValue(recNode, "targetJobId");
+        JobCategory targetJob = findTargetJob(targetJobId, categoryCode, allJobs);
+        if (targetJob == null) {
+            throw new IllegalArgumentException("Python Roadmap-RAG returned unknown target job");
         }
 
-        return recommendations;
+        String pathCategoryCode = !categoryCode.isBlank() ? categoryCode : extractBaseCategoryCode(targetJob.getJobCategoryCode());
+        List<CareerPathRecommendationVO.PathNodeVO> pathNodes = buildPathNodes(pathCategoryCode, allJobs);
+        JsonNode evidenceNode = recNode.get("evidence");
+        if (evidenceNode != null && !evidenceNode.isArray()) {
+            throw new IllegalArgumentException("Python Roadmap-RAG evidence must be an array");
+        }
+
+        return CareerPathRecommendationVO.LateralPathRecommendationVO.builder()
+                .targetJobId(targetJob.getId())
+                .targetJobName(getOptionalTextValue(recNode, "targetJobName", targetJob.getJobCategoryName()))
+                .targetCategoryCode(pathCategoryCode)
+                .matchScore(BigDecimal.valueOf(getNumberValue(recNode, "matchScore", 0.7)))
+                .transitionDifficulty(getIntValue(recNode, "transitionDifficulty", 3))
+                .estimatedMonths(getIntValue(recNode, "estimatedMonths", 12))
+                .requiredSkills(parseStrictStringArray(recNode.get("requiredSkills"), "requiredSkills"))
+                .possessedSkills(parseStrictStringArray(recNode.get("possessedSkills"), "possessedSkills"))
+                .aiRecommendationReason(getOptionalTextValue(recNode, "aiRecommendationReason", "基于 Roadmap-RAG 证据推荐"))
+                .pathNodes(pathNodes)
+                .evidence(sanitizeEvidenceArray(evidenceNode))
+                .build();
+    }
+
+    private JobCategory findTargetJob(Long targetJobId, String categoryCode, List<JobCategory> allJobs) {
+        if (targetJobId != null) {
+            Optional<JobCategory> byId = allJobs.stream()
+                    .filter(job -> targetJobId.equals(job.getId()))
+                    .findFirst();
+            if (byId.isPresent()) {
+                return byId.get();
+            }
+        }
+        if (categoryCode == null || categoryCode.isBlank()) {
+            return null;
+        }
+        return allJobs.stream()
+                .filter(job -> extractBaseCategoryCode(job.getJobCategoryCode()).equals(categoryCode))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private List<CareerPathRecommendationVO.PathNodeVO> buildPathNodes(String categoryCode, List<JobCategory> allJobs) {
+        return allJobs.stream()
+                .filter(job -> extractBaseCategoryCode(job.getJobCategoryCode()).equals(categoryCode))
+                .sorted(Comparator.comparingInt(job -> levelOrderIndex(job.getJobLevel())))
+                .map(job -> CareerPathRecommendationVO.PathNodeVO.builder()
+                        .id(String.valueOf(job.getId()))
+                        .title(job.getJobCategoryName())
+                        .levelName(job.getJobLevelName())
+                        .salaryRange(formatSalaryRange(job))
+                        .skills(parseJsonToList(job.getRequiredSkills()))
+                        .isCurrentLevel(false)
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    private List<Map<String, Object>> sanitizeEvidenceArray(JsonNode evidenceNode) {
+        List<Map<String, Object>> evidence = new ArrayList<>();
+        if (evidenceNode == null || evidenceNode.isNull()) {
+            return evidence;
+        }
+        for (JsonNode item : evidenceNode) {
+            if (item == null || !item.isObject()) {
+                throw new IllegalArgumentException("Python Roadmap-RAG evidence item must be an object");
+            }
+            Map<String, Object> value = new LinkedHashMap<>();
+            putOptionalText(value, item, "documentType");
+            putOptionalLong(value, item, "jobId");
+            putOptionalText(value, item, "chunkId");
+            putOptionalNumber(value, item, "score");
+            putOptionalText(value, item, "source");
+            evidence.add(value);
+        }
+        return evidence;
+    }
+
+    private Map<String, Object> sanitizeDiagnostics(JsonNode diagnosticsNode) {
+        if (diagnosticsNode == null || !diagnosticsNode.isObject()) {
+            throw new IllegalArgumentException("Python Roadmap-RAG response diagnostics must be an object");
+        }
+
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        JsonNode queriesNode = diagnosticsNode.get("queries");
+        if (queriesNode != null && !queriesNode.isNull()) {
+            if (!queriesNode.isArray()) {
+                throw new IllegalArgumentException("Python Roadmap-RAG diagnostics.queries must be an array");
+            }
+            List<String> queries = new ArrayList<>();
+            for (JsonNode queryNode : queriesNode) {
+                if (!queryNode.isTextual()) {
+                    throw new IllegalArgumentException("Python Roadmap-RAG diagnostics.queries must contain strings");
+                }
+                queries.add(redactSensitive(queryNode.asText()));
+            }
+            diagnostics.put("queries", queries);
+        }
+
+        JsonNode filtersNode = diagnosticsNode.get("filters");
+        if (filtersNode != null && !filtersNode.isNull()) {
+            if (!filtersNode.isObject()) {
+                throw new IllegalArgumentException("Python Roadmap-RAG diagnostics.filters must be an object");
+            }
+            Map<String, Object> filters = new LinkedHashMap<>();
+            JsonNode excludeSameCategoryNode = filtersNode.get("excludeSameCategory");
+            if (excludeSameCategoryNode != null && !excludeSameCategoryNode.isNull()) {
+                if (!excludeSameCategoryNode.isBoolean()) {
+                    throw new IllegalArgumentException("Python Roadmap-RAG diagnostics.filters.excludeSameCategory must be a boolean");
+                }
+                filters.put("excludeSameCategory", excludeSameCategoryNode.asBoolean());
+            }
+            JsonNode documentTypesNode = filtersNode.get("documentTypes");
+            if (documentTypesNode != null && !documentTypesNode.isNull()) {
+                filters.put("documentTypes", parseStrictStringArray(documentTypesNode, "diagnostics.filters.documentTypes"));
+            }
+            diagnostics.put("filters", filters);
+        }
+
+        copyOptionalDiagnosticText(diagnostics, diagnosticsNode, "fusion");
+        copyOptionalDiagnosticText(diagnostics, diagnosticsNode, "reranker");
+        JsonNode candidateCountNode = diagnosticsNode.get("candidateCount");
+        if (candidateCountNode != null && !candidateCountNode.isNull()) {
+            if (!candidateCountNode.isIntegralNumber() || !candidateCountNode.canConvertToInt()) {
+                throw new IllegalArgumentException("Python Roadmap-RAG diagnostics.candidateCount must be an integer");
+            }
+            diagnostics.put("candidateCount", candidateCountNode.asInt());
+        }
+        return diagnostics;
+    }
+
+    private RoadmapRagResult fallbackRoadmapRagResult(String currentJob, List<String> userSkills, List<JobCategory> allJobs) {
+        List<CareerPathRecommendationVO.LateralPathRecommendationVO> fallback =
+                generateFallbackLateralRecommendations(currentJob, userSkills, allJobs, new ArrayList<>());
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        diagnostics.put("fusion", "local-similarity-fallback");
+        diagnostics.put("reranker", "local-deterministic");
+        diagnostics.put("candidateCount", allJobs != null ? allJobs.size() : 0);
+        diagnostics.put("filters", Map.of("excludeSameCategory", true));
+        diagnostics.put("queries", List.of(redactSensitive(currentJob != null ? currentJob : "")));
+        return new RoadmapRagResult(fallback, diagnostics);
     }
 
     /**
@@ -955,6 +1092,8 @@ public class RoadmapServiceImpl implements RoadmapService {
         Set<String> existingCategories = existing.stream()
                 .map(CareerPathRecommendationVO.LateralPathRecommendationVO::getTargetCategoryCode)
                 .collect(Collectors.toSet());
+        String currentBaseCategory = inferCurrentBaseCategory(currentJob, allJobs);
+        List<String> sanitizedUserSkills = safeStringList(userSkills);
 
         // 按类别分组，计算每个类别的平均相似度
         Map<String, List<JobCategory>> jobsByCategory = allJobs.stream()
@@ -963,6 +1102,7 @@ public class RoadmapServiceImpl implements RoadmapService {
         List<Map.Entry<String, BigDecimal>> categoryScores = new ArrayList<>();
         for (Map.Entry<String, List<JobCategory>> entry : jobsByCategory.entrySet()) {
             if (existingCategories.contains(entry.getKey())) continue;
+            if (!currentBaseCategory.isBlank() && currentBaseCategory.equals(entry.getKey())) continue;
 
             BigDecimal avgScore = entry.getValue().stream()
                     .map(j -> calculateJobSimilarity(currentJob, userSkills, j))
@@ -983,7 +1123,7 @@ public class RoadmapServiceImpl implements RoadmapService {
 
             JobCategory representative = categoryJobs.get(0);
             List<CareerPathRecommendationVO.PathNodeVO> pathNodes = categoryJobs.stream()
-                    .sorted(Comparator.comparingInt(j -> LEVEL_ORDER.indexOf(j.getJobLevel())))
+                    .sorted(Comparator.comparingInt(j -> levelOrderIndex(j.getJobLevel())))
                     .map(j -> CareerPathRecommendationVO.PathNodeVO.builder()
                             .id(String.valueOf(j.getId()))
                             .title(j.getJobCategoryName())
@@ -1002,13 +1142,162 @@ public class RoadmapServiceImpl implements RoadmapService {
                     .transitionDifficulty(3)
                     .estimatedMonths(12)
                     .requiredSkills(parseJsonToList(representative.getRequiredSkills()))
-                    .possessedSkills(userSkills != null ? userSkills : new ArrayList<>())
+                    .possessedSkills(sanitizedUserSkills)
                     .aiRecommendationReason("基于您的技能背景，该岗位与您的经验有一定关联，转型难度适中。")
                     .pathNodes(pathNodes)
                     .build());
         }
 
         return fallback;
+    }
+
+    private String inferCurrentBaseCategory(String currentJob, List<JobCategory> allJobs) {
+        if (currentJob == null || currentJob.isBlank() || allJobs == null || allJobs.isEmpty()) {
+            return "";
+        }
+        return allJobs.stream()
+                .filter(job -> isJobMatch(currentJob, job))
+                .map(job -> extractBaseCategoryCode(job.getJobCategoryCode()))
+                .filter(code -> code != null && !code.isBlank())
+                .findFirst()
+                .orElse("");
+    }
+
+    private int levelOrderIndex(String level) {
+        int index = LEVEL_ORDER.indexOf(level);
+        return index >= 0 ? index : LEVEL_ORDER.size();
+    }
+
+    private List<String> safeStringList(List<String> values) {
+        if (values == null) {
+            return new ArrayList<>();
+        }
+        return values.stream()
+                .filter(Objects::nonNull)
+                .filter(value -> !value.isBlank())
+                .map(this::redactSensitive)
+                .collect(Collectors.toList());
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> objectMap(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        return objectMapper.convertValue(node, Map.class);
+    }
+
+    private Long getLongValue(JsonNode node, String fieldName) {
+        JsonNode fieldNode = node.get(fieldName);
+        if (fieldNode == null || fieldNode.isNull()) {
+            return null;
+        }
+        if (!fieldNode.isIntegralNumber() || !fieldNode.canConvertToLong()) {
+            throw new IllegalArgumentException("Python Roadmap-RAG " + fieldName + " must be an integer");
+        }
+        return fieldNode.asLong();
+    }
+
+    private int getIntValue(JsonNode node, String fieldName, int defaultValue) {
+        JsonNode fieldNode = node.get(fieldName);
+        if (fieldNode == null || fieldNode.isNull()) {
+            return defaultValue;
+        }
+        if (!fieldNode.isIntegralNumber() || !fieldNode.canConvertToInt()) {
+            throw new IllegalArgumentException("Python Roadmap-RAG " + fieldName + " must be an integer");
+        }
+        return fieldNode.asInt();
+    }
+
+    private double getNumberValue(JsonNode node, String fieldName, double defaultValue) {
+        JsonNode fieldNode = node.get(fieldName);
+        if (fieldNode == null || fieldNode.isNull()) {
+            return defaultValue;
+        }
+        if (!fieldNode.isNumber()) {
+            throw new IllegalArgumentException("Python Roadmap-RAG " + fieldName + " must be a number");
+        }
+        return fieldNode.asDouble();
+    }
+
+    private String getOptionalTextValue(JsonNode node, String fieldName, String defaultValue) {
+        JsonNode fieldNode = node.get(fieldName);
+        if (fieldNode == null || fieldNode.isNull()) {
+            return defaultValue;
+        }
+        if (!fieldNode.isTextual()) {
+            throw new IllegalArgumentException("Python Roadmap-RAG " + fieldName + " must be a string");
+        }
+        return redactSensitive(fieldNode.asText(defaultValue));
+    }
+
+    private List<String> parseStrictStringArray(JsonNode node, String fieldName) {
+        List<String> result = new ArrayList<>();
+        if (node == null || node.isNull()) {
+            return result;
+        }
+        if (!node.isArray()) {
+            throw new IllegalArgumentException("Python Roadmap-RAG " + fieldName + " must be an array");
+        }
+        for (JsonNode item : node) {
+            if (!item.isTextual()) {
+                throw new IllegalArgumentException("Python Roadmap-RAG " + fieldName + " must contain strings");
+            }
+            result.add(redactSensitive(item.asText()));
+        }
+        return result;
+    }
+
+    private void copyOptionalDiagnosticText(Map<String, Object> target, JsonNode source, String fieldName) {
+        JsonNode fieldNode = source.get(fieldName);
+        if (fieldNode == null || fieldNode.isNull()) {
+            return;
+        }
+        if (!fieldNode.isTextual()) {
+            throw new IllegalArgumentException("Python Roadmap-RAG diagnostics." + fieldName + " must be a string");
+        }
+        target.put(fieldName, redactSensitive(fieldNode.asText()));
+    }
+
+    private void putOptionalText(Map<String, Object> target, JsonNode source, String fieldName) {
+        JsonNode fieldNode = source.get(fieldName);
+        if (fieldNode == null || fieldNode.isNull()) {
+            return;
+        }
+        if (!fieldNode.isTextual()) {
+            throw new IllegalArgumentException("Python Roadmap-RAG evidence." + fieldName + " must be a string");
+        }
+        target.put(fieldName, redactSensitive(fieldNode.asText()));
+    }
+
+    private void putOptionalLong(Map<String, Object> target, JsonNode source, String fieldName) {
+        JsonNode fieldNode = source.get(fieldName);
+        if (fieldNode == null || fieldNode.isNull()) {
+            return;
+        }
+        if (!fieldNode.isIntegralNumber() || !fieldNode.canConvertToLong()) {
+            throw new IllegalArgumentException("Python Roadmap-RAG evidence." + fieldName + " must be an integer");
+        }
+        target.put(fieldName, fieldNode.asLong());
+    }
+
+    private void putOptionalNumber(Map<String, Object> target, JsonNode source, String fieldName) {
+        JsonNode fieldNode = source.get(fieldName);
+        if (fieldNode == null || fieldNode.isNull()) {
+            return;
+        }
+        if (!fieldNode.isNumber()) {
+            throw new IllegalArgumentException("Python Roadmap-RAG evidence." + fieldName + " must be a number");
+        }
+        target.put(fieldName, fieldNode.asDouble());
+    }
+
+    private String redactSensitive(String value) {
+        String redacted = value == null ? "" : value;
+        for (String pattern : SENSITIVE_PATTERNS) {
+            redacted = redacted.replaceAll(pattern, "[REDACTED]");
+        }
+        return redacted;
     }
 
     /**
@@ -1063,6 +1352,11 @@ public class RoadmapServiceImpl implements RoadmapService {
         }
 
         return cleaned.trim();
+    }
+
+    private record RoadmapRagResult(
+            List<CareerPathRecommendationVO.LateralPathRecommendationVO> lateralPaths,
+            Map<String, Object> diagnostics) {
     }
 
     // ==================== New methods for CareerMap frontend ====================

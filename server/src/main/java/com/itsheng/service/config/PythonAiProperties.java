@@ -62,6 +62,11 @@ public class PythonAiProperties {
     private Integer dashboardTimeoutSeconds;
 
     /**
+     * Roadmap-RAG 个性化推荐超时时间（秒）
+     */
+    private Integer roadmapTimeoutSeconds;
+
+    /**
      * Whether to register the legacy /ai/chat debug endpoint.
      */
     private boolean debugChatEndpointEnabled = false;
@@ -121,6 +126,12 @@ public class PythonAiProperties {
         Integer legacyEnvValue = readPositiveEnv("FUCHUANG_PYTHON_AI_DASHBOARD_TIMEOUT_SECONDS");
         Integer envValue = readPositiveEnv("FUCHUANG_AI_PYTHON_DASHBOARD_TIMEOUT_SECONDS");
         return firstPositive(envValue, legacyEnvValue, dashboardTimeoutSeconds, timeoutSeconds, 30);
+    }
+
+    public Integer getRoadmapTimeoutSeconds() {
+        Integer legacyEnvValue = readPositiveEnv("FUCHUANG_PYTHON_AI_ROADMAP_TIMEOUT_SECONDS");
+        Integer envValue = readPositiveEnv("FUCHUANG_AI_PYTHON_ROADMAP_TIMEOUT_SECONDS");
+        return firstPositive(envValue, legacyEnvValue, roadmapTimeoutSeconds, timeoutSeconds, 8);
     }
 
     public boolean isDebugChatEndpointEnabled() {

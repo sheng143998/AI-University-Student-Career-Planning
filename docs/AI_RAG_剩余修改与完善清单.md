@@ -17,7 +17,7 @@
 | Goals | `ai-rag-goals-advice-python-rag` | 1 | `e0d6ae6 feat: route goals advice through python rag` | 本地闭环待合并决策 |
 | Reports | `ai-rag-reports-python-rag` | 2 | `958fcd9 test: close reports rag post-commit gate` | 本地闭环待合并决策 |
 | Resume | `ai-rag-resume-python-rag` | 1 | `2f60cde feat: route resume analysis through python rag` | 本地闭环待合并决策 |
-| Roadmap | `ai-rag-roadmap-python-rag` | 3 | `9b10a7a test: harden roadmap current-job cache handling` | 本地闭环待合并决策 |
+| Roadmap | `ai-rag-roadmap-python-rag` | 3 | `9b10a7a test: harden roadmap current-job cache handling` | 已迁移进 `ai-rag-integration-20260613` 工作区，待最终提交/全量门禁 |
 
 ## P0：必须先处理的风险
 
@@ -34,14 +34,14 @@
 
 ### 2. 所有本地闭环分支仍未 push/merge/PR
 
-Resume、Reports、Goals、Dashboard、Chat 已经在 `ai-rag-integration-20260613` 中有统一 `ai-service/` 方向的集成痕迹，其中 Dashboard 已于 2026-06-14 迁入 8090 聚合服务并通过 Python/Java 窄测。Roadmap 仍停留在旧 `ai_service/` 分支实现中，尚未迁入统一集成分支。主分支和远端仍没有真正获得这些改动。
+Resume、Reports、Goals、Dashboard、Chat 已经在 `ai-rag-integration-20260613` 中有统一 `ai-service/` 方向的集成痕迹，其中 Dashboard 已于 2026-06-14 迁入 8090 聚合服务并通过 Python/Java 窄测。Roadmap 也已于 2026-06-14 迁入 `ai-service` 聚合入口并通过 Python/Java/前端构建验证，但仍未进入 `master`。主分支和远端仍没有真正获得这些改动。
 
 需要决定每个分支的处理方式：
 
 - push 到远端并开 PR。
 - cherry-pick 到一个集成分支。
 - 先废弃部分分支，只保留最稳定的实现。
-- 重新按统一 Python 服务目录合并后再提交；Roadmap 是当前剩余最大分支未合并风险。
+- 重新按统一 Python 服务目录合并后再提交；Roadmap 已完成集成 worktree 迁移，仍需提交、推送/PR 或最终合并决策。
 
 ### 3. Java + Python + DB + Redis + OSS/JWT 端到端 smoke 基本都未跑
 
@@ -78,7 +78,7 @@ Resume、Reports、Goals、Dashboard、Chat 已经在 `ai-rag-integration-202606
 - `ai_service/`
 - `ai-service/`
 
-集成分支新增能力应统一落到 `ai-service/`。Dashboard 已按此规则迁移；Roadmap/Market 仍需继续迁移，不能把新增能力继续留在旧 `ai_service/`。统一布局为：
+集成分支新增能力应统一落到 `ai-service/`。Dashboard 与 Roadmap 已按此规则迁移；Market 仍需继续迁移，不能把新增能力继续留在旧 `ai_service/`。统一布局为：
 
 - `app/`：HTTP 入口。
 - `rag/`：chunker、summary index、retriever、fusion、reranker。

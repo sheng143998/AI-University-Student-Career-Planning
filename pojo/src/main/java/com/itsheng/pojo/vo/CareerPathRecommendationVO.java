@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 个性化职业路径推荐 VO
@@ -36,6 +37,11 @@ public class CareerPathRecommendationVO {
      * 推荐生成时间
      */
     private String generatedAt;
+
+    /**
+     * Roadmap-RAG 检索诊断信息
+     */
+    private Map<String, Object> ragDiagnostics;
 
     /**
      * 垂直晋升路径推荐详情
@@ -133,6 +139,11 @@ public class CareerPathRecommendationVO {
          * 转型路径节点
          */
         private List<PathNodeVO> pathNodes;
+
+        /**
+         * Roadmap-RAG 证据引用
+         */
+        private List<Map<String, Object>> evidence;
     }
 
     /**

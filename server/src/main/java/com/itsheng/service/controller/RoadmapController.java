@@ -141,7 +141,8 @@ public class RoadmapController {
     @Operation(summary = "保存当前岗位", description = "保存用户手动设置的当前岗位到 Redis")
     public Result<String> saveUserCurrentJob(@RequestBody Map<String, String> request) {
         String currentJob = request.get("currentJob");
-        log.info("保存用户当前岗位: {}", currentJob);
+        log.info("保存用户当前岗位: currentJobPresent={}, currentJobLength={}",
+                currentJob != null && !currentJob.isBlank(), currentJob == null ? 0 : currentJob.length());
         roadmapService.saveUserCurrentJob(currentJob);
         return Result.success("当前岗位保存成功");
     }
@@ -153,7 +154,8 @@ public class RoadmapController {
     @Operation(summary = "获取当前岗位", description = "获取用户手动设置的当前岗位")
     public Result<String> getUserCurrentJob() {
         String currentJob = roadmapService.getUserCurrentJob();
-        log.info("获取用户当前岗位: {}", currentJob);
+        log.info("获取用户当前岗位: currentJobPresent={}, currentJobLength={}",
+                currentJob != null && !currentJob.isBlank(), currentJob == null ? 0 : currentJob.length());
         return Result.success(currentJob);
     }
 }
