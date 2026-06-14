@@ -8,16 +8,16 @@
 
 当前主工作区 `C:\Users\WhenJayHe\IdeaProjects\AI-University-Student-Career-Planning` 已恢复为 clean，且 `master` 与 `origin/master` 同步在 `313b9be`。历史脏改已备份到 `C:\Users\WhenJayHe\IdeaProjects\AI-University-Student-Career-Planning-backups\main-dirty-20260613-013812`。当前主要风险已经从“主工作区脏改”转为“多个隔离分支尚未合并/归档”。
 
-多个 AI/RAG 功能已经在隔离 worktree 中完成本地闭环，但还没有 push、merge 或开 PR：
+多个 AI/RAG 功能已经在隔离 worktree 中完成本地闭环，但还没有 push、merge 或开 PR。当前统一候选集成分支为 `ai-rag-integration-20260613`，HEAD 为 `2ceba44 feat: integrate roadmap rag into ai service`，相对 `origin/master` ahead 13：
 
 | 模块 | 隔离分支 | ahead | 最新提交 | 状态 |
 | --- | --- | ---: | --- | --- |
-| Chat | `ai-rag-chat-python-boundary` | 3 | `46451df test: verify chat debug env binding` | 本地闭环待合并决策 |
-| Dashboard | `ai-rag-dashboard-target-job-match` | 1 | `713eb90 feat: route dashboard target matching through python rag` | 已迁移进 `ai-rag-integration-20260613` 工作区，待最终提交/全量门禁 |
-| Goals | `ai-rag-goals-advice-python-rag` | 1 | `e0d6ae6 feat: route goals advice through python rag` | 本地闭环待合并决策 |
-| Reports | `ai-rag-reports-python-rag` | 2 | `958fcd9 test: close reports rag post-commit gate` | 本地闭环待合并决策 |
-| Resume | `ai-rag-resume-python-rag` | 1 | `2f60cde feat: route resume analysis through python rag` | 本地闭环待合并决策 |
-| Roadmap | `ai-rag-roadmap-python-rag` | 3 | `9b10a7a test: harden roadmap current-job cache handling` | 已迁移进 `ai-rag-integration-20260613` 工作区，待最终提交/全量门禁 |
+| Chat | `ai-rag-chat-python-boundary` | 3 | `46451df test: verify chat debug env binding` | 功能已进入 `ai-rag-integration-20260613`，旧分支待归档/删除决策 |
+| Dashboard | `ai-rag-dashboard-target-job-match` | 1 | `713eb90 feat: route dashboard target matching through python rag` | 已迁移进 `ai-rag-integration-20260613` 的 `ai-service/`，旧 `ai_service/**` 分支不直接合并 |
+| Goals | `ai-rag-goals-advice-python-rag` | 1 | `e0d6ae6 feat: route goals advice through python rag` | 功能已进入 `ai-rag-integration-20260613`，旧 `ai_service/**` 分支不直接合并 |
+| Reports | `ai-rag-reports-python-rag` | 2 | `958fcd9 test: close reports rag post-commit gate` | patch 等价已进入 `ai-rag-integration-20260613` |
+| Resume | `ai-rag-resume-python-rag` | 1 | `2f60cde feat: route resume analysis through python rag` | 已迁移进 `ai-rag-integration-20260613` 的 `ai-service/`，旧 `ai_service/**` 分支不直接合并 |
+| Roadmap | `ai-rag-roadmap-python-rag` | 3 | `9b10a7a test: harden roadmap current-job cache handling` | 核心能力已迁入 `ai-rag-integration-20260613`；旧分支的 `JwtTokenInterceptor.java` 与 `Roadmap.vue` 未覆盖，需单独评估 |
 
 ## P0：必须先处理的风险
 
@@ -34,14 +34,14 @@
 
 ### 2. 所有本地闭环分支仍未 push/merge/PR
 
-Resume、Reports、Goals、Dashboard、Chat 已经在 `ai-rag-integration-20260613` 中有统一 `ai-service/` 方向的集成痕迹，其中 Dashboard 已于 2026-06-14 迁入 8090 聚合服务并通过 Python/Java 窄测。Roadmap 也已于 2026-06-14 迁入 `ai-service` 聚合入口并通过 Python/Java/前端构建验证，但仍未进入 `master`。主分支和远端仍没有真正获得这些改动。
+Resume、Reports、Goals、Dashboard、Chat、Roadmap、Feedback queue 与统一配置文档已经在 `ai-rag-integration-20260613` 中收敛到统一 `ai-service/` 方向。Roadmap 已于 `2ceba44` 迁入 `ai-service` 聚合入口，并通过 Python `67 passed`、Java server `88 tests`、前端 build 与子 Agent 复验。但这些改动仍未进入 `master`，也未推送到 GitHub/GitLab。
 
 需要决定每个分支的处理方式：
 
-- push 到远端并开 PR。
-- cherry-pick 到一个集成分支。
-- 先废弃部分分支，只保留最稳定的实现。
-- 重新按统一 Python 服务目录合并后再提交；Roadmap 已完成集成 worktree 迁移，仍需提交、推送/PR 或最终合并决策。
+- 推送 `ai-rag-integration-20260613` 到远端并开 PR/MR。
+- 不再直接 merge 旧 `ai_service/**` 分支；旧分支以 `tests-log/ai-rag-automation/2026-06-14-1125-ai-rag-branch-coverage-audit.md` 的覆盖矩阵为归档依据。
+- 旧 Roadmap 分支中的 `JwtTokenInterceptor.java` 与 `website/src/views/Roadmap.vue` 不随集成分支进入，需要时另起最小任务重审。
+- 合并到 `master` 前先完成 runtime smoke 或明确记录无法运行原因。
 
 ### 3. Java + Python + DB + Redis + OSS/JWT 端到端 smoke 基本都未跑
 
@@ -141,28 +141,31 @@ Resume 分支已完成 Python fallback RAG，但仍有后续完善项：
 
 ### 11. 测试日志和 Obsidian 记录需要统一索引
 
-现在已有多份 `tests-log/ai-rag-automation/*.md` 和 Obsidian 使用记录，但还缺一个总索引：
+现在已有多份 `tests-log/ai-rag-automation/*.md` 和 Obsidian 使用记录。`tests-log/ai-rag-automation/2026-06-14-1125-ai-rag-branch-coverage-audit.md` 已作为分支覆盖审计索引，后续仍需要在 PR/MR 合并前后维护最终总索引：
 
 - 每个接口文档对应哪个分支、哪个提交、哪份测试日志。
 - 哪些分支已合并，哪些只是本地闭环。
 - 哪些 runtime smoke 未执行。
 - 哪些测试是 fallback 级别，哪些是真实服务级别。
 
-### 12. 配置命名和端口需要最终定稿
+### 12. 配置命名和端口已形成当前定稿，仍需随 PR/MR 复核
 
-已有端口分工大致如下，但还需要写入统一配置说明：
+当前端口分工已经写入 `docs/AI_RAG_配置与端口说明.md`，并按 `ai-rag-integration-20260613` 的实际代码复核：
 
 - Java backend：`8081`
 - Resume Python：`8091`
 - Chat Python：`8092`
-- 其他 Python RAG 服务：需要明确是否聚合到一个服务，还是每个模块独立端口。
+- 聚合 Python RAG 服务：`8090`，当前承载 Reports、Goals、Dashboard、Roadmap、Feedback 与偏好校验。
 
-还要统一环境变量优先级，例如：
+已记录的主要环境变量包括：
 
 - `FUCHUANG_AI_PYTHON_BASE_URL`
 - `FUCHUANG_AI_PYTHON_RESUME_BASE_URL`
 - `FUCHUANG_AI_PYTHON_CHAT_BASE_URL`
+- `FUCHUANG_AI_PYTHON_REPORTS_BASE_URL`
 - 各模块 timeout 配置。
+
+剩余风险不是“端口未定稿”，而是合并前仍需用真实 Java `8081` + Python `8090/8091/8092` + Redis + PostgreSQL/pgvector + JWT 环境做 runtime smoke，确认配置在运行时生效。
 
 ### 13. 需要补真实安全和隐私审计
 
@@ -179,17 +182,17 @@ Resume 分支已完成 Python fallback RAG，但仍有后续完善项：
 推荐顺序：
 
 1. 先冻结主工作区，不继续直接开发。
-2. 按模块选择最稳定的隔离分支。
-3. 每次只合并一个模块，先跑该模块测试，再跑全局 compile/build。
-4. 合并后建立一个统一 AI/RAG 总测试日志。
-5. 最后再做真实端到端 smoke。
+2. 以 `ai-rag-integration-20260613` 为唯一候选集成分支，不再逐个 merge 旧隔离分支。
+3. 推送集成分支并开 PR/MR，让远端保留可审查的 13 个提交。
+4. 合并前补真实端到端 smoke；如果无法运行，必须在 PR/MR 和测试日志中写明替代验证与剩余风险。
+5. 旧隔离分支只按覆盖矩阵归档，不能直接 merge 到 `master`。
 
 ## 建议下一步
 
 最优先不是继续写新功能，而是做一次“集成收敛”：
 
-1. 选择要先合并的隔离分支，建议从 Resume 或 Reports 开始，因为它们的测试日志和 gate 最完整。
-2. 清理或隔离主工作区脏改，避免污染合并。
-3. 统一 `ai_service/` 与 `ai-service/` 目录策略。
-4. 准备真实 runtime smoke 环境。
+1. 推送 `ai-rag-integration-20260613` 并开 PR/MR，而不是继续从旧分支 cherry-pick。
+2. 针对 PR/MR 运行 Java 8081 + Python 8090/8091/8092 + Redis/JWT 的最小 runtime smoke。
+3. 明确旧 Roadmap 分支的 `JwtTokenInterceptor.java` 和 `Roadmap.vue` 是否仍需要；需要则另起最小任务重审。
+4. PR/MR 通过后再合并到 `master`，并立即复跑 Python/Java/frontend 全量验证。
 5. 再推进 Market/JD ingestion、Interface 10 feedback/settings、生产级 pgvector/Dashscope/评估闭环。
