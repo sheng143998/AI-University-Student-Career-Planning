@@ -8,7 +8,7 @@
 
 当前主工作区 `C:\Users\WhenJayHe\IdeaProjects\AI-University-Student-Career-Planning` 已恢复为 clean，且 `master` 与 `origin/master` 同步在 `313b9be`。历史脏改已备份到 `C:\Users\WhenJayHe\IdeaProjects\AI-University-Student-Career-Planning-backups\main-dirty-20260613-013812`。当前主要风险已经从“主工作区脏改”转为“多个隔离分支尚未合并/归档”。
 
-多个 AI/RAG 功能已经在隔离 worktree 中完成本地闭环，但还没有 push、merge 或开 PR。当前统一候选集成分支为 `ai-rag-integration-20260613`，HEAD 为 `2ceba44 feat: integrate roadmap rag into ai service`，相对 `origin/master` ahead 13：
+多个 AI/RAG 功能已经在隔离 worktree 中完成本地闭环，但还没有 merge 到 `master`。当前统一候选集成分支为 `ai-rag-integration-20260613`；Roadmap 功能集成快照为 `2ceba44 feat: integrate roadmap rag into ai service`，其后的文档/审计收口提交会继续推进该分支，最终以远端分支 HEAD 和 PR/MR 为准：
 
 | 模块 | 隔离分支 | ahead | 最新提交 | 状态 |
 | --- | --- | ---: | --- | --- |
@@ -34,7 +34,7 @@
 
 ### 2. 所有本地闭环分支仍未 push/merge/PR
 
-Resume、Reports、Goals、Dashboard、Chat、Roadmap、Feedback queue 与统一配置文档已经在 `ai-rag-integration-20260613` 中收敛到统一 `ai-service/` 方向。Roadmap 已于 `2ceba44` 迁入 `ai-service` 聚合入口，并通过 Python `67 passed`、Java server `88 tests`、前端 build 与子 Agent 复验。但这些改动仍未进入 `master`，也未推送到 GitHub/GitLab。
+Resume、Reports、Goals、Dashboard、Chat、Roadmap、Feedback queue 与统一配置文档已经在 `ai-rag-integration-20260613` 中收敛到统一 `ai-service/` 方向。Roadmap 已于 `2ceba44` 迁入 `ai-service` 聚合入口，并通过 Python `67 passed`、Java server `88 tests`、前端 build 与子 Agent 复验；后续 `8b0329b` 及之后的提交仅收口文档和审计日志。这些改动仍未进入 `master`。
 
 需要决定每个分支的处理方式：
 

@@ -6,7 +6,8 @@
 - 集成 worktree：`C:\Users\WhenJayHe\IdeaProjects\AI-University-Student-Career-Planning-ai-rag-integration`
 - 基线：`origin/master` / `master` = `313b9be fix: tighten ai rag feedback ownership`
 - 集成分支：`ai-rag-integration-20260613`
-- 集成 HEAD：`2ceba44 feat: integrate roadmap rag into ai service`
+- Roadmap 功能集成快照：`2ceba44 feat: integrate roadmap rag into ai service`
+- 文档/审计收口提交：`8b0329b docs: refine ai rag branch coverage audit` 及后续仅文档修订提交；最终以远端分支 HEAD 为准。
 - GitLab 远端：`https://gitlab.com/yunqianqin-group/AI-University-Student-Career-Planning.git`
 
 ## 审计原因
@@ -16,8 +17,8 @@ Roadmap-RAG 已迁入统一 `ai-service/` 并提交到集成分支。完整目�
 ## 当前状态
 
 - 主工作区：`git status --short --branch` 输出 `## master...origin/master`，无普通脏改。
-- 集成 worktree：`git status --short --branch` 输出 `## ai-rag-integration-20260613...origin/master [ahead 13]`，无普通脏改。
-- 集成分支相对 `origin/master`：`git rev-list --left-right --count origin/master...HEAD` 输出 `0 13`。
+- Roadmap 功能集成提交后，集成 worktree 曾为 `## ai-rag-integration-20260613...origin/master [ahead 13]`；2026-06-14 文档/审计收口后继续追加文档提交，当前状态需以复查命令为准。
+- Roadmap 功能集成提交后，集成分支相对 `origin/master` 曾为 `0 13`；文档/审计收口提交后左右计数会增加，提交前必须重新执行 `git rev-list --left-right --count origin/master...HEAD`。
 - 集成分支总变更文件数：`git diff --name-only origin/master..ai-rag-integration-20260613` 为 113 个文件。
 - GitLab 访问：普通 `git ls-remote` 会受本机 `http.proxy/https.proxy=http://127.0.0.1:10808` 影响；使用 `git -c http.proxy= -c https.proxy= ls-remote --heads ...` 可访问。
 - GitLab 当前 heads：
