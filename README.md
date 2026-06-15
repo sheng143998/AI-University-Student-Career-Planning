@@ -2,6 +2,12 @@
 
 本项目是面向大学生职业规划的前后端系统。前端使用 Vue 3，业务后端使用 Java/Spring Boot，AI/RAG 能力统一放在 Python 服务中。浏览器只访问 Java 后端，Java 负责认证、业务编排、文件处理、数据库读写和统一响应；Python 负责简历分析、OCR、岗位检索、RAG 生成、AI 建议和诊断信息。
 
+## 关联笔记库
+
+本项目的 AI Agent、RAG、FastAPI 服务边界和 Python 化改造思路，关联到 Obsidian 学习笔记仓库：[HeWhenJay/obsidian-study-notes](https://github.com/HeWhenJay/obsidian-study-notes)。
+
+笔记仓库中与本项目直接相关的记录主要位于 `项目使用记录/AI-University-Student-Career-Planning/`，用于沉淀本项目的 AI/RAG 迁移、接口设计、流程图说明、失败场景分析和后续优化记录。
+
 ## 当前架构
 
 | 层级 | 技术 | 说明 |
@@ -404,5 +410,6 @@ npm run build
 - AI/RAG 配置与端口：[docs/AI_RAG_配置与端口说明.md](docs/AI_RAG_配置与端口说明.md)
 - 业务流程图：[docs/business-flow.mmd](docs/business-flow.mmd)
 - 接口文档：[接口文档/](接口文档)
+- 关联 Obsidian 笔记库：[HeWhenJay/obsidian-study-notes](https://github.com/HeWhenJay/obsidian-study-notes)
 
 当前仓库只保留与现有代码一致的说明文档和接口文档。历史待办清单、旧迁移备忘和重复部署说明已清理。
