@@ -36,6 +36,21 @@ class PythonResumeAiClientTest {
     }
 
     @Test
+    void ocrPageReturnsValidatedData() throws Exception {
+        PythonResumeAiClient client = clientFor(json(200, successBody()), json(200, ocrSuccessBody()));
+
+        assertEquals("Python RAG", client.ocrPage(Map.of("image_data_url", "data:image/png;base64,abc")).path("text").asText());
+    }
+
+    @Test
+    void ocrPageRejectsFailureCode() throws Exception {
+        PythonResumeAiClient client = clientFor(json(200, successBody()), json(200, "{\"code\":0,\"msg\":\"bad\",\"data\":{}}"));
+
+        assertThrows(PythonResumeAiClient.PythonResumeSchemaException.class,
+                () -> client.ocrPage(Map.of("image_data_url", "data:image/png;base64,abc")));
+    }
+
+    @Test
     void analyzeMapsHttpFailure() throws Exception {
         PythonResumeAiClient client = clientFor(json(502, "{\"message\":\"bad gateway\"}"));
 
@@ -79,12 +94,18 @@ class PythonResumeAiClientTest {
     }
 
     private PythonResumeAiClient clientFor(Handler handler) throws IOException {
+        return clientFor(handler, handler);
+    }
+
+    private PythonResumeAiClient clientFor(Handler analyzeHandler, Handler ocrHandler) throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/api/v1/resume/analyze", handler::handle);
+        server.createContext("/api/v1/resume/analyze", analyzeHandler::handle);
+        server.createContext("/internal/resume/ocr", ocrHandler::handle);
         server.start();
         PythonAiProperties properties = new PythonAiProperties();
         ReflectionTestUtils.setField(properties, "resumeBaseUrl", "http://127.0.0.1:" + server.getAddress().getPort());
         ReflectionTestUtils.setField(properties, "resumeTimeoutSeconds", 5);
+        ReflectionTestUtils.setField(properties, "resumeOcrTimeoutSeconds", 5);
         return new PythonResumeAiClient(properties, new ObjectMapper());
     }
 
@@ -137,6 +158,16 @@ class PythonResumeAiClientTest {
                   "rag_diagnostics": {
                     "retrieval": {"bm25": true, "embedding_fallback": "hash", "fusion": "rrf", "reranker": "deterministic"}
                   }
+                }
+                """;
+    }
+
+    private String ocrSuccessBody() {
+        return """
+                {
+                  "code": 1,
+                  "msg": "success",
+                  "data": {"text": "Python RAG", "model": "mock-ocr"}
                 }
                 """;
     }

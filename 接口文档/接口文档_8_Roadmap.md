@@ -338,7 +338,7 @@ GET /api/roadmap/graph 或 /api/roadmap/nodes/{id}
 
 Roadmap 个性化职业路径推荐继续保持 Java 对外接口不变：前端调用
 `GET /api/roadmap/recommendations/personalized`，Java 负责 JWT 鉴权、`BaseContext.userId`
-上下文、岗位和简历摘要组装、`Result<T>` 包装、Redis 缓存和本地相似度降级。
+上下文、岗位和简历摘要组装、`Result<T>` 包装、Redis 缓存和 Python 不可用诊断。
 横向换岗推荐中的 RAG 检索、证据选择和诊断输出迁移到统一 Python 聚合服务
 `ai-service`，不再提交旧 `ai_service/` Roadmap 新能力。
 
@@ -412,11 +412,10 @@ Roadmap 个性化职业路径推荐继续保持 Java 对外接口不变：前端
   `roadmap:recommendations:personalized` 缓存和当前用户上下文控制。
 - **错误映射**:
   - Python HTTP 5xx、连接失败、非法 JSON、schema 字段类型错误：Java 记录 warn，
-    使用本地相似度 fallback，不向前端暴露 Python 内部异常。
-  - Python timeout：Java 使用本地 fallback，并在日志中保留超时类型。
-  - Python 返回空推荐：Java 使用本地 fallback。
-  - Python 只返回 1 条横向推荐：Java 保留 Python 推荐并用本地 fallback 补足，
-    `ragDiagnostics.supplementedBy=local-similarity-fallback`。
+    返回空横向推荐和脱敏诊断，不向前端暴露 Python 内部异常。
+  - Python timeout：Java 返回空横向推荐，并在诊断中标记 `status=PYTHON_UNAVAILABLE`。
+  - Python 返回空推荐：Java 保留空推荐结果，不再本地补足。
+  - Python 只返回 1 条横向推荐：Java 仅保留 Python 返回结果，不再用本地 fallback 补足。
 
 ### Python 处理要求
 

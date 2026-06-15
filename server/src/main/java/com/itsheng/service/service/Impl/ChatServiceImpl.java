@@ -276,8 +276,8 @@ public class ChatServiceImpl implements ChatService {
 
     @Override
     public String voiceToText(MultipartFile file) {
-        // TODO: 接入语音转写服务（如 DashScope/OpenAI Whisper）
-        // 当前返回占位文本，后续对接 ASR 服务
+        // TODO: route speech transcription through a Python ASR service boundary.
+        // Current implementation returns placeholder text until the Python ASR endpoint is available.
         log.info("语音转写功能待接入，文件名: {}", file.getOriginalFilename());
         return "语音转写功能待接入，请稍后使用或改用文字输入。";
     }

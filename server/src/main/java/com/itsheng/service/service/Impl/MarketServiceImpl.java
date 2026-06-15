@@ -1,14 +1,15 @@
 package com.itsheng.service.service.Impl;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.itsheng.pojo.entity.JobCategory;
 import com.itsheng.pojo.vo.*;
+import com.itsheng.service.client.PythonMarketAiClient;
 import com.itsheng.service.mapper.JobCategoryMapper;
 import com.itsheng.service.service.MarketService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -27,12 +28,12 @@ public class MarketServiceImpl implements MarketService {
 
     private final JobCategoryMapper jobCategoryMapper;
     private final ObjectMapper objectMapper;
-    private final ChatClient jobClassificationChatClient;
+    private final PythonMarketAiClient pythonMarketAiClient;
     private final StringRedisTemplate redisTemplate;
 
     private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_DATE_TIME;
     private static final String REDIS_KEY_PREFIX = "market:insight:";
-    private static final Duration REDIS_TTL = Duration.ofHours(24); // 24小时过期
+    private static final Duration REDIS_TTL = Duration.ofHours(24); // 24灏忔椂杩囨湡
 
     @Override
     public MarketProfileListVO getProfiles(String industry, String city, String keyword, Integer page, Integer size) {
@@ -118,18 +119,21 @@ public class MarketServiceImpl implements MarketService {
             log.warn("Failed to read insight from Redis: {}", e.getMessage());
         }
         
-        // Generate new insight via AI
+        // Request generated insight from Python Market-AI.
         MarketInsightContentVO content = buildInsightContent(jobProfileId);
         insight.setInsight(content);
         insight.setUpdatedAt(LocalDateTime.now().format(ISO_FORMATTER));
         
-        // Cache to Redis
-        try {
-            String contentJson = objectMapper.writeValueAsString(content);
-            redisTemplate.opsForValue().set(redisKey, contentJson, REDIS_TTL);
-            log.info("Cached insight to Redis for jobProfileId: {}", jobProfileId);
-        } catch (Exception e) {
-            log.warn("Failed to cache insight to Redis: {}", e.getMessage());
+        if (hasGeneratedMarketInsight(content)) {
+            try {
+                String contentJson = objectMapper.writeValueAsString(content);
+                redisTemplate.opsForValue().set(redisKey, contentJson, REDIS_TTL);
+                log.info("Cached insight to Redis for jobProfileId: {}", jobProfileId);
+            } catch (Exception e) {
+                log.warn("Failed to cache insight to Redis: {}", e.getMessage());
+            }
+        } else {
+            log.warn("Python Market-AI insight unavailable for jobProfileId: {}, skip cache", jobProfileId);
         }
         
         return insight;
@@ -142,9 +146,14 @@ public class MarketServiceImpl implements MarketService {
         String redisKey = REDIS_KEY_PREFIX + jobProfileId;
         try {
             MarketInsightContentVO content = buildInsightContent(jobProfileId);
-            String contentJson = objectMapper.writeValueAsString(content);
-            redisTemplate.opsForValue().set(redisKey, contentJson, REDIS_TTL);
-            log.info("Refreshed insight cache for jobProfileId: {}", jobProfileId);
+            if (hasGeneratedMarketInsight(content)) {
+                String contentJson = objectMapper.writeValueAsString(content);
+                redisTemplate.opsForValue().set(redisKey, contentJson, REDIS_TTL);
+                log.info("Refreshed insight cache for jobProfileId: {}", jobProfileId);
+            } else {
+                redisTemplate.delete(redisKey);
+                log.warn("Python Market-AI insight unavailable for jobProfileId: {}, cleared cache", jobProfileId);
+            }
         } catch (Exception e) {
             log.error("Failed to refresh insight cache for jobProfileId {}: {}", jobProfileId, e.getMessage());
         }
@@ -607,8 +616,7 @@ public class MarketServiceImpl implements MarketService {
                     }
                     detail.setSoftSkills(softSkills);
                 } else {
-                    // Fallback to basic soft skills (no AI call)
-                    detail.setSoftSkills(generateBasicSoftSkills(caps));
+                    detail.setSoftSkills(Collections.emptyList());
                 }
                 
                 // Certificate requirements
@@ -672,7 +680,7 @@ public class MarketServiceImpl implements MarketService {
             }
         }
         
-        // Default generation (no AI call, use fallback soft skills)
+        // Default non-AI display fields. Python-only fields stay empty if unavailable.
         MarketSalarySnapshotVO salaryRange = new MarketSalarySnapshotVO();
         salaryRange.setMin(job.getMinSalary());
         salaryRange.setMax(job.getMaxSalary());
@@ -710,8 +718,8 @@ public class MarketServiceImpl implements MarketService {
         MarketCapabilityRequirementsVO caps = generateCapabilities(job.getJobLevel());
         detail.setCapabilityRequirements(caps);
         
-        // softSkills - use fallback (no AI call)
-        detail.setSoftSkills(generateBasicSoftSkills(caps));
+        // softSkills - generated by Python AI service only.
+        detail.setSoftSkills(generateSoftSkills(job, caps));
         
         detail.setCertificateRequirements(generateCertificates(job.getJobCategoryCode()));
         detail.setCompanyBenefits(Arrays.asList("Five social insurance and one housing fund", "Year-end bonus", "Paid annual leave", "Training opportunities"));
@@ -743,134 +751,24 @@ public class MarketServiceImpl implements MarketService {
     }
 
     /**
-     * Generate soft skills via AI based on job data
+     * Generate soft skills through the Python Market-AI boundary.
      */
     private List<SoftSkillItemVO> generateSoftSkills(JobCategory job, MarketCapabilityRequirementsVO caps) {
         try {
-            // Build prompt with job context
-            String jobContext = String.format("""
-                {
-                  "jobName": "%s",
-                  "jobLevel": "%s",
-                  "requiredSkills": %s,
-                  "description": "%s",
-                  "capabilityScores": {
-                    "innovation": %d,
-                    "learning": %d,
-                    "resilience": %d,
-                    "communication": %d,
-                    "internship": %d
-                  }
-                }
-                """,
-                job.getJobCategoryName(),
-                job.getJobLevel(),
-                job.getRequiredSkills() != null ? job.getRequiredSkills() : "[]",
-                job.getJobDescription() != null ? job.getJobDescription().replace("\"", "\\\"").replace("\n", " ") : "",
-                caps.getInnovation() != null ? caps.getInnovation() : 50,
-                caps.getLearning() != null ? caps.getLearning() : 50,
-                caps.getResilience() != null ? caps.getResilience() : 50,
-                caps.getCommunication() != null ? caps.getCommunication() : 50,
-                caps.getInternship() != null ? caps.getInternship() : 50
-            );
-
-            String userPrompt = String.format("""
-                根据以下岗位数据生成5种软技能的详细描述和证据。
-                必须只生成这5种软技能：创新能力、学习能力、抗压能力、沟通能力、实习能力。
-                每种软技能包含：name(中文名称)、score(0-100分，基于capabilityScores)、description(中文描述，针对该岗位具体说明)、evidence(2-3个中文具体例子)。
-                
-                岗位数据：
-                %s
-                
-                返回JSON数组格式：
-                [{"name":"创新能力","score":85,"description":"针对该岗位的具体描述","evidence":["例子1","例子2"]}]
-                
-                只返回JSON数组，不要markdown或其他文字。
-                """, jobContext);
-
-            String response = jobClassificationChatClient.prompt()
-                    .user(userPrompt)
-                    .call()
-                    .content();
-
-            // Parse AI response
-            if (response != null && !response.isBlank()) {
-                // Clean response (remove markdown code blocks if present)
-                String cleanedResponse = response.trim();
-                if (cleanedResponse.startsWith("```")) {
-                    cleanedResponse = cleanedResponse.replaceAll("```json\\s*", "").replaceAll("```\\s*", "");
-                }
-                
-                List<SoftSkillItemVO> softSkills = objectMapper.readValue(cleanedResponse, 
-                        new TypeReference<List<SoftSkillItemVO>>() {});
+            Map<String, Object> payload = buildMarketAiPayload(job, caps);
+            JsonNode response = pythonMarketAiClient.generateSoftSkills(payload);
+            if (response != null && response.isArray()) {
+                List<SoftSkillItemVO> softSkills = objectMapper.convertValue(
+                        response,
+                        new TypeReference<List<SoftSkillItemVO>>() {}
+                );
                 return softSkills != null ? softSkills : new ArrayList<>();
             }
         } catch (Exception e) {
-            log.warn("AI soft skills generation failed for job {}: {}", job.getId(), e.getMessage());
+            log.warn("Python soft skills generation failed for job {}: {}", job.getId(), e.getMessage());
         }
-        
-        // Fallback to basic soft skills based on capability scores
-        return generateBasicSoftSkills(caps);
-    }
-    
-    /**
-     * Fallback: generate basic soft skills from capability scores
-     * Only 5 types: innovation, learning, resilience, communication, internship
-     */
-    private List<SoftSkillItemVO> generateBasicSoftSkills(MarketCapabilityRequirementsVO caps) {
-        List<SoftSkillItemVO> softSkills = new ArrayList<>();
-        
-        // Innovation - Innovation Ability
-        if (caps.getInnovation() != null && caps.getInnovation() > 0) {
-            SoftSkillItemVO innovation = new SoftSkillItemVO();
-            innovation.setName("Innovation Ability");
-            innovation.setScore(caps.getInnovation());
-            innovation.setDescription("Ability to propose innovative solutions and optimize existing processes");
-            innovation.setEvidence(Arrays.asList("Propose technical improvement solutions", "Participate in innovation projects"));
-            softSkills.add(innovation);
-        }
-        
-        // Learning - Learning Ability
-        if (caps.getLearning() != null && caps.getLearning() > 0) {
-            SoftSkillItemVO learning = new SoftSkillItemVO();
-            learning.setName("Learning Ability");
-            learning.setScore(caps.getLearning());
-            learning.setDescription("Ability to quickly master new technologies and apply them to projects");
-            learning.setEvidence(Arrays.asList("Learn new frameworks independently", "Complete technical courses"));
-            softSkills.add(learning);
-        }
-        
-        // Resilience - Resilience
-        if (caps.getResilience() != null && caps.getResilience() > 0) {
-            SoftSkillItemVO resilience = new SoftSkillItemVO();
-            resilience.setName("Resilience");
-            resilience.setScore(caps.getResilience());
-            resilience.setDescription("Ability to maintain performance under pressure and tight deadlines");
-            resilience.setEvidence(Arrays.asList("Deliver projects on schedule", "Handle multiple tasks effectively"));
-            softSkills.add(resilience);
-        }
-        
-        // Communication - Communication Skills
-        if (caps.getCommunication() != null && caps.getCommunication() > 0) {
-            SoftSkillItemVO communication = new SoftSkillItemVO();
-            communication.setName("Communication Skills");
-            communication.setScore(caps.getCommunication());
-            communication.setDescription("Ability to collaborate with teams and express technical concepts clearly");
-            communication.setEvidence(Arrays.asList("Participate in code reviews", "Write technical documentation"));
-            softSkills.add(communication);
-        }
-        
-        // Internship - Internship Ability
-        if (caps.getInternship() != null && caps.getInternship() > 0) {
-            SoftSkillItemVO internship = new SoftSkillItemVO();
-            internship.setName("Internship Ability");
-            internship.setScore(caps.getInternship());
-            internship.setDescription("Ability to adapt to work environment and complete internship tasks");
-            internship.setEvidence(Arrays.asList("Complete internship assignments", "Actively participate in team activities"));
-            softSkills.add(internship);
-        }
-        
-        return softSkills;
+
+        return Collections.emptyList();
     }
 
     private MarketTrendsVO buildAggregatedTrends() {
@@ -974,119 +872,92 @@ public class MarketServiceImpl implements MarketService {
     }
 
     private MarketInsightContentVO buildInsightContent(Long jobProfileId) {
-        // Try to get real job data for AI insight generation
+        // Try to get real job data for Python Market-AI insight generation.
         JobCategory job = null;
         if (jobProfileId != null) {
             job = jobCategoryMapper.selectById(jobProfileId);
         }
         
-        // If we have job data, try AI generation
         if (job != null) {
             try {
                 return generateAiInsight(job);
             } catch (Exception e) {
-                log.warn("AI insight generation failed for job {}: {}", job.getId(), e.getMessage());
+                log.warn("Python Market-AI insight generation failed for job {}: {}", job.getId(), e.getMessage());
             }
         }
         
-        // Fallback to static content
+        return emptyMarketInsightContent();
+    }
+
+    private MarketInsightContentVO emptyMarketInsightContent() {
         MarketInsightContentVO content = new MarketInsightContentVO();
-        content.setTitle("市场洞察分析");
-        content.setSummary("基于近期市场数据，该岗位展现出强劲的增长潜力，对专业人才的需求持续上升。企业正在积极招聘并提供具有竞争力的薪酬福利。");
-        
-        List<MarketSignalVO> signals = Arrays.asList(
-                createSignal("平均薪资", "¥25K-35K/月", "UP"),
-                createSignal("在招岗位", "1,200+ 职位", "UP"),
-                createSignal("技能需求", "高增长", "UP"),
-                createSignal("竞争程度", "中等水平", "STABLE")
-        );
-        content.setMarketSignals(signals);
-        
-        content.setIndustryTrends(Arrays.asList(
-                "数字化转型推动需求增长",
-                "云原生技能日益重要",
-                "AI/ML集成成为标配",
-                "远程工作机会持续扩展"
-        ));
-        
-        List<MarketSuggestedActionVO> actions = Arrays.asList(
-                createAction("强化核心技能", "聚焦热门技术领域", "HIGH"),
-                createAction("获取专业认证", "行业认证提升竞争力", "MEDIUM"),
-                createAction("打造作品集", "展示实战经验", "MEDIUM"),
-                createAction("积极拓展人脉", "连接行业专业人士", "LOW")
-        );
-        content.setSuggestedActions(actions);
-        
+        content.setTitle("Market insight unavailable");
+        content.setSummary("");
+        content.setMarketSignals(Collections.emptyList());
+        content.setIndustryTrends(Collections.emptyList());
+        content.setSuggestedActions(Collections.emptyList());
         return content;
+    }
+
+    private boolean hasGeneratedMarketInsight(MarketInsightContentVO content) {
+        return content != null
+                && content.getTitle() != null
+                && !content.getTitle().isBlank()
+                && !"Market insight unavailable".equals(content.getTitle());
     }
     
     /**
-     * Generate market insight using AI
+     * Request market insight from Python Market-AI.
      */
     private MarketInsightContentVO generateAiInsight(JobCategory job) {
-        String jobContext = String.format("""
-            {
-              "jobName": "%s",
-              "jobLevel": "%s",
-              "requiredSkills": %s,
-              "description": "%s",
-              "sourceJobCount": %d,
-              "minSalary": %s,
-              "maxSalary": %s
-            }
-            """,
-            job.getJobCategoryName(),
-            job.getJobLevel() != null ? job.getJobLevel() : "中级",
-            job.getRequiredSkills() != null ? job.getRequiredSkills() : "[]",
-            job.getJobDescription() != null ? job.getJobDescription().replace("\"", "\\\"").replace("\n", " ") : "",
-            job.getSourceJobCount() != null ? job.getSourceJobCount() : 100,
-            job.getMinSalary() != null ? job.getMinSalary().toString() : "15000",
-            job.getMaxSalary() != null ? job.getMaxSalary().toString() : "35000"
-        );
-        
-        String userPrompt = String.format("""
-            您是位经验丰富的职业顾问。根据以下岗位数据生成市场洞察分析报告。
-            
-            岗位数据：
-            %s
-            
-            请生成以下内容（全部使用中文）：
-            1. summary: 2-3句话的市场洞察总结
-            2. marketSignals: 4个市场信号（label中文名称、value具体数值或描述、trend趋势UP/DOWN/STABLE）
-            3. industryTrends: 4个行业趋势（中文短语）
-            4. suggestedActions: 4个建议行动（title中文标题、desc中文描述、priority优先级HIGH/MEDIUM/LOW）
-            
-            只返回JSON对象，不要markdown或其他文字。
-            """, jobContext);
-        
-        String response = jobClassificationChatClient.prompt()
-                .user(userPrompt)
-                .call()
-                .content();
-        
-        if (response != null && !response.isBlank()) {
-            // Clean response
-            String cleanedResponse = response.trim();
-            if (cleanedResponse.startsWith("```")) {
-                cleanedResponse = cleanedResponse.replaceAll("```json\\s*", "").replaceAll("```\\s*", "");
-            }
-            
-            // Parse AI response
-            try {
-                MarketInsightContentVO content = objectMapper.readValue(cleanedResponse, MarketInsightContentVO.class);
-                if (content != null) {
-                    content.setTitle(job.getJobCategoryName() + " 市场洞察");
-                    return content;
-                }
-            } catch (Exception parseEx) {
-                log.warn("Failed to parse AI insight response: {}", parseEx.getMessage());
-            }
+        Map<String, Object> payload = buildMarketAiPayload(job, null);
+        JsonNode response = pythonMarketAiClient.generateMarketInsight(payload);
+        if (response == null || !response.isObject()) {
+            throw new RuntimeException("Python market insight response was empty or invalid");
         }
-        
-        throw new RuntimeException("AI response was empty or invalid");
+        MarketInsightContentVO content = objectMapper.convertValue(response, MarketInsightContentVO.class);
+        if (content == null) {
+            throw new RuntimeException("Python market insight response could not be parsed");
+        }
+        if (content.getTitle() == null || content.getTitle().isBlank()) {
+            content.setTitle(job.getJobCategoryName() + " market insight");
+        }
+        return content;
     }
 
-    // ==================== 工具方法 ====================
+    private Map<String, Object> buildMarketAiPayload(JobCategory job, MarketCapabilityRequirementsVO caps) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("job", buildMarketJobPayload(job));
+        if (caps != null) {
+            payload.put("capabilityScores", buildCapabilityScores(caps));
+        }
+        return payload;
+    }
+
+    private Map<String, Object> buildMarketJobPayload(JobCategory job) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("jobName", job.getJobCategoryName());
+        payload.put("jobLevel", job.getJobLevel());
+        payload.put("requiredSkills", job.getRequiredSkills());
+        payload.put("jobDescription", job.getJobDescription());
+        payload.put("sourceJobCount", job.getSourceJobCount());
+        payload.put("minSalary", job.getMinSalary());
+        payload.put("maxSalary", job.getMaxSalary());
+        payload.put("salaryUnit", job.getSalaryUnit());
+        payload.put("capabilityRequirements", job.getJobProfile());
+        return payload;
+    }
+
+    private Map<String, Object> buildCapabilityScores(MarketCapabilityRequirementsVO caps) {
+        Map<String, Object> scores = new LinkedHashMap<>();
+        scores.put("innovation", caps.getInnovation());
+        scores.put("learning", caps.getLearning());
+        scores.put("resilience", caps.getResilience());
+        scores.put("communication", caps.getCommunication());
+        scores.put("internship", caps.getInternship());
+        return scores;
+    }
+    // ==================== 宸ュ叿鏂规硶 ====================
 
     private List<String> parseJsonToList(String json) {
         if (json == null || json.trim().isEmpty()) {
@@ -1095,28 +966,28 @@ public class MarketServiceImpl implements MarketService {
         try {
             return objectMapper.readValue(json, new TypeReference<List<String>>() {});
         } catch (Exception e) {
-            log.warn("解析JSON数组失败: {}", json, e);
+            log.warn("瑙ｆ瀽JSON鏁扮粍澶辫触: {}", json, e);
             return new ArrayList<>();
         }
     }
 
     private String deriveIndustrySegment(String categoryCode) {
-        if (categoryCode == null) return "技术";
-        if (categoryCode.contains("JAVA") || categoryCode.contains("BACKEND")) return "后端开发";
-        if (categoryCode.contains("FRONTEND") || categoryCode.contains("WEB")) return "前端开发";
-        if (categoryCode.contains("DATA")) return "数据工程";
-        if (categoryCode.contains("AI") || categoryCode.contains("ML")) return "AI/机器学习";
+        if (categoryCode == null) return "Technology";
+        if (categoryCode.contains("JAVA") || categoryCode.contains("BACKEND")) return "Backend Development";
+        if (categoryCode.contains("FRONTEND") || categoryCode.contains("WEB")) return "Frontend Development";
+        if (categoryCode.contains("DATA")) return "Data Engineering";
+        if (categoryCode.contains("AI") || categoryCode.contains("ML")) return "AI/Machine Learning";
         if (categoryCode.contains("DEVOPS")) return "DevOps";
-        if (categoryCode.contains("MOBILE")) return "移动开发";
-        if (categoryCode.contains("TEST")) return "质量保障";
-        return "技术";
+        if (categoryCode.contains("MOBILE")) return "Mobile Development";
+        if (categoryCode.contains("TEST")) return "Quality Assurance";
+        return "Technology";
     }
 
     private String calculateDemandLevel(Integer sourceJobCount) {
-        if (sourceJobCount == null || sourceJobCount < 10) return "低";
-        if (sourceJobCount < 30) return "中";
-        if (sourceJobCount < 60) return "高";
-        return "极高";
+        if (sourceJobCount == null || sourceJobCount < 10) return "LOW";
+        if (sourceJobCount < 30) return "MEDIUM";
+        if (sourceJobCount < 60) return "HIGH";
+        return "VERY_HIGH";
     }
 
     private MarketCapabilityRequirementsVO generateCapabilities(String jobLevel) {
@@ -1135,35 +1006,35 @@ public class MarketServiceImpl implements MarketService {
         List<String> certs = new ArrayList<>();
         if (categoryCode != null) {
             if (categoryCode.contains("JAVA")) {
-                certs.add("Oracle认证Java程序员");
-                certs.add("Spring专业认证");
+                certs.add("Oracle Certified Java Programmer");
+                certs.add("Spring Professional Certification");
             } else if (categoryCode.contains("FRONTEND")) {
-                certs.add("AWS认证开发者");
+                certs.add("AWS Certified Developer");
             } else if (categoryCode.contains("DATA")) {
-                certs.add("AWS认证数据分析");
+                certs.add("AWS Certified Data Analytics");
             }
         }
-        certs.add("英语四级及以上");
+        certs.add("CET-4 or above");
         return certs;
     }
 
     private String determineTag(JobCategory job) {
-        if (job.getSourceJobCount() != null && job.getSourceJobCount() > 50) return "热门";
-        if (job.getMaxSalary() != null && job.getMaxSalary().compareTo(new BigDecimal("30000")) > 0) return "高薪";
-        if ("INTERNSHIP".equals(job.getJobLevel())) return "入门级";
-        return "推荐";
+        if (job.getSourceJobCount() != null && job.getSourceJobCount() > 50) return "HOT";
+        if (job.getMaxSalary() != null && job.getMaxSalary().compareTo(new BigDecimal("30000")) > 0) return "HIGH_SALARY";
+        if ("INTERNSHIP".equals(job.getJobLevel())) return "ENTRY";
+        return "RECOMMENDED";
     }
 
     private List<String> generateHighlights(JobCategory job) {
         List<String> highlights = new ArrayList<>();
         if (job.getSourceJobCount() != null && job.getSourceJobCount() > 50) {
-            highlights.add("需求旺盛");
+            highlights.add("Strong market demand");
         }
         if (job.getMaxSalary() != null && job.getMaxSalary().compareTo(new BigDecimal("30000")) > 0) {
-            highlights.add("薪资竞争力强");
+            highlights.add("Competitive salary");
         }
-        highlights.add("职业路径清晰");
-        highlights.add("技能成长空间大");
+        highlights.add("Clear career path");
+        highlights.add("Large skill growth space");
         return highlights;
     }
 
@@ -1190,9 +1061,9 @@ public class MarketServiceImpl implements MarketService {
     }
 
     private String determineEducationRequirement(String jobLevel) {
-        if ("SENIOR".equals(jobLevel)) return "本科及以上";
-        if ("MID".equals(jobLevel)) return "本科优先";
-        return "大专及以上";
+        if ("SENIOR".equals(jobLevel)) return "Bachelor degree or above";
+        if ("MID".equals(jobLevel)) return "鏈浼樺厛";
+        return "Associate degree or above";
     }
 
     private List<String> buildVerticalPath(JobCategory job) {
@@ -1202,18 +1073,18 @@ public class MarketServiceImpl implements MarketService {
         
         if ("INTERNSHIP".equals(level)) {
             path.add(name);
-            path.add(name.replace("实习", "初级"));
-            path.add(name.replace("实习", "中级"));
-            path.add(name.replace("实习", "高级"));
+            path.add(name.replace("瀹炰範", "鍒濈骇"));
+            path.add(name.replace("瀹炰範", "涓骇"));
+            path.add(name.replace("瀹炰範", "楂樼骇"));
         } else if ("JUNIOR".equals(level)) {
             path.add(name);
-            path.add(name.replace("初级", "中级"));
-            path.add(name.replace("初级", "高级"));
+            path.add(name.replace("鍒濈骇", "涓骇"));
+            path.add(name.replace("鍒濈骇", "楂樼骇"));
         } else {
             path.add(name);
-            path.add("高级" + name);
-            path.add(name + "主管");
-            path.add(name + "经理");
+            path.add("Senior " + name);
+            path.add(name + " Lead");
+            path.add(name + " Manager");
         }
         return path;
     }
@@ -1224,11 +1095,11 @@ public class MarketServiceImpl implements MarketService {
         
         if (code != null) {
             if (code.contains("JAVA")) {
-                path.add("Python开发工程师");
-                path.add("Go开发工程师");
+                path.add("Python寮€鍙戝伐绋嬪笀");
+                path.add("Go寮€鍙戝伐绋嬪笀");
             } else if (code.contains("FRONTEND")) {
-                path.add("全栈开发工程师");
-                path.add("UI/UX设计师");
+                path.add("鍏ㄦ爤寮€鍙戝伐绋嬪笀");
+                path.add("UI/UX Designer");
             } else if (code.contains("DATA")) {
                 path.add("Data Scientist");
                 path.add("ML Engineer");
@@ -1247,19 +1118,4 @@ public class MarketServiceImpl implements MarketService {
         return hotSkill;
     }
 
-    private MarketSignalVO createSignal(String label, String value, String trend) {
-        MarketSignalVO signal = new MarketSignalVO();
-        signal.setLabel(label);
-        signal.setValue(value);
-        signal.setTrend(trend);
-        return signal;
-    }
-
-    private MarketSuggestedActionVO createAction(String title, String desc, String priority) {
-        MarketSuggestedActionVO action = new MarketSuggestedActionVO();
-        action.setTitle(title);
-        action.setDesc(desc);
-        action.setPriority(priority);
-        return action;
-    }
 }

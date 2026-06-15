@@ -8,7 +8,14 @@ from typing import Any
 from career_ai.feedback_service import accept_rag_feedback, validate_rag_preferences
 from career_ai.dashboard_rag_service import match_target_job
 from career_ai.goals_advice_service import generate_goal_advice
-from career_ai.market_service import generate_market_insight, generate_soft_skills
+from career_ai.market_service import (
+    classify_job,
+    generate_market_insight,
+    generate_soft_skills,
+    index_jobs,
+    search_jobs,
+)
+from career_ai.resume_ocr_service import extract_resume_ocr_text
 from career_ai.roadmap_rag_service import generate_roadmap_recommendations
 from career_ai.report_support_service import ReportSupportService
 from rag.chat_pipeline import ChatRagPipeline
@@ -54,6 +61,18 @@ class AiServiceHandler(BaseHTTPRequestHandler):
                 return
             if self.path == "/api/v1/market/soft-skills":
                 self._write_json(generate_soft_skills(payload))
+                return
+            if self.path == "/internal/market/jobs/classify":
+                self._write_json(classify_job(payload))
+                return
+            if self.path == "/internal/market/jobs/index":
+                self._write_json(index_jobs(payload))
+                return
+            if self.path == "/internal/market/jobs/search":
+                self._write_json(search_jobs(payload))
+                return
+            if self.path == "/internal/resume/ocr":
+                self._write_json(extract_resume_ocr_text(payload))
                 return
             if self.path == "/api/roadmap/recommendations/personalized":
                 self._write_json(generate_roadmap_recommendations(payload))

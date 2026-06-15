@@ -7,6 +7,7 @@ import com.itsheng.common.exception.BaseException;
 import com.itsheng.pojo.dto.ResumeParsedData;
 import com.itsheng.pojo.entity.JobCategory;
 import com.itsheng.pojo.vo.CareerPathRecommendationVO;
+import com.itsheng.pojo.vo.UserTransitionRecommendationVO;
 import com.itsheng.service.client.PythonRoadmapRagClient;
 import com.itsheng.service.mapper.JobCategoryMapper;
 import com.itsheng.service.mapper.UserProfileMapper;
@@ -141,7 +142,7 @@ class RoadmapServiceImplTest {
                 (List<CareerPathRecommendationVO.LateralPathRecommendationVO>) ReflectionTestUtils.invokeMethod(result, "lateralPaths");
         @SuppressWarnings("unchecked")
         Map<String, Object> diagnostics = (Map<String, Object>) ReflectionTestUtils.invokeMethod(result, "diagnostics");
-        assertEquals(2, lateralPaths.size());
+        assertEquals(1, lateralPaths.size());
         assertEquals("AI_APP", lateralPaths.get(0).getTargetCategoryCode());
         assertEquals(1, lateralPaths.get(0).getEvidence().size());
         Map<String, Object> evidence = lateralPaths.get(0).getEvidence().get(0);
@@ -162,7 +163,7 @@ class RoadmapServiceImplTest {
     }
 
     @Test
-    void generateLateralPathRecommendationsRagFallsBackOnEmptyRecommendations() {
+    void generateLateralPathRecommendationsRagKeepsPythonEmptyRecommendations() {
         RoadmapServiceImpl service = serviceWith(response("{\"lateralPaths\":[],\"diagnostics\":{\"fusion\":\"rrf\"}}"));
 
         Object result = ReflectionTestUtils.invokeMethod(
@@ -175,12 +176,12 @@ class RoadmapServiceImplTest {
                 (List<CareerPathRecommendationVO.LateralPathRecommendationVO>) ReflectionTestUtils.invokeMethod(result, "lateralPaths");
         @SuppressWarnings("unchecked")
         Map<String, Object> diagnostics = (Map<String, Object>) ReflectionTestUtils.invokeMethod(result, "diagnostics");
-        assertFalse(lateralPaths.isEmpty());
-        assertEquals("local-similarity-fallback", diagnostics.get("fusion"));
+        assertTrue(lateralPaths.isEmpty());
+        assertEquals("rrf", diagnostics.get("fusion"));
     }
 
     @Test
-    void generateLateralPathRecommendationsRagSupplementsSinglePythonRecommendation() {
+    void generateLateralPathRecommendationsRagDoesNotSupplementSinglePythonRecommendation() {
         RoadmapServiceImpl service = serviceWith(response("""
                 {
                   "lateralPaths": [
@@ -211,8 +212,8 @@ class RoadmapServiceImplTest {
                 (List<CareerPathRecommendationVO.LateralPathRecommendationVO>) ReflectionTestUtils.invokeMethod(result, "lateralPaths");
         @SuppressWarnings("unchecked")
         Map<String, Object> diagnostics = (Map<String, Object>) ReflectionTestUtils.invokeMethod(result, "diagnostics");
-        assertEquals(2, lateralPaths.size());
-        assertEquals("local-similarity-fallback", diagnostics.get("supplementedBy"));
+        assertEquals(1, lateralPaths.size());
+        assertFalse(diagnostics.containsKey("supplementedBy"));
         assertTrue(lateralPaths.stream().anyMatch(item -> "AI_APP".equals(item.getTargetCategoryCode())));
     }
 
@@ -236,11 +237,12 @@ class RoadmapServiceImplTest {
         assertNotNull(result);
         @SuppressWarnings("unchecked")
         Map<String, Object> diagnostics = (Map<String, Object>) ReflectionTestUtils.invokeMethod(result, "diagnostics");
-        assertEquals("local-similarity-fallback", diagnostics.get("fusion"));
+        assertEquals("PYTHON_UNAVAILABLE", diagnostics.get("status"));
+        assertEquals("none", diagnostics.get("fusion"));
     }
 
     @Test
-    void fallbackRecommendationsExcludeCurrentCategoryAndRedactPossessedSkills() {
+    void pythonFailureDoesNotGenerateJavaRecommendationsAndRedactsReason() {
         String credential = "sk-" + "fallback-1234567890";
         PythonRoadmapRagClient client = mock(PythonRoadmapRagClient.class);
         when(client.generatePersonalizedRecommendations(any())).thenThrow(new RuntimeException("down"));
@@ -266,12 +268,14 @@ class RoadmapServiceImplTest {
         @SuppressWarnings("unchecked")
         List<CareerPathRecommendationVO.LateralPathRecommendationVO> lateralPaths =
                 (List<CareerPathRecommendationVO.LateralPathRecommendationVO>) ReflectionTestUtils.invokeMethod(result, "lateralPaths");
-        assertFalse(lateralPaths.stream().anyMatch(item -> "FRONTEND".equals(item.getTargetCategoryCode())));
-        String serialized = String.valueOf(lateralPaths);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> diagnostics = (Map<String, Object>) ReflectionTestUtils.invokeMethod(result, "diagnostics");
+        assertTrue(lateralPaths.isEmpty());
+        String serialized = String.valueOf(diagnostics);
         assertFalse(serialized.contains("18812345678"));
         assertFalse(serialized.contains("user@example.com"));
         assertFalse(serialized.contains(credential));
-        assertTrue(serialized.contains("[REDACTED]"));
+        assertEquals("PYTHON_UNAVAILABLE", diagnostics.get("status"));
     }
 
     @Test
@@ -308,7 +312,8 @@ class RoadmapServiceImplTest {
         assertNotNull(result);
         @SuppressWarnings("unchecked")
         Map<String, Object> diagnostics = (Map<String, Object>) ReflectionTestUtils.invokeMethod(result, "diagnostics");
-        assertEquals("local-similarity-fallback", diagnostics.get("fusion"));
+        assertEquals("PYTHON_UNAVAILABLE", diagnostics.get("status"));
+        assertEquals("none", diagnostics.get("fusion"));
         assertFalse(String.valueOf(diagnostics).contains(currentCredential));
     }
 
@@ -319,6 +324,54 @@ class RoadmapServiceImplTest {
 
         assertThrows(IllegalArgumentException.class,
                 () -> ReflectionTestUtils.invokeMethod(service, "parseRoadmapRagResult", root, jobs()));
+    }
+
+    @Test
+    void recommendTransitionByJobNameUsesPythonRoadmapRag() {
+        JobCategoryMapper jobCategoryMapper = mock(JobCategoryMapper.class);
+        PythonRoadmapRagClient client = mock(PythonRoadmapRagClient.class);
+        when(jobCategoryMapper.searchByKeyword("Frontend Engineer", 20)).thenReturn(List.of(jobs().get(0)));
+        when(jobCategoryMapper.selectAll()).thenReturn(jobs());
+        when(client.generatePersonalizedRecommendations(any())).thenReturn(response("""
+                {
+                  "lateralPaths": [
+                    {
+                      "targetJobId": 2,
+                      "targetCategoryCode": "AI_APP",
+                      "targetJobName": "AI Application Engineer",
+                      "matchScore": 0.86,
+                      "transitionDifficulty": 3,
+                      "estimatedMonths": 15,
+                      "requiredSkills": ["RAG"],
+                      "possessedSkills": ["Python"],
+                      "aiRecommendationReason": "evidence based",
+                      "evidence": []
+                    }
+                  ],
+                  "diagnostics": {"fusion":"rrf","candidateCount":3}
+                }
+                """));
+        RoadmapServiceImpl service = new RoadmapServiceImpl(
+                jobCategoryMapper,
+                objectMapper,
+                mock(UserProfileMapper.class),
+                client,
+                mock(StringRedisTemplate.class),
+                mock(CacheManager.class)
+        );
+
+        UserTransitionRecommendationVO result =
+                service.recommendTransitionByJobNameAndLevel("Frontend Engineer", "junior");
+
+        assertEquals(List.of("Vue", "TypeScript"), result.getCurrentSkills());
+        assertEquals(1, result.getRecommendations().size());
+        UserTransitionRecommendationVO.TransitionRecommendationItemVO recommendation =
+                result.getRecommendations().get(0);
+        assertEquals(2L, recommendation.getToJobId());
+        assertEquals(0.86, recommendation.getMatchScore());
+        assertEquals(15, recommendation.getAvgTransitionTimeMonths());
+        assertEquals("RAG", recommendation.getRequiredSkillsGap().get(0).getSkill());
+        verify(client).generatePersonalizedRecommendations(any());
     }
 
     @Test

@@ -17,6 +17,7 @@
         <java.version>17</java.version>
         <mybatis.spring>4.0.1</mybatis.spring>
         <aliyun.oss.version>3.17.4</aliyun.oss.version>
+        <tika.version>3.2.3</tika.version>
         <commons-io.version>2.16.1</commons-io.version>
         <commons-compress.version>1.27.1</commons-compress.version>
     </properties>
@@ -81,10 +82,6 @@
             <scope>runtime</scope>
         </dependency>
 <!--        pgvector 和 pdf 识别相关依赖-->
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-pdf-document-reader</artifactId>
-        </dependency>
         <!-- PDF 生成 -->
         <dependency>
             <groupId>com.github.librepdf</groupId>
@@ -92,7 +89,7 @@
             <version>1.3.30</version>
         </dependency>
         <!-- Apache PDFBox for PDF editing (read + modify existing PDFs) -->
-        <!-- 统一使用 3.0.5 以匹配 spring-ai-pdf-document-reader 和 tika 的传递依赖 -->
+        <!-- 统一使用 3.0.5 以匹配 Tika 3.x 的传递依赖 -->
         <dependency>
             <groupId>org.apache.pdfbox</groupId>
             <artifactId>pdfbox</artifactId>
@@ -104,8 +101,14 @@
             <version>3.0.5</version>
         </dependency>
         <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-tika-document-reader</artifactId>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-core</artifactId>
+            <version>${tika.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-parsers-standard-package</artifactId>
+            <version>${tika.version}</version>
         </dependency>
         <!-- Commons IO - 覆盖旧版本的传递依赖 -->
         <dependency>
@@ -118,10 +121,6 @@
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-compress</artifactId>
             <version>${commons-compress.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-pgvector-store</artifactId>
         </dependency>
         <dependency>
             <groupId>com.aliyun.oss</groupId>

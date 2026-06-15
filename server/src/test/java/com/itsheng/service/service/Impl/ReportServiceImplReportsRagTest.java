@@ -83,7 +83,7 @@ class ReportServiceImplReportsRagTest {
     }
 
     @Test
-    void asyncGenerationFallsBackWhenPythonFails() throws Exception {
+    void asyncGenerationStoresEmptyAiSupportWhenPythonFails() throws Exception {
         givenReportInputs();
         when(pythonReportsAiClient.generateSupport(anyMap())).thenThrow(new RuntimeException("downstream"));
 
@@ -98,8 +98,8 @@ class ReportServiceImplReportsRagTest {
         Map<String, Object> matchDetails = objectMapper.readValue(completed.getMatchDetails(), Map.class);
         Map<?, ?> diagnostics = (Map<?, ?>) matchDetails.get("rag_diagnostics");
         assertEquals("COMPLETED", completed.getStatus());
-        assertTrue(completed.getAiSuggestions().contains("Use metrics"));
-        assertEquals("FALLBACK", diagnostics.get("status"));
+        assertEquals("", completed.getAiSuggestions());
+        assertEquals("PYTHON_UNAVAILABLE", diagnostics.get("status"));
     }
 
     @Test
@@ -115,7 +115,7 @@ class ReportServiceImplReportsRagTest {
     }
 
     @Test
-    void asyncGenerationFallsBackForEmptyRetrieval() throws Exception {
+    void asyncGenerationStoresEmptyAiSupportForEmptyRetrieval() throws Exception {
         givenReportInputs();
         JsonNode evidence = objectMapper.readTree("[]");
         JsonNode diagnostics = objectMapper.readTree("{\"status\":\"EMPTY_RETRIEVAL\",\"emptyRetrieval\":true}");
@@ -131,7 +131,8 @@ class ReportServiceImplReportsRagTest {
                 .findFirst()
                 .orElseThrow();
         Map<String, Object> matchDetails = objectMapper.readValue(completed.getMatchDetails(), Map.class);
-        assertEquals("FALLBACK", ((Map<?, ?>) matchDetails.get("rag_diagnostics")).get("status"));
+        assertEquals("", completed.getAiSuggestions());
+        assertEquals("EMPTY_RETRIEVAL", ((Map<?, ?>) matchDetails.get("rag_diagnostics")).get("status"));
     }
 
     private void givenReportInputs() {

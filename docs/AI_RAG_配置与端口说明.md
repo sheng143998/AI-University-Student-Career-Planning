@@ -11,17 +11,20 @@
 | 服务 | 端口 | 入口 | 职责 |
 | --- | --- | --- | --- |
 | Java backend | `8081` | `server`（Spring Boot） | 鉴权、业务、对前端唯一入口 |
-| Python 聚合 AI 服务 | `8090` | `ai-service/app/main.py`（`AI_SERVICE_HOST` / `AI_SERVICE_PORT`） | Reports、Goals、Dashboard、Roadmap、Market fallback、RAG feedback、偏好校验 |
-| Python Resume AI 服务 | `8091` | `ai-service/career_ai/resume_analysis_service.py` | 简历分析 |
+| Python 聚合 AI 服务 | `8090` | `ai-service/app/main.py`（`AI_SERVICE_HOST` / `AI_SERVICE_PORT`） | Reports、Goals、Dashboard、Roadmap、Market/JD、RAG feedback、偏好校验 |
+| Python Resume AI 服务 | `8091` | `ai-service/career_ai/resume_analysis_service.py` 或 `ai-service/app/main.py` | 简历分析、PDF OCR |
 | Python Chat AI 服务 | `8092` | `ai-service/app/main.py`（`AI_SERVICE_HOST` / `AI_SERVICE_PORT`） | Chat complete、每日建议 |
 
-**决策**：除 Resume（8091）和 Chat（8092）独立端口外，已集成的 Reports、Goals、Dashboard、Roadmap、Market fallback、Feedback 统一聚合在 8090。旧 `ai_service/` 目录已移除，后续不得再以该目录承接新增能力。
+**决策**：除 Resume（8091）和 Chat（8092）独立端口外，已集成的 Reports、Goals、Dashboard、Roadmap、Market/JD、Feedback 统一聚合在 8090。旧 `ai_service/` 目录已移除，后续不得再以该目录承接新增能力。
 
 聚合服务（8090）当前暴露的路由：
 
 - `POST /api/v1/reports/generate-support`
 - `POST /api/v1/market/insight`
 - `POST /api/v1/market/soft-skills`
+- `POST /internal/market/jobs/classify`
+- `POST /internal/market/jobs/index`
+- `POST /internal/market/jobs/search`
 - `POST /internal/goals/advice`
 - `POST /internal/dashboard/target-job/match`
 - `POST /api/roadmap/recommendations/personalized`
@@ -37,10 +40,13 @@ Chat 服务（8092）当前暴露的路由：
 Resume 服务（8091）当前暴露的路由：
 
 - `POST /api/v1/resume/analyze`
+- `POST /internal/resume/ocr`
 
 **安全边界**：所有 Python 端口仅监听 `127.0.0.1`，前端禁止直连，必须经 Java `8081` 转发。
 
 ## 2. Java 侧配置键与环境变量
+
+Java 侧不再配置或读取 `spring.ai.openai.*`、`spring.ai.vectorstore.*`。模型 API key、OCR base URL、真实 embedding/pgvector 等 AI 运行配置均放在 Python 服务侧，Java 只保留 Python HTTP 边界地址、超时和调试开关。
 
 ### 2.1 `fuchuang.ai.python.*`（`PythonAiProperties`）
 
@@ -53,8 +59,10 @@ Resume 服务（8091）当前暴露的路由：
 | `fuchuang.ai.python.reports-base-url` | `FUCHUANG_AI_PYTHON_REPORTS_BASE_URL` | 回退到 `base-url` | `PythonReportsAiClient` |
 | `fuchuang.ai.python.reports-timeout-seconds` | `FUCHUANG_AI_PYTHON_REPORTS_TIMEOUT_SECONDS` | `8` | Reports-RAG |
 | `fuchuang.ai.python.resume-timeout-seconds` | `FUCHUANG_AI_PYTHON_RESUME_TIMEOUT_SECONDS` | `30` | Resume-AI |
+| `fuchuang.ai.python.resume-ocr-timeout-seconds` | `FUCHUANG_AI_PYTHON_RESUME_OCR_TIMEOUT_SECONDS` | `60` | Resume OCR |
 | `fuchuang.ai.python.dashboard-timeout-seconds` | `FUCHUANG_AI_PYTHON_DASHBOARD_TIMEOUT_SECONDS` / `FUCHUANG_PYTHON_AI_DASHBOARD_TIMEOUT_SECONDS`（legacy） | `30` | Dashboard-RAG |
 | `fuchuang.ai.python.roadmap-timeout-seconds` | `FUCHUANG_AI_PYTHON_ROADMAP_TIMEOUT_SECONDS` / `FUCHUANG_PYTHON_AI_ROADMAP_TIMEOUT_SECONDS`（legacy） | `8` | Roadmap-RAG |
+| `fuchuang.ai.python.market-timeout-seconds` | `FUCHUANG_AI_PYTHON_MARKET_TIMEOUT_SECONDS` | `20` | Market/JD Python boundary |
 | `fuchuang.ai.python.chat-timeout-seconds` | `FUCHUANG_PYTHON_AI_CHAT_TIMEOUT_SECONDS`（legacy） | `60` | Chat complete |
 | `fuchuang.ai.python.daily-suggestions-timeout-seconds` | `FUCHUANG_PYTHON_AI_DAILY_SUGGESTIONS_TIMEOUT_SECONDS`（legacy） | `30` | 每日建议 |
 | `fuchuang.ai.python.rag-feedback-timeout-seconds` | `FUCHUANG_PYTHON_AI_RAG_FEEDBACK_TIMEOUT_SECONDS`（legacy） | `10` | RAG 反馈与偏好校验 |
@@ -80,6 +88,18 @@ Roadmap timeout 兼容顺序为：
 FUCHUANG_AI_PYTHON_ROADMAP_TIMEOUT_SECONDS > FUCHUANG_PYTHON_AI_ROADMAP_TIMEOUT_SECONDS（legacy） > fuchuang.ai.python.roadmap-timeout-seconds > fuchuang.ai.python.timeout-seconds > 8
 ```
 
+Market/JD timeout 兼容顺序为：
+
+```
+FUCHUANG_AI_PYTHON_MARKET_TIMEOUT_SECONDS > fuchuang.ai.python.market-timeout-seconds > fuchuang.ai.python.timeout-seconds > 20
+```
+
+Resume OCR timeout 兼容顺序为：
+
+```
+FUCHUANG_AI_PYTHON_RESUME_OCR_TIMEOUT_SECONDS > fuchuang.ai.python.resume-ocr-timeout-seconds > fuchuang.ai.python.resume-timeout-seconds > fuchuang.ai.python.timeout-seconds > 60
+```
+
 ### 2.2 模块独立配置（历史命名，后续迁移项）
 
 | 配置键 | 环境变量 | 默认值 | 使用方 |
@@ -94,6 +114,10 @@ FUCHUANG_AI_PYTHON_ROADMAP_TIMEOUT_SECONDS > FUCHUANG_PYTHON_AI_ROADMAP_TIMEOUT_
 | `AI_SERVICE_HOST` | `127.0.0.1` | `app/main.py` 监听地址 |
 | `AI_SERVICE_PORT` | `8090` / `8092` | 聚合服务或 Chat 服务端口 |
 | `AI_RAG_FEEDBACK_QUEUE_PATH` | `data/rag_feedback_queue.jsonl` | RAG 反馈评估队列落盘路径（`career_ai/feedback_queue.py`） |
+| `FUCHUANG_RESUME_OCR_API_KEY` / `OPENAI_API_KEY` / `DASHSCOPE_API_KEY` | 无 | Python Resume OCR 模型调用 API key |
+| `FUCHUANG_RESUME_OCR_BASE_URL` / `OPENAI_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | Python Resume OCR OpenAI-compatible base URL |
+| `FUCHUANG_RESUME_OCR_MODEL` | `qwen-vl-ocr-2025-11-20` | Python Resume OCR 模型 |
+| `FUCHUANG_RESUME_OCR_MOCK_TEXT` | 无 | 本地测试时跳过真实 OCR 网络调用 |
 
 聚合服务（8090）启动：
 
@@ -105,7 +129,7 @@ AI_SERVICE_PORT=8090 python -m app.main
 ## 4. 已知命名债务（暂不改动，列入后续收敛）
 
 1. **环境变量前缀不统一**：超时类 legacy 变量是 `FUCHUANG_PYTHON_AI_*`，base-url 类是 `FUCHUANG_AI_PYTHON_*`，两套前缀并存。新增配置一律使用 `FUCHUANG_AI_PYTHON_*`。
-2. **Market 仍是 fallback 能力**：`/api/v1/market/insight` 与 `/api/v1/market/soft-skills` 已迁入 `ai-service/` 聚合入口，但还没有接入真实 JD ingestion、pgvector/Dashscope 或离线评估集。
+2. **Market/JD 仍是 fallback 能力**：`/api/v1/market/insight`、`/api/v1/market/soft-skills`、`/internal/market/jobs/classify|index|search` 已迁入 `ai-service/` 聚合入口，但还没有接入真实 embedding 模型、pgvector/Dashscope 或离线评估集。
 3. **通用超时默认值不一致**：yml 默认 20s，Goals 默认 20s，Reports 默认 8s，Roadmap 默认 8s；以显式配置为准。
 
 ## 5. 本地启动速查

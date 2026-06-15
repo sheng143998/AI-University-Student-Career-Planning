@@ -516,7 +516,7 @@ public class RoadmapServiceImpl implements RoadmapService {
         CareerPathRecommendationVO.VerticalPathRecommendationVO verticalPath =
                 findBestMatchingVerticalPath(effectiveCurrentJob, userSkills, allJobs);
 
-        // 5. 调用 Python Roadmap-RAG 生成横向换岗推荐，失败时使用本地相似度降级
+        // 5. 调用 Python Roadmap-RAG 生成横向换岗推荐，失败时返回空推荐诊断，不再本地补足
         RoadmapRagResult ragResult =
                 generateLateralPathRecommendationsRAG(effectiveCurrentJob, userSkills, resumeData, allJobs);
 
@@ -843,25 +843,23 @@ public class RoadmapServiceImpl implements RoadmapService {
         try {
             Map<String, Object> payload = buildRoadmapRagPayload(currentJob, userSkills, resumeData, allJobs);
             JsonNode rootNode = pythonRoadmapRagClient.generatePersonalizedRecommendations(payload);
-            RoadmapRagResult result = parseRoadmapRagResult(rootNode, allJobs);
-            if (result.lateralPaths().size() >= 2) {
-                return result;
-            }
-            if (!result.lateralPaths().isEmpty()) {
-                List<CareerPathRecommendationVO.LateralPathRecommendationVO> supplemented =
-                        new ArrayList<>(result.lateralPaths());
-                supplemented.addAll(generateFallbackLateralRecommendations(currentJob, userSkills, allJobs, supplemented));
-                if (supplemented.size() >= 2) {
-                    Map<String, Object> diagnostics = new LinkedHashMap<>(result.diagnostics());
-                    diagnostics.put("supplementedBy", "local-similarity-fallback");
-                    return new RoadmapRagResult(supplemented, diagnostics);
-                }
-            }
-            log.warn("Python Roadmap-RAG 返回空推荐，使用本地相似度降级");
+            return parseRoadmapRagResult(rootNode, allJobs);
         } catch (RuntimeException e) {
-            log.warn("Python Roadmap-RAG 调用失败，使用本地相似度降级: {}", e.getMessage());
+            log.warn("Python Roadmap-RAG call failed, returning empty recommendation diagnostics: {}", e.getMessage());
+            return emptyRoadmapRagResult("PYTHON_UNAVAILABLE", e.getMessage(), allJobs);
         }
-        return fallbackRoadmapRagResult(currentJob, userSkills, allJobs);
+    }
+
+    private RoadmapRagResult emptyRoadmapRagResult(String status, String reason, List<JobCategory> allJobs) {
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        diagnostics.put("status", status);
+        diagnostics.put("fusion", "none");
+        diagnostics.put("reranker", "none");
+        diagnostics.put("candidateCount", allJobs != null ? allJobs.size() : 0);
+        diagnostics.put("filters", Map.of("excludeSameCategory", true));
+        diagnostics.put("queries", Collections.emptyList());
+        diagnostics.put("fallbackReason", redactSensitive(reason != null ? reason : ""));
+        return new RoadmapRagResult(Collections.emptyList(), diagnostics);
     }
 
     private Map<String, Object> buildRoadmapRagPayload(
@@ -1067,100 +1065,6 @@ public class RoadmapServiceImpl implements RoadmapService {
             diagnostics.put("candidateCount", candidateCountNode.asInt());
         }
         return diagnostics;
-    }
-
-    private RoadmapRagResult fallbackRoadmapRagResult(String currentJob, List<String> userSkills, List<JobCategory> allJobs) {
-        List<CareerPathRecommendationVO.LateralPathRecommendationVO> fallback =
-                generateFallbackLateralRecommendations(currentJob, userSkills, allJobs, new ArrayList<>());
-        Map<String, Object> diagnostics = new LinkedHashMap<>();
-        diagnostics.put("fusion", "local-similarity-fallback");
-        diagnostics.put("reranker", "local-deterministic");
-        diagnostics.put("candidateCount", allJobs != null ? allJobs.size() : 0);
-        diagnostics.put("filters", Map.of("excludeSameCategory", true));
-        diagnostics.put("queries", List.of(redactSensitive(currentJob != null ? currentJob : "")));
-        return new RoadmapRagResult(fallback, diagnostics);
-    }
-
-    /**
-     * 生成备选横向推荐（当AI推荐不足时）
-     */
-    private List<CareerPathRecommendationVO.LateralPathRecommendationVO> generateFallbackLateralRecommendations(
-            String currentJob, List<String> userSkills, List<JobCategory> allJobs,
-            List<CareerPathRecommendationVO.LateralPathRecommendationVO> existing) {
-
-        List<CareerPathRecommendationVO.LateralPathRecommendationVO> fallback = new ArrayList<>();
-        Set<String> existingCategories = existing.stream()
-                .map(CareerPathRecommendationVO.LateralPathRecommendationVO::getTargetCategoryCode)
-                .collect(Collectors.toSet());
-        String currentBaseCategory = inferCurrentBaseCategory(currentJob, allJobs);
-        List<String> sanitizedUserSkills = safeStringList(userSkills);
-
-        // 按类别分组，计算每个类别的平均相似度
-        Map<String, List<JobCategory>> jobsByCategory = allJobs.stream()
-                .collect(Collectors.groupingBy(j -> extractBaseCategoryCode(j.getJobCategoryCode())));
-
-        List<Map.Entry<String, BigDecimal>> categoryScores = new ArrayList<>();
-        for (Map.Entry<String, List<JobCategory>> entry : jobsByCategory.entrySet()) {
-            if (existingCategories.contains(entry.getKey())) continue;
-            if (!currentBaseCategory.isBlank() && currentBaseCategory.equals(entry.getKey())) continue;
-
-            BigDecimal avgScore = entry.getValue().stream()
-                    .map(j -> calculateJobSimilarity(currentJob, userSkills, j))
-                    .reduce(BigDecimal.ZERO, BigDecimal::add)
-                    .divide(new BigDecimal(entry.getValue().size()), 2, RoundingMode.HALF_UP);
-
-            categoryScores.add(new AbstractMap.SimpleEntry<>(entry.getKey(), avgScore));
-        }
-
-        // 选择相似度中等的类别（排除已选）
-        categoryScores.sort(Map.Entry.comparingByValue());
-        int startIdx = Math.max(0, categoryScores.size() / 2 - 1);
-
-        for (int i = startIdx; i < Math.min(startIdx + (2 - existing.size()), categoryScores.size()); i++) {
-            String categoryCode = categoryScores.get(i).getKey();
-            List<JobCategory> categoryJobs = jobsByCategory.get(categoryCode);
-            if (categoryJobs.isEmpty()) continue;
-
-            JobCategory representative = categoryJobs.get(0);
-            List<CareerPathRecommendationVO.PathNodeVO> pathNodes = categoryJobs.stream()
-                    .sorted(Comparator.comparingInt(j -> levelOrderIndex(j.getJobLevel())))
-                    .map(j -> CareerPathRecommendationVO.PathNodeVO.builder()
-                            .id(String.valueOf(j.getId()))
-                            .title(j.getJobCategoryName())
-                            .levelName(j.getJobLevelName())
-                            .salaryRange(formatSalaryRange(j))
-                            .skills(parseJsonToList(j.getRequiredSkills()))
-                            .isCurrentLevel(false)
-                            .build())
-                    .collect(Collectors.toList());
-
-            fallback.add(CareerPathRecommendationVO.LateralPathRecommendationVO.builder()
-                    .targetJobId(representative.getId())
-                    .targetJobName(representative.getJobCategoryName())
-                    .targetCategoryCode(categoryCode)
-                    .matchScore(categoryScores.get(i).getValue())
-                    .transitionDifficulty(3)
-                    .estimatedMonths(12)
-                    .requiredSkills(parseJsonToList(representative.getRequiredSkills()))
-                    .possessedSkills(sanitizedUserSkills)
-                    .aiRecommendationReason("基于您的技能背景，该岗位与您的经验有一定关联，转型难度适中。")
-                    .pathNodes(pathNodes)
-                    .build());
-        }
-
-        return fallback;
-    }
-
-    private String inferCurrentBaseCategory(String currentJob, List<JobCategory> allJobs) {
-        if (currentJob == null || currentJob.isBlank() || allJobs == null || allJobs.isEmpty()) {
-            return "";
-        }
-        return allJobs.stream()
-                .filter(job -> isJobMatch(currentJob, job))
-                .map(job -> extractBaseCategoryCode(job.getJobCategoryCode()))
-                .filter(code -> code != null && !code.isBlank())
-                .findFirst()
-                .orElse("");
     }
 
     private int levelOrderIndex(String level) {
@@ -1665,9 +1569,6 @@ public class RoadmapServiceImpl implements RoadmapService {
         log.info("Recommend transition by job name: {}, level: {}", jobName, level);
 
         String normalizedLevel = normalizeLevel(level);
-        log.info("Normalized level: raw={}, normalized={}", level, normalizedLevel);
-
-        // Search with higher limit to find best match
         List<JobCategory> matchedJobs = jobCategoryMapper.searchByKeyword(jobName, 20);
         if (matchedJobs.isEmpty()) {
             return UserTransitionRecommendationVO.builder()
@@ -1677,127 +1578,52 @@ public class RoadmapServiceImpl implements RoadmapService {
                     .build();
         }
 
-        // Find best matching job - prioritize level parameter
-        JobCategory centerJob = null;
-
-        if (normalizedLevel != null) {
-            centerJob = matchedJobs.stream()
-                    .filter(j -> j.getJobCategoryName().equalsIgnoreCase(jobName) &&
-                            j.getJobLevel().equalsIgnoreCase(normalizedLevel))
-                    .findFirst()
-                    .orElse(null);
-        }
-
-        if (centerJob == null && normalizedLevel != null) {
-            centerJob = matchedJobs.stream()
-                    .filter(j -> j.getJobLevel().equalsIgnoreCase(normalizedLevel))
-                    .findFirst()
-                    .orElse(null);
-        }
-
-        if (centerJob == null) {
-            centerJob = matchedJobs.stream()
-                    .filter(j -> j.getJobCategoryName().equalsIgnoreCase(jobName))
-                    .findFirst()
-                    .orElse(matchedJobs.get(0));
-        }
-
+        JobCategory centerJob = findTransitionCenterJob(jobName, normalizedLevel, matchedJobs);
         List<String> currentSkills = parseJsonToList(centerJob.getRequiredSkills());
-        String centerBaseCode = extractBaseCategoryCode(centerJob.getJobCategoryCode());
-
-        log.info("Center job: {}, level: {}, levelName: {}, skills: {}",
-                centerJob.getJobCategoryName(), centerJob.getJobLevel(), centerJob.getJobLevelName(), currentSkills.size());
-
         List<JobCategory> allJobs = jobCategoryMapper.selectAll();
+        RoadmapRagResult ragResult = generateLateralPathRecommendationsRAG(
+                centerJob.getJobCategoryName(), currentSkills, null, allJobs);
+        List<UserTransitionRecommendationVO.TransitionRecommendationItemVO> recommendations =
+                mapTransitionRecommendations(ragResult.lateralPaths(), allJobs);
 
-        // Calculate skill-based similarity and dedupe by base category.
-        // Prefer same level as center (same behavior as roadmap focus lateral paths).
-        String centerLevel = centerJob.getJobLevel();
+        return UserTransitionRecommendationVO.builder()
+                .currentSkills(currentSkills)
+                .recommendations(recommendations)
+                .message("Found " + recommendations.size() + " transition recommendations from Python Roadmap-RAG")
+                .build();
+    }
 
-        Map<String, TransitionCandidate> bestByCategory = new HashMap<>();
-        for (JobCategory targetJob : allJobs) {
-            if (targetJob == null || targetJob.getId() == null) continue;
+    private JobCategory findTransitionCenterJob(String jobName, String normalizedLevel, List<JobCategory> matchedJobs) {
+        if (normalizedLevel != null) {
+            Optional<JobCategory> exact = matchedJobs.stream()
+                    .filter(job -> job.getJobCategoryName().equalsIgnoreCase(jobName)
+                            && normalizedLevel.equalsIgnoreCase(job.getJobLevel()))
+                    .findFirst();
+            if (exact.isPresent()) {
+                return exact.get();
+            }
+            Optional<JobCategory> sameLevel = matchedJobs.stream()
+                    .filter(job -> normalizedLevel.equalsIgnoreCase(job.getJobLevel()))
+                    .findFirst();
+            if (sameLevel.isPresent()) {
+                return sameLevel.get();
+            }
+        }
+        return matchedJobs.stream()
+                .filter(job -> job.getJobCategoryName().equalsIgnoreCase(jobName))
+                .findFirst()
+                .orElse(matchedJobs.get(0));
+    }
 
-            // Skip same job
-            if (targetJob.getId().equals(centerJob.getId())) continue;
-
-            // Skip same category
-            String targetBaseCode = extractBaseCategoryCode(targetJob.getJobCategoryCode());
-            if (targetBaseCode.equals(centerBaseCode)) continue;
-
-            // Prefer same level first; if level missing, still allow
-            if (centerLevel != null && targetJob.getJobLevel() != null && !centerLevel.equalsIgnoreCase(targetJob.getJobLevel())) {
+    private List<UserTransitionRecommendationVO.TransitionRecommendationItemVO> mapTransitionRecommendations(
+            List<CareerPathRecommendationVO.LateralPathRecommendationVO> lateralPaths,
+            List<JobCategory> allJobs) {
+        List<UserTransitionRecommendationVO.TransitionRecommendationItemVO> recommendations = new ArrayList<>();
+        for (CareerPathRecommendationVO.LateralPathRecommendationVO path : lateralPaths) {
+            JobCategory targetJob = findTargetJob(path.getTargetJobId(), path.getTargetCategoryCode(), allJobs);
+            if (targetJob == null) {
                 continue;
             }
-
-            double score = calculateSkillSimilarity(currentSkills, targetJob);
-            TransitionCandidate existing = bestByCategory.get(targetBaseCode);
-            if (existing == null || score > existing.score) {
-                bestByCategory.put(targetBaseCode, new TransitionCandidate(targetJob, score, targetBaseCode));
-            }
-        }
-
-        List<TransitionCandidate> candidates = new ArrayList<>(bestByCategory.values());
-
-        // Fallback: if too few candidates on same level, broaden to all levels
-        if (candidates.size() < 4) {
-            bestByCategory.clear();
-            for (JobCategory targetJob : allJobs) {
-                if (targetJob == null || targetJob.getId() == null) continue;
-                if (targetJob.getId().equals(centerJob.getId())) continue;
-                String targetBaseCode = extractBaseCategoryCode(targetJob.getJobCategoryCode());
-                if (targetBaseCode.equals(centerBaseCode)) continue;
-
-                double score = calculateSkillSimilarity(currentSkills, targetJob);
-                TransitionCandidate existing = bestByCategory.get(targetBaseCode);
-                if (existing == null || score > existing.score) {
-                    bestByCategory.put(targetBaseCode, new TransitionCandidate(targetJob, score, targetBaseCode));
-                }
-            }
-            candidates = new ArrayList<>(bestByCategory.values());
-        }
-
-        // Dynamic threshold: start at 0.3 (roadmap), if not enough then lower to 0.2
-        List<TransitionCandidate> filtered = filterCandidatesByThreshold(candidates, 0.3);
-        if (filtered.size() < 4) {
-            filtered = filterCandidatesByThreshold(candidates, 0.2);
-        }
-
-        // Sort by score descending
-        filtered.sort((a, b) -> Double.compare(b.score, a.score));
-
-        // Take top candidates (return more so frontend can render more)
-        List<UserTransitionRecommendationVO.TransitionRecommendationItemVO> recommendations = new ArrayList<>();
-        int count = Math.min(filtered.size(), 8);
-
-        for (int i = 0; i < count; i++) {
-            TransitionCandidate candidate = filtered.get(i);
-            JobCategory targetJob = candidate.job;
-
-            List<String> targetSkills = parseJsonToList(targetJob.getRequiredSkills());
-            List<JobTransitionPathDetailVO.SkillsGapVO> skillsGap = new ArrayList<>();
-
-            for (String skill : targetSkills) {
-                boolean possessed = currentSkills.stream()
-                        .anyMatch(s -> {
-                            String sLower = s.toLowerCase();
-                            String skillLower = skill.toLowerCase();
-                            return sLower.equals(skillLower) ||
-                                   sLower.contains(skillLower) ||
-                                   skillLower.contains(sLower);
-                        });
-                if (!possessed) {
-                    skillsGap.add(JobTransitionPathDetailVO.SkillsGapVO.builder()
-                            .skill(skill)
-                            .level(0.7)
-                            .priority(skillsGap.size() < 3 ? "high" : "medium")
-                            .build());
-                }
-            }
-
-            int difficulty = (int) Math.max(1, Math.min(5, 6 - candidate.score * 5));
-            int avgMonths = (int) (6 + (1 - candidate.score) * 18);
-
             recommendations.add(UserTransitionRecommendationVO.TransitionRecommendationItemVO.builder()
                     .id(targetJob.getId())
                     .recommendationId(targetJob.getId())
@@ -1805,65 +1631,33 @@ public class RoadmapServiceImpl implements RoadmapService {
                     .toJobName(targetJob.getJobCategoryName())
                     .toJobLevel(targetJob.getJobLevel())
                     .toJobLevelName(targetJob.getJobLevelName())
-                    .matchScore(candidate.score)
-                    .transitionDifficulty(difficulty)
-                    .avgTransitionTimeMonths(avgMonths)
-                    .requiredSkillsGap(skillsGap)
+                    .matchScore(path.getMatchScore() == null ? 0.0 : path.getMatchScore().doubleValue())
+                    .transitionDifficulty(path.getTransitionDifficulty())
+                    .avgTransitionTimeMonths(path.getEstimatedMonths())
+                    .requiredSkillsGap(buildSkillsGap(path.getRequiredSkills()))
                     .industry(extractIndustryFromProfile(targetJob.getJobProfile()))
                     .salaryRange(formatSalaryRange(targetJob))
                     .build());
         }
-
-        return UserTransitionRecommendationVO.builder()
-                .currentSkills(currentSkills)
-                .recommendations(recommendations)
-                .message("Found " + recommendations.size() + " transition recommendations based on skill similarity")
-                .build();
+        return recommendations;
     }
 
-    /**
-     * Calculate skill similarity only (for transition matching)
-     * Uses same algorithm as roadmap lateral paths
-     */
-    private double calculateSkillSimilarity(List<String> currentSkills, JobCategory targetJob) {
-        List<String> targetSkills = parseJsonToList(targetJob.getRequiredSkills());
-
-        if (currentSkills.isEmpty() || targetSkills.isEmpty()) {
-            return 0.0;
+    private List<JobTransitionPathDetailVO.SkillsGapVO> buildSkillsGap(List<String> requiredSkills) {
+        List<JobTransitionPathDetailVO.SkillsGapVO> skillsGap = new ArrayList<>();
+        if (requiredSkills == null) {
+            return skillsGap;
         }
-
-        // Same matching logic as addLateralPaths method
-        long matchedSkills = currentSkills.stream()
-                .filter(s -> targetSkills.stream()
-                        .anyMatch(ts -> ts.toLowerCase().contains(s.toLowerCase())
-                                || s.toLowerCase().contains(ts.toLowerCase())))
-                .count();
-
-        // Same formula as roadmap lateral paths
-        double similarity = (double) matchedSkills / Math.max(currentSkills.size(), targetSkills.size());
-
-        return Math.min(similarity, 1.0);
-    }
-
-    private List<TransitionCandidate> filterCandidatesByThreshold(List<TransitionCandidate> candidates, double threshold) {
-        final double t = threshold;
-        return candidates.stream()
-                .filter(c -> c != null && c.score > t)
-                .collect(Collectors.toList());
-    }
-
-    /**
-     * Helper class for transition candidates
-     */
-    private static class TransitionCandidate {
-        JobCategory job;
-        double score;
-        String categoryCode;
-
-        TransitionCandidate(JobCategory job, double score, String categoryCode) {
-            this.job = job;
-            this.score = score;
-            this.categoryCode = categoryCode;
+        for (String skill : requiredSkills) {
+            String safeSkill = redactSensitive(skill);
+            if (safeSkill == null || safeSkill.isBlank()) {
+                continue;
+            }
+            skillsGap.add(JobTransitionPathDetailVO.SkillsGapVO.builder()
+                    .skill(safeSkill)
+                    .level(0.7)
+                    .priority(skillsGap.size() < 3 ? "high" : "medium")
+                    .build());
         }
+        return skillsGap;
     }
 }

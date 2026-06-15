@@ -77,7 +77,7 @@
 - Java 先创建 `PROCESSING` 报告记录。
 - 内容生成完成后状态更新为 `COMPLETED`。
 - 能力画像或职业数据等前置数据缺失时状态更新为 `FAILED`。
-- Python 下游 400、5xx、超时、不可用、无效 JSON 或空检索不应导致整份报告失败；Java 使用 deterministic fallback 生成建议，并在 `ragDiagnostics` 中标记 `FALLBACK` 原因。
+- Python 下游 400、5xx、超时、不可用、无效 JSON 或空检索不应导致整份报告失败；Java 不再生成本地 AI 建议，改为保存空 `aiSuggestions`、空证据和 `ragDiagnostics` 中的不可用/空检索原因。
 
 ## 9.2 获取最新报告
 
@@ -426,12 +426,12 @@ Java 错误映射：
 | Python 情况 | Java 行为 | `ragDiagnostics.status` |
 | --- | --- | --- |
 | 2xx + `OK` | 使用 Python 建议与证据 | `OK` |
-| 2xx + `EMPTY_RETRIEVAL` | 使用 deterministic fallback 建议，证据为空 | `FALLBACK` |
-| 400 | 使用 fallback，不重试 | `FALLBACK` |
-| 5xx | 使用 fallback，不重试 | `FALLBACK` |
-| Timeout | 使用 fallback，不重试 | `FALLBACK` |
-| 连接失败 | 使用 fallback，不重试 | `FALLBACK` |
-| 响应 JSON 无效或 2xx schema 缺失/状态未知/字段类型错误 | 使用 fallback，不重试 | `FALLBACK` |
+| 2xx + `EMPTY_RETRIEVAL` | 保存空 `aiSuggestions`，证据为空，不重试 | `EMPTY_RETRIEVAL` |
+| 400 | 保存空 `aiSuggestions`，证据为空，不重试 | `PYTHON_UNAVAILABLE` |
+| 5xx | 保存空 `aiSuggestions`，证据为空，不重试 | `PYTHON_UNAVAILABLE` |
+| Timeout | 保存空 `aiSuggestions`，证据为空，不重试 | `PYTHON_UNAVAILABLE` |
+| 连接失败 | 保存空 `aiSuggestions`，证据为空，不重试 | `PYTHON_UNAVAILABLE` |
+| 响应 JSON 无效或 2xx schema 缺失/状态未知/字段类型错误 | 保存空 `aiSuggestions`，证据为空，不重试 | `PYTHON_UNAVAILABLE` |
 
 `evidenceRefs[].snippet` 只能返回经过轻量脱敏的短文本片段，至少遮蔽邮箱、手机号和身份证号；完整简历、职业数据或能力画像原文不得写入诊断日志。
 

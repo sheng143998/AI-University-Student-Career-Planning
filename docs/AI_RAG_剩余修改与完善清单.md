@@ -36,7 +36,8 @@ Canonical 运行门禁结论：Python 8090/8091/8092 smoke 通过；Java 8081 �
 
 ### 2. GitHub PR #1 未合并风险已关闭
 
-Resume、Reports、Goals、Dashboard、Chat、Roadmap、Market fallback、Feedback queue 与统一配置文档已经收敛到统一 `ai-service/` 方向。Roadmap 已迁入 `ai-service` 聚合入口，并通过 Python `71 passed`、Java server `88 tests`、Roadmap narrow `19 tests`、前端 build 与子 Agent 复验。
+Resume、Reports、Goals、Dashboard、Chat、Roadmap、Market fallback、Feedback queue 与统一配置文档已经收敛到统一 `ai-service/` 方向。Roadmap 已迁入 `ai-service` 聚合入口，并通过 Python `71 passed`、Java server `88 tests`、Roadmap narrow `19 tests`、前端 build 与子 Agent 复验。2026-06-15 补迁移后，Java 不再用本地 skill-similarity fallback 补足 Roadmap 横向推荐，按岗位换岗推荐也改为调用 Python Roadmap-RAG 后映射返回。
+2026-06-15 追加补迁移后，Reports 在 Python Reports-RAG 不可用或空检索时不再由 Java 复用/生成 AI 建议，改为空 `aiSuggestions` 加诊断返回。
 
 后续分支处理方式：
 
@@ -101,17 +102,18 @@ Resume、Reports、Goals、Dashboard、Chat、Roadmap、Market fallback、Feedba
 
 接口文档里提到市场数据、招聘数据和企业 1w 条就业数据仍有待补充。当前还需要确认：
 
-- 招聘 JD ingestion 是否从 Java 转到 Python。
-- JD 分块、摘要索引、metadata filter 是否落地。
-- job_vector_store 是否仍有 Java fake embedding 或空向量风险。
-- 市场趋势分析是否有真实数据源和 Python RAG 支撑；当前仅有 `ai-service` deterministic fallback。
+- 招聘 JD ingestion、岗位分类、岗位索引、岗位语义检索已从 Java Spring AI/OpenAIEmbeddingModel 改为 Python `ai-service` 边界。
+- JD 分块、metadata filter、Multi-Query、BM25/hash embedding hybrid retrieval、RRF rerank 已有 deterministic fallback。
+- job_vector_store 不再由 Java fake embedding 或 Spring AI VectorStore 写入，Java 只持久化 Python 返回的 embedding/metadata/content_hash。
+- 市场趋势分析和软技能生成已走 Python fallback；Java 下游失败时不再生成静态 AI 洞察或软技能证据，但还缺真实数据源、真实 embedding 模型、pgvector/Dashscope 和离线评估集。
 - Dashboard/Roadmap 是否依赖同一套岗位知识库，避免重复实现。
 
 ### 8. Resume 闭环仍缺真实 PDF/OCR 和数据库约束
 
 Resume 分支已完成 Python fallback RAG，但仍有后续完善项：
 
-- 图片型 PDF/OCR 解析仍需按 `docs/简历图片型PDF解析改造计划.md` 继续落地。
+- 图片型 PDF/OCR 模型调用已迁到 Python `/internal/resume/ocr` 边界；Java 只负责 PDF 渲染和业务异常流。
+- 仍需用真实图片型 PDF、真实 OCR API key、真实 OSS 文件和真实用户跑端到端验收。
 - 未新增 `(vector_store_id, user_id)` 唯一约束，目前靠 Java/MyBatis 层幂等。
 - 还未做真实 OSS 文件、真实用户、真实异步轮询的端到端测试。
 - 未做真实 embedding/pgvector 的简历召回质量评估。

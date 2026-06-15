@@ -56,6 +56,8 @@ public class PythonAiProperties {
      */
     private Integer resumeTimeoutSeconds;
 
+    private Integer resumeOcrTimeoutSeconds;
+
     /**
      * Dashboard-AI 目标岗位匹配超时时间（秒）
      */
@@ -65,6 +67,8 @@ public class PythonAiProperties {
      * Roadmap-RAG 个性化推荐超时时间（秒）
      */
     private Integer roadmapTimeoutSeconds;
+
+    private Integer marketTimeoutSeconds;
 
     /**
      * Whether to register the legacy /ai/chat debug endpoint.
@@ -122,6 +126,11 @@ public class PythonAiProperties {
         return firstPositive(envValue, resumeTimeoutSeconds, timeoutSeconds, 30);
     }
 
+    public Integer getResumeOcrTimeoutSeconds() {
+        Integer envValue = readPositiveEnv("FUCHUANG_AI_PYTHON_RESUME_OCR_TIMEOUT_SECONDS");
+        return firstPositive(envValue, resumeOcrTimeoutSeconds, resumeTimeoutSeconds, timeoutSeconds, 60);
+    }
+
     public Integer getDashboardTimeoutSeconds() {
         Integer legacyEnvValue = readPositiveEnv("FUCHUANG_PYTHON_AI_DASHBOARD_TIMEOUT_SECONDS");
         Integer envValue = readPositiveEnv("FUCHUANG_AI_PYTHON_DASHBOARD_TIMEOUT_SECONDS");
@@ -132,6 +141,11 @@ public class PythonAiProperties {
         Integer legacyEnvValue = readPositiveEnv("FUCHUANG_PYTHON_AI_ROADMAP_TIMEOUT_SECONDS");
         Integer envValue = readPositiveEnv("FUCHUANG_AI_PYTHON_ROADMAP_TIMEOUT_SECONDS");
         return firstPositive(envValue, legacyEnvValue, roadmapTimeoutSeconds, timeoutSeconds, 8);
+    }
+
+    public Integer getMarketTimeoutSeconds() {
+        Integer envValue = readPositiveEnv("FUCHUANG_AI_PYTHON_MARKET_TIMEOUT_SECONDS");
+        return firstPositive(envValue, marketTimeoutSeconds, timeoutSeconds, 20);
     }
 
     public boolean isDebugChatEndpointEnabled() {

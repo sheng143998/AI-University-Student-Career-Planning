@@ -7,7 +7,13 @@ from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 
 from app.main import AiServiceHandler
-from career_ai.market_service import generate_market_insight, generate_soft_skills
+from career_ai.market_service import (
+    classify_job,
+    generate_market_insight,
+    generate_soft_skills,
+    index_jobs,
+    search_jobs,
+)
 
 
 def sample_payload() -> dict:
@@ -62,6 +68,69 @@ class MarketServiceTest(unittest.TestCase):
         self.assertEqual(0, scores["Learning ability"])
         self.assertEqual(60, scores["Communication"])
 
+    def test_classify_job_returns_result_shape(self) -> None:
+        result = classify_job(
+            {
+                "job_id": 6001,
+                "job_content": "AI Agent and RAG backend engineer, Python, PyTorch, 15-25K, 1 year experience",
+                "job": {"jobName": "AI Application Engineer", "salaryRange": "15-25K"},
+            }
+        )
+
+        self.assertEqual(1, result["code"])
+        data = result["data"]
+        self.assertEqual("AI_APP_JUNIOR", data["category_code"])
+        self.assertEqual("JUNIOR", data["level"])
+        self.assertEqual(15000, data["min_salary"])
+        self.assertIn("Python", data["required_skills"])
+        self.assertIn("RAG", data["required_skills"])
+
+    def test_index_jobs_returns_deterministic_embedding_records(self) -> None:
+        payload = {
+            "jobs": [
+                {
+                    "job_id": 6001,
+                    "content": "AI Application Engineer\nPython RAG LLM",
+                    "metadata": {"document_type": "jd", "source": "test", "raw_text": "must not pass"},
+                }
+            ]
+        }
+
+        first = index_jobs(payload)
+        second = index_jobs(payload)
+
+        record = first["data"]["records"][0]
+        self.assertEqual(1, first["code"])
+        self.assertEqual(record["embedding"], second["data"]["records"][0]["embedding"])
+        self.assertEqual(6001, record["job_id"])
+        self.assertNotIn("raw_text", record["metadata"])
+        self.assertTrue(record["embedding"].startswith("["))
+
+    def test_search_jobs_returns_ranked_job_ids(self) -> None:
+        result = search_jobs(
+            {
+                "query_text": "Python RAG backend",
+                "limit": 2,
+                "jobs": [
+                    {
+                        "job_id": 1,
+                        "job_name": "Frontend Engineer",
+                        "required_skills": ["Vue", "CSS"],
+                    },
+                    {
+                        "job_id": 2,
+                        "job_name": "AI Application Engineer",
+                        "required_skills": ["Python", "RAG"],
+                        "job_description": "Build backend RAG applications",
+                    },
+                ],
+            }
+        )
+
+        self.assertEqual(1, result["code"])
+        self.assertEqual(2, result["data"]["job_ids"][0])
+        self.assertEqual("rrf", result["data"]["retrieval"]["fusion_method"])
+
     def test_http_market_endpoints_are_mounted(self) -> None:
         server = ThreadingHTTPServer(("127.0.0.1", 0), AiServiceHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -74,6 +143,33 @@ class MarketServiceTest(unittest.TestCase):
             soft_skills = self.post(server.server_port, "/api/v1/market/soft-skills", sample_payload())
             self.assertEqual(200, soft_skills[0])
             self.assertEqual(5, len(soft_skills[1]))
+
+            classification = self.post(
+                server.server_port,
+                "/internal/market/jobs/classify",
+                {"job_content": "Java Spring backend engineer 20-30K", "job": {"jobName": "Java Engineer"}},
+            )
+            self.assertEqual(200, classification[0])
+            self.assertEqual(1, classification[1]["code"])
+
+            indexed = self.post(
+                server.server_port,
+                "/internal/market/jobs/index",
+                {"jobs": [{"job_id": 1, "content": "Python RAG engineer", "metadata": {"source": "test"}}]},
+            )
+            self.assertEqual(200, indexed[0])
+            self.assertEqual(1, indexed[1]["code"])
+
+            searched = self.post(
+                server.server_port,
+                "/internal/market/jobs/search",
+                {
+                    "query_text": "Python RAG",
+                    "jobs": [{"job_id": 1, "job_name": "AI Engineer", "required_skills": ["Python", "RAG"]}],
+                },
+            )
+            self.assertEqual(200, searched[0])
+            self.assertEqual([1], searched[1]["data"]["job_ids"])
         finally:
             server.shutdown()
             server.server_close()

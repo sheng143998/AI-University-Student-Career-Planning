@@ -29,18 +29,17 @@ import com.itsheng.service.mapper.StudentCapabilityProfileMapper;
 import com.itsheng.service.mapper.UserCareerDataMapper;
 import com.itsheng.service.mapper.UserRoadmapStepsMapper;
 import com.itsheng.service.mapper.UserVectorStoreMapper;
+import com.itsheng.service.model.ResumeDocument;
 import com.itsheng.service.service.ResumeOcrService;
 import com.itsheng.service.service.ResumeService;
 import com.itsheng.common.utils.AliOssUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.document.Document;
-import org.springframework.ai.reader.ExtractedTextFormatter;
-import org.springframework.ai.reader.pdf.PagePdfDocumentReader;
-import org.springframework.ai.reader.pdf.config.PdfDocumentReaderConfig;
-import org.springframework.ai.reader.tika.TikaDocumentReader;
-import org.springframework.ai.transformer.splitter.TokenTextSplitter;
-import org.springframework.core.io.ByteArrayResource;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.tika.Tika;
+import org.apache.tika.exception.TikaException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -50,6 +49,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -75,6 +75,7 @@ public class ResumeServiceImpl implements ResumeService {
     private final UserCareerDataMapper userCareerDataMapper;
     private final UserRoadmapStepsMapper userRoadmapStepsMapper;
     private final ResumeOcrService resumeOcrService;
+    private final Tika tika = new Tika();
 
     @Value("${resume.parser.pdf.min-effective-chars:80}")
     private int pdfMinEffectiveChars;
@@ -130,7 +131,7 @@ public class ResumeServiceImpl implements ResumeService {
 
             // 解析简历内容
             byte[] fileBytes = file.getBytes();
-            List<Document> documents = parseResume(fileBytes, fileType, userId, fileUrl);
+            List<ResumeDocument> documents = parseResume(fileBytes, fileType, userId, fileUrl);
             log.debug("简历解析完成：userId={}, fileType={}, documentCount={}", userId, fileType, documents.size());
 
             if (documents.isEmpty()) {
@@ -140,7 +141,7 @@ public class ResumeServiceImpl implements ResumeService {
 
             // 合并所有内容用于返回
             String resumeContent = documents.stream()
-                    .map(Document::getText)
+                    .map(ResumeDocument::getText)
                     .collect(Collectors.joining("\n"));
             int effectiveChars = countEffectiveChars(resumeContent);
             log.debug("简历文本聚合完成：userId={}, totalChars={}, effectiveChars={}", userId,
@@ -888,8 +889,7 @@ public class ResumeServiceImpl implements ResumeService {
      * @param fileUrl 文件存储路径
      * @return 解析后的 Document 列表（metadata 中已包含用户 ID 和文件路径）
      */
-    private List<Document> parseResume(byte[] fileBytes, String fileType, Long userId, String fileUrl) throws IOException {
-        ByteArrayResource resource = new ByteArrayResource(fileBytes);
+    private List<ResumeDocument> parseResume(byte[] fileBytes, String fileType, Long userId, String fileUrl) throws IOException {
         String baseDocId = UUID.randomUUID().toString();
 
         // 构建基础 metadata
@@ -898,24 +898,17 @@ public class ResumeServiceImpl implements ResumeService {
                 userId, fileType, fileUrl, baseDocId);
 
         if ("pdf".equals(fileType)) {
-            return parseResumeByPdf(resource, fileBytes, baseMetadata, userId, fileUrl);
+            return parseResumeByPdf(fileBytes, baseMetadata, userId, fileUrl);
         } else {
-            return parseResumeByTika(resource, baseMetadata, fileType);
+            return parseResumeByTika(fileBytes, baseMetadata, fileType);
         }
     }
 
-    private List<Document> parseResumeByPdf(ByteArrayResource resource, byte[] fileBytes,
-                                            Map<String, Object> baseMetadata, Long userId, String fileUrl) {
+    private List<ResumeDocument> parseResumeByPdf(byte[] fileBytes, Map<String, Object> baseMetadata,
+                                                  Long userId, String fileUrl) {
         log.debug("开始执行 PDF 文本提取：userId={}, fileUrl={}", userId, fileUrl);
 
-        PagePdfDocumentReader reader = new PagePdfDocumentReader(
-                resource,
-                PdfDocumentReaderConfig.builder()
-                        .withPageExtractedTextFormatter(ExtractedTextFormatter.defaults())
-                        .withPagesPerDocument(ResumeConstant.PDF_PAGES_PER_DOCUMENT)
-                        .build()
-        );
-        List<Document> pageDocuments = reader.read();
+        List<ResumeDocument> pageDocuments = extractPdfDocuments(fileBytes, baseMetadata);
         log.info("PDF 简历文本提取完成，共{}页文档", pageDocuments.size());
 
         int rawEffectiveChars = countEffectiveChars(joinDocumentTexts(pageDocuments));
@@ -930,7 +923,7 @@ public class ResumeServiceImpl implements ResumeService {
 
         validateExtractedResumeText(pageDocuments, "PDF_OCR_OR_TEXT");
 
-        List<Document> splitDocuments = splitDocuments(pageDocuments);
+        List<ResumeDocument> splitDocuments = splitDocuments(pageDocuments);
         log.info("PDF 文本分割完成，共{}个片段", splitDocuments.size());
 
         for (int i = 0; i < splitDocuments.size(); i++) {
@@ -942,13 +935,21 @@ public class ResumeServiceImpl implements ResumeService {
         return splitDocuments;
     }
 
-    private List<Document> parseResumeByTika(ByteArrayResource resource, Map<String, Object> baseMetadata, String fileType) {
-        TikaDocumentReader reader = new TikaDocumentReader(resource);
-        List<Document> documents = reader.read();
+    private List<ResumeDocument> parseResumeByTika(byte[] fileBytes, Map<String, Object> baseMetadata, String fileType) throws IOException {
+        String text;
+        try {
+            text = tika.parseToString(new ByteArrayInputStream(fileBytes));
+        } catch (TikaException e) {
+            throw new FileUploadException("RESUME_TEXT_EXTRACTION_FAILED: 文档文本提取失败", e);
+        }
+        Map<String, Object> metadata = new HashMap<>(baseMetadata);
+        metadata.put("parser", "apache-tika");
+        metadata.put("source_type", fileType);
+        List<ResumeDocument> documents = List.of(ResumeDocument.of(text, metadata));
         log.info("Tika 简历解析成功 ({}), 共{}个文档", fileType, documents.size());
         log.debug("Tika 文本提取统计：fileType={}, rawEffectiveChars={}", fileType, countEffectiveChars(joinDocumentTexts(documents)));
 
-        List<Document> splitDocuments = splitDocuments(documents);
+        List<ResumeDocument> splitDocuments = splitDocuments(documents);
         log.info("文本分割完成，共{}个片段", splitDocuments.size());
 
         for (int i = 0; i < splitDocuments.size(); i++) {
@@ -960,8 +961,8 @@ public class ResumeServiceImpl implements ResumeService {
         return splitDocuments;
     }
 
-    private List<Document> parsePdfWithOcrFallback(byte[] fileBytes, Map<String, Object> baseMetadata,
-                                                   Long userId, String fileUrl, int rawEffectiveChars) {
+    private List<ResumeDocument> parsePdfWithOcrFallback(byte[] fileBytes, Map<String, Object> baseMetadata,
+                                                         Long userId, String fileUrl, int rawEffectiveChars) {
         if (!pdfOcrEnabled) {
             log.warn("检测到疑似图片型 PDF，但 OCR 未启用，userId={}, fileUrl={}", userId, fileUrl);
             throw new FileUploadException("RESUME_IMAGE_PDF_OCR_REQUIRED: 该 PDF 可能为扫描件或图片，当前系统未启用 OCR，请上传可复制文本版 PDF 或 DOCX");
@@ -970,7 +971,7 @@ public class ResumeServiceImpl implements ResumeService {
         log.warn("开始对疑似图片型 PDF 执行 OCR fallback，userId={}, fileUrl={}, rawEffectiveChars={}",
                 userId, fileUrl, rawEffectiveChars);
 
-        List<Document> ocrDocuments = resumeOcrService.extractDocumentsFromPdf(fileBytes, baseMetadata);
+        List<ResumeDocument> ocrDocuments = resumeOcrService.extractDocumentsFromPdf(fileBytes, baseMetadata);
         int ocrEffectiveChars = countEffectiveChars(joinDocumentTexts(ocrDocuments));
         log.debug("OCR fallback 完成：userId={}, fileUrl={}, ocrDocumentCount={}, ocrEffectiveChars={}",
                 userId, fileUrl, ocrDocuments.size(), ocrEffectiveChars);
@@ -983,6 +984,39 @@ public class ResumeServiceImpl implements ResumeService {
         return ocrDocuments;
     }
 
+    private List<ResumeDocument> extractPdfDocuments(byte[] fileBytes, Map<String, Object> baseMetadata) {
+        try (PDDocument pdfDocument = Loader.loadPDF(fileBytes)) {
+            PDFTextStripper stripper = new PDFTextStripper();
+            int pageCount = pdfDocument.getNumberOfPages();
+            int pagesPerDocument = Math.max(1, ResumeConstant.PDF_PAGES_PER_DOCUMENT);
+            int overlap = Math.max(0, Math.min(ResumeConstant.PDF_PAGE_OVERLAP, pagesPerDocument - 1));
+            List<ResumeDocument> documents = new ArrayList<>();
+
+            int startPage = 1;
+            while (startPage <= pageCount) {
+                int endPage = Math.min(pageCount, startPage + pagesPerDocument - 1);
+                stripper.setStartPage(startPage);
+                stripper.setEndPage(endPage);
+                String text = stripper.getText(pdfDocument);
+
+                Map<String, Object> metadata = new HashMap<>(baseMetadata);
+                metadata.put(ResumeConstant.METADATA_KEY_PAGE_NUMBER, startPage);
+                metadata.put("page_start", startPage);
+                metadata.put("page_end", endPage);
+                metadata.put("parser", "pdfbox");
+                documents.add(ResumeDocument.of(text, metadata));
+
+                if (endPage >= pageCount) {
+                    break;
+                }
+                startPage = endPage + 1 - overlap;
+            }
+            return documents;
+        } catch (IOException e) {
+            throw new FileUploadException("RESUME_TEXT_EXTRACTION_FAILED: PDF 文本提取失败", e);
+        }
+    }
+
     private Map<String, Object> buildBaseMetadata(Long userId, String fileUrl, String fileType, String baseDocId) {
         Map<String, Object> baseMetadata = new HashMap<>();
         baseMetadata.put(ResumeConstant.METADATA_KEY_USER_ID, userId);
@@ -992,21 +1026,67 @@ public class ResumeServiceImpl implements ResumeService {
         return baseMetadata;
     }
 
-    private List<Document> splitDocuments(List<Document> documents) {
-        TokenTextSplitter splitter = TokenTextSplitter.builder()
-                .withChunkSize(ResumeConstant.TEXT_SPLITTER_CHUNK_SIZE)
-                .withMinChunkSizeChars(ResumeConstant.TEXT_SPLITTER_MIN_CHUNK_SIZE_CHARS)
-                .withMinChunkLengthToEmbed(ResumeConstant.TEXT_SPLITTER_MIN_CHUNK_LENGTH_TO_EMBED)
-                .withMaxNumChunks(ResumeConstant.TEXT_SPLITTER_MAX_NUM_CHUNKS)
-                .build();
-
-        List<Document> splitDocuments = splitter.apply(documents);
+    private List<ResumeDocument> splitDocuments(List<ResumeDocument> documents) {
+        List<ResumeDocument> splitDocuments = new ArrayList<>();
+        for (ResumeDocument document : documents) {
+            for (String chunk : splitText(document.getText())) {
+                if (splitDocuments.size() >= ResumeConstant.TEXT_SPLITTER_MAX_NUM_CHUNKS) {
+                    break;
+                }
+                Map<String, Object> metadata = new HashMap<>(document.getMetadata());
+                metadata.put("parent_document_id", document.getId());
+                splitDocuments.add(ResumeDocument.of(chunk, metadata));
+            }
+        }
         log.debug("文本分割统计：rawDocumentCount={}, splitDocumentCount={}, splitEffectiveChars={}",
                 documents.size(), splitDocuments.size(), countEffectiveChars(joinDocumentTexts(splitDocuments)));
         return splitDocuments;
     }
 
-    private void validateExtractedResumeText(List<Document> documents, String stage) {
+    private List<String> splitText(String text) {
+        if (text == null || text.isBlank()) {
+            return Collections.emptyList();
+        }
+        String normalized = text.trim();
+        int chunkSize = Math.max(1, ResumeConstant.TEXT_SPLITTER_CHUNK_SIZE);
+        int minChunkSize = Math.max(1, ResumeConstant.TEXT_SPLITTER_MIN_CHUNK_SIZE_CHARS);
+        if (normalized.length() <= chunkSize) {
+            return countEffectiveChars(normalized) >= ResumeConstant.TEXT_SPLITTER_MIN_CHUNK_LENGTH_TO_EMBED
+                    ? List.of(normalized)
+                    : Collections.emptyList();
+        }
+
+        List<String> chunks = new ArrayList<>();
+        int start = 0;
+        while (start < normalized.length()
+                && chunks.size() < ResumeConstant.TEXT_SPLITTER_MAX_NUM_CHUNKS) {
+            int end = Math.min(normalized.length(), start + chunkSize);
+            int splitAt = findSplitBoundary(normalized, start, end, minChunkSize);
+            String chunk = normalized.substring(start, splitAt).trim();
+            if (countEffectiveChars(chunk) >= ResumeConstant.TEXT_SPLITTER_MIN_CHUNK_LENGTH_TO_EMBED) {
+                chunks.add(chunk);
+            }
+            start = splitAt;
+        }
+        return chunks;
+    }
+
+    private int findSplitBoundary(String text, int start, int preferredEnd, int minChunkSize) {
+        if (preferredEnd >= text.length()) {
+            return text.length();
+        }
+        int earliest = Math.min(text.length(), start + minChunkSize);
+        for (int i = preferredEnd; i > earliest; i--) {
+            char ch = text.charAt(i - 1);
+            if (ch == '\n' || ch == '。' || ch == '！' || ch == '？'
+                    || ch == '.' || ch == '!' || ch == '?') {
+                return i;
+            }
+        }
+        return preferredEnd;
+    }
+
+    private void validateExtractedResumeText(List<ResumeDocument> documents, String stage) {
         int effectiveChars = countEffectiveChars(joinDocumentTexts(documents));
         if (documents == null || documents.isEmpty()) {
             log.warn("简历解析阶段 {} 未生成任何文档", stage);
@@ -1019,7 +1099,7 @@ public class ResumeServiceImpl implements ResumeService {
         log.debug("简历解析阶段 {} 校验通过：documentCount={}, effectiveChars={}", stage, documents.size(), effectiveChars);
     }
 
-    private boolean isTextExtractionInsufficient(List<Document> documents) {
+    private boolean isTextExtractionInsufficient(List<ResumeDocument> documents) {
         if (documents == null || documents.isEmpty()) {
             log.warn("文本提取结果为空，判定为提取不足");
             return true;
@@ -1043,8 +1123,8 @@ public class ResumeServiceImpl implements ResumeService {
         return insufficient;
     }
 
-    private boolean allDocumentsNearlyEmpty(List<Document> documents) {
-        for (Document document : documents) {
+    private boolean allDocumentsNearlyEmpty(List<ResumeDocument> documents) {
+        for (ResumeDocument document : documents) {
             if (countEffectiveChars(document.getText()) >= Math.max(10, pdfMinEffectiveCharsPerPage)) {
                 return false;
             }
@@ -1052,12 +1132,12 @@ public class ResumeServiceImpl implements ResumeService {
         return true;
     }
 
-    private String joinDocumentTexts(List<Document> documents) {
+    private String joinDocumentTexts(List<ResumeDocument> documents) {
         if (documents == null || documents.isEmpty()) {
             return "";
         }
         return documents.stream()
-                .map(Document::getText)
+                .map(ResumeDocument::getText)
                 .filter(Objects::nonNull)
                 .collect(Collectors.joining("\n"));
     }

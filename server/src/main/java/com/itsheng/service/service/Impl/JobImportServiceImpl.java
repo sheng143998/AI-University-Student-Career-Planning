@@ -6,23 +6,18 @@ import com.alibaba.excel.event.AnalysisEventListener;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.itsheng.common.constant.SystemConstants;
 import com.itsheng.common.exception.FileUploadException;
 import com.itsheng.pojo.entity.JobCategory;
 import com.itsheng.pojo.entity.JobEntity;
 import com.itsheng.pojo.entity.JobExcelRow;
 import com.itsheng.pojo.entity.JobVectorStore;
+import com.itsheng.service.client.PythonMarketAiClient;
 import com.itsheng.service.mapper.JobCategoryMapper;
 import com.itsheng.service.mapper.JobMapper;
 import com.itsheng.service.mapper.JobVectorStoreMapper;
 import com.itsheng.service.service.JobImportService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.document.Document;
-import org.springframework.ai.vectorstore.VectorStore;
-import org.springframework.ai.openai.OpenAiEmbeddingModel;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,9 +25,6 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -49,10 +41,8 @@ public class JobImportServiceImpl implements JobImportService {
     private final JobMapper jobMapper;
     private final JobCategoryMapper jobCategoryMapper;
     private final JobVectorStoreMapper jobVectorStoreMapper;
-    private final VectorStore jobVectorStore;
-    private final OpenAiEmbeddingModel embeddingModel;
+    private final PythonMarketAiClient pythonMarketAiClient;
     private final ObjectMapper objectMapper;
-    private final ChatClient jobClassificationChatClient;
 
     /**
      * 每批插入的记录数（每条记录 14 个字段，65535/14 ≈ 4680，为安全使用 1000）
@@ -60,9 +50,9 @@ public class JobImportServiceImpl implements JobImportService {
     private static final int BATCH_SIZE = 1000;
 
     /**
-     * 向量化批次大小（当前 Embedding API 单次最多支持 10 条文本）
+     * Python 岗位向量化批次大小
      */
-    private static final int EMBEDDING_BATCH_SIZE = 10;
+    private static final int PYTHON_JOB_INDEX_BATCH_SIZE = 10;
 
     /**
      * AI 分类批次大小（避免 API 限流）
@@ -118,16 +108,16 @@ public class JobImportServiceImpl implements JobImportService {
      */
     private void processJobsInBatches(List<JobEntity> jobs) {
         int totalSize = jobs.size();
-        int batchCount = (totalSize + EMBEDDING_BATCH_SIZE - 1) / EMBEDDING_BATCH_SIZE;
+        int batchCount = (totalSize + PYTHON_JOB_INDEX_BATCH_SIZE - 1) / PYTHON_JOB_INDEX_BATCH_SIZE;
         log.info("开始批量向量化处理，共{}条记录，分为{}批", totalSize, batchCount);
 
         for (int i = 0; i < batchCount; i++) {
-            int fromIndex = i * EMBEDDING_BATCH_SIZE;
-            int toIndex = Math.min(fromIndex + EMBEDDING_BATCH_SIZE, totalSize);
+            int fromIndex = i * PYTHON_JOB_INDEX_BATCH_SIZE;
+            int toIndex = Math.min(fromIndex + PYTHON_JOB_INDEX_BATCH_SIZE, totalSize);
             List<JobEntity> batchJobs = jobs.subList(fromIndex, toIndex);
 
             try {
-                processEmbeddingBatch(batchJobs, i + 1, batchCount);
+                processPythonJobIndexBatch(batchJobs, i + 1, batchCount);
                 log.info("已完成第 {}/{} 批向量化处理", i + 1, batchCount);
             } catch (Exception e) {
                 log.error("第 {} 批向量化处理失败", i + 1, e);
@@ -136,46 +126,46 @@ public class JobImportServiceImpl implements JobImportService {
     }
 
     /**
-     * 处理一批岗位的向量化（使用 Spring AI VectorStore API）
+     * 处理一批岗位的向量化（通过 Python AI 服务生成向量与元数据）
      */
-    private void processEmbeddingBatch(List<JobEntity> batchJobs, int batchNum, int totalBatches) {
+    private void processPythonJobIndexBatch(List<JobEntity> batchJobs, int batchNum, int totalBatches) {
         try {
-            // 构建 Document 列表（Spring AI 会自动调用 Embedding 模型）
-            List<Document> documents = new ArrayList<>();
+            List<Map<String, Object>> jobs = new ArrayList<>();
+            Map<Long, String> contentByJobId = new HashMap<>();
             for (JobEntity job : batchJobs) {
-                String vectorStoreId = UUID.randomUUID().toString();
                 String jobContent = buildJobContent(job);
                 Map<String, Object> metadata = buildMetadataMap(job);
-                metadata.put("job_id", job.getId());
-                metadata.put("vector_store_id", vectorStoreId);
-                metadata.put("content_hash", generateContentHash(jobContent));
-
-                Document document = Document.builder()
-                        .id(vectorStoreId)
-                        .text(jobContent)
-                        .metadata(metadata)
-                        .build();
-                documents.add(document);
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("job_id", job.getId());
+                item.put("content", jobContent);
+                item.put("metadata", metadata);
+                jobs.add(item);
+                contentByJobId.put(job.getId(), jobContent);
             }
 
-            // 使用 VectorStore 添加文档（自动完成 embedding 并存储）
-            jobVectorStore.add(documents);
-            log.info("第 {}/{} 批：成功添加 {} 个岗位向量文档", batchNum, totalBatches, documents.size());
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("request_id", "job-index-batch-" + batchNum + "-" + totalBatches);
+            payload.put("jobs", jobs);
+            PythonMarketAiClient.JobIndexResult indexResult = pythonMarketAiClient.indexJobs(payload);
 
-            // 批量更新 job_id 和 content_hash 字段（Spring AI 不会自动填充这些独立列）
-            List<JobVectorStore> updates = new ArrayList<>();
-            for (int i = 0; i < batchJobs.size(); i++) {
-                JobEntity job = batchJobs.get(i);
-                Document doc = documents.get(i);
-                JobVectorStore jvs = JobVectorStore.builder()
-                        .id(doc.getId())
-                        .jobId(job.getId())
-                        .contentHash((String) doc.getMetadata().get("content_hash"))
-                        .build();
-                updates.add(jvs);
+            LocalDateTime now = LocalDateTime.now();
+            List<JobVectorStore> stores = indexResult.records().stream()
+                    .map(record -> JobVectorStore.builder()
+                            .id(record.id())
+                            .jobId(record.jobId())
+                            .content(contentByJobId.get(record.jobId()))
+                            .embeddingVector(record.embedding())
+                            .metadata(record.metadata())
+                            .contentHash(record.contentHash())
+                            .createdAt(now)
+                            .updatedAt(now)
+                            .build()
+                    )
+                    .toList();
+            if (!stores.isEmpty()) {
+                jobVectorStoreMapper.insertBatch(stores);
             }
-            jobVectorStoreMapper.updateBatch(updates);
-            log.info("第 {}/{} 批：已更新 job_id 和 content_hash 字段", batchNum, totalBatches);
+            log.info("第 {}/{} 批：Python 已生成并保存 {} 个岗位向量文档", batchNum, totalBatches, stores.size());
 
         } catch (Exception e) {
             log.error("第 {} 批向量化处理失败", batchNum, e);
@@ -183,22 +173,22 @@ public class JobImportServiceImpl implements JobImportService {
     }
 
     /**
-     * 构建元数据 Map（用于 Document）
+     * 构建元数据 Map（传给 Python 进行清洗和向量化）
      */
     private Map<String, Object> buildMetadataMap(JobEntity job) {
-        Map<String, Object> metadata = new HashMap<>();
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("document_type", "jd");
+        metadata.put("source", "recruitment_data");
+        metadata.put("visibility_scope", "public");
         metadata.put("job_name", job.getJobName());
-        if (job.getJobDetail() != null) {
-            metadata.put("job_detail", job.getJobDetail());
-        }
-        if (job.getCompanyName() != null) {
-            metadata.put("company_name", job.getCompanyName());
-        }
         if (job.getIndustry() != null) {
             metadata.put("industry", job.getIndustry());
         }
-        if (job.getAddress() != null) {
-            metadata.put("address", job.getAddress());
+        if (job.getAddress() != null || job.getCity() != null) {
+            metadata.put("city", job.getCity() != null ? job.getCity() : job.getAddress());
+        }
+        if (job.getCompanySize() != null) {
+            metadata.put("company_size", job.getCompanySize());
         }
         return metadata;
     }
@@ -348,24 +338,6 @@ public class JobImportServiceImpl implements JobImportService {
         return content.toString();
     }
 
-    /**
-     * 生成内容哈希（用于去重）
-     */
-    private String generateContentHash(String content) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] hashBytes = md.digest(content.getBytes(StandardCharsets.UTF_8));
-            StringBuilder hexString = new StringBuilder();
-            for (byte b : hashBytes) {
-                hexString.append(String.format("%02x", b));
-            }
-            return hexString.toString();
-        } catch (NoSuchAlgorithmException e) {
-            log.error("生成内容哈希失败", e);
-            return UUID.randomUUID().toString();
-        }
-    }
-
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void classifyAndImportJobs() {
@@ -453,8 +425,13 @@ public class JobImportServiceImpl implements JobImportService {
             // 构建岗位内容用于 AI 分析
             String jobContent = buildJobContentForClassification(job);
 
-            // 调用 AI 进行分类
-            String analysisJson = callAiForClassification(jobContent);
+            // 调用 Python AI 服务进行分类
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("request_id", "job-classify-" + job.getId());
+            payload.put("job_id", job.getId());
+            payload.put("job_content", jobContent);
+            payload.put("job", buildClassificationJobPayload(job));
+            String analysisJson = pythonMarketAiClient.classifyJob(payload).toString();
 
             // 解析 AI 返回的 JSON 结果
             return parseClassificationResult(analysisJson);
@@ -507,27 +484,24 @@ public class JobImportServiceImpl implements JobImportService {
         return content.toString();
     }
 
-    /**
-     * 调用 AI 进行岗位分类
-     */
-    private String callAiForClassification(String jobContent) {
-        String userPrompt = String.format("""
-            请分析以下招聘信息：
+    private Map<String, Object> buildClassificationJobPayload(JobEntity job) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        putIfPresent(payload, "jobName", job.getJobName());
+        putIfPresent(payload, "city", job.getCity());
+        putIfPresent(payload, "salaryRange", job.getSalaryRange());
+        putIfPresent(payload, "industry", job.getIndustry());
+        putIfPresent(payload, "companySize", job.getCompanySize());
+        putIfPresent(payload, "companyType", job.getCompanyType());
+        putIfPresent(payload, "jobDescription", job.getJobDescription());
+        putIfPresent(payload, "jobRequirements", job.getJobRequirements());
+        putIfPresent(payload, "jobDetail", job.getJobDetail());
+        return payload;
+    }
 
-            ===== 招聘信息开始 =====
-            %s
-            ===== 招聘信息结束 =====
-
-            请按照要求的 JSON 格式返回分类结果，直接返回 JSON 对象，不要包含任何 markdown 标记或额外说明。
-            """, jobContent);
-
-        ChatResponse response = jobClassificationChatClient.prompt()
-                .system(SystemConstants.JOB_CLASSIFICATION_PROMPT)
-                .user(userPrompt)
-                .call()
-                .chatResponse();
-
-        return response.getResult().getOutput().getText();
+    private void putIfPresent(Map<String, Object> payload, String key, Object value) {
+        if (value != null && !String.valueOf(value).isBlank()) {
+            payload.put(key, value);
+        }
     }
 
     /**
@@ -746,7 +720,7 @@ public class JobImportServiceImpl implements JobImportService {
                         .requiredSkills(requiredSkillsJson)
                         .jobDescription(first.getJobDescription())
                         .aiConfidenceScore(avgConfidence)
-                        .analysisPromptUsed("JOB_CLASSIFICATION_PROMPT")
+                        .analysisPromptUsed("PYTHON_MARKET_JOB_CLASSIFY")
                         .createdAt(now)
                         .updatedAt(now)
                         .build();

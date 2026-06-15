@@ -22,6 +22,7 @@ import java.util.Map;
 public class PythonResumeAiClient {
 
     private static final String RESUME_ANALYZE_PATH = "/api/v1/resume/analyze";
+    private static final String RESUME_OCR_PATH = "/internal/resume/ocr";
 
     private final PythonAiProperties properties;
     private final ObjectMapper objectMapper;
@@ -61,6 +62,38 @@ public class PythonResumeAiClient {
         }
     }
 
+    public JsonNode ocrPage(Map<String, Object> payload) {
+        try {
+            String requestBody = objectMapper.writeValueAsString(payload);
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(normalizeBaseUrl(properties.getResumeBaseUrl()) + RESUME_OCR_PATH))
+                    .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(properties.getResumeOcrTimeoutSeconds()))
+                    .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                throw new PythonResumeHttpException(response.statusCode(), safeBodySummary(response.body()));
+            }
+            if (response.body() == null || response.body().isBlank()) {
+                throw new PythonResumeSchemaException("empty OCR response body");
+            }
+            JsonNode body = objectMapper.readTree(response.body());
+            JsonNode data = validateOcrBody(body);
+            return data;
+        } catch (java.net.http.HttpTimeoutException e) {
+            throw new PythonResumeTimeoutException(e);
+        } catch (PythonResumeClientException e) {
+            throw e;
+        } catch (IOException e) {
+            throw new PythonResumeUnavailableException(e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new PythonResumeUnavailableException(e);
+        }
+    }
+
     private void validateBody(JsonNode body) {
         if (body == null || !body.isObject()) {
             throw new PythonResumeSchemaException("response body must be an object");
@@ -75,6 +108,21 @@ public class PythonResumeAiClient {
         requireArray(body, "suggestions");
         requireObject(body, "capability_profile");
         requireObject(body, "rag_diagnostics");
+    }
+
+    private JsonNode validateOcrBody(JsonNode body) {
+        if (body == null || !body.isObject()) {
+            throw new PythonResumeSchemaException("OCR response body must be an object");
+        }
+        int code = body.path("code").asInt(0);
+        if (code != 1) {
+            throw new PythonResumeSchemaException("OCR response code must be 1");
+        }
+        JsonNode data = body.path("data");
+        if (!data.isObject() || !data.path("text").isTextual()) {
+            throw new PythonResumeSchemaException("OCR response data.text must be text");
+        }
+        return data;
     }
 
     private void requireObject(JsonNode body, String field) {

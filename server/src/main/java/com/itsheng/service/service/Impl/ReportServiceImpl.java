@@ -131,7 +131,7 @@ public class ReportServiceImpl implements ReportService {
             String developmentPath = buildDevelopmentPath(targetJobName);
             report.setDevelopmentPath(developmentPath);
 
-            // AI 建议（从简历分析结果获取）
+            // AI/RAG 支撑内容只来自 Python Reports-RAG；不可用时返回空建议和诊断
             ReportAiSupport aiSupport = generateReportsSupport(reportId, userId, capability, latestCareerData, targetJobName, matchDetails, actionPlan, developmentPath);
             matchDetails.put("evidence_refs", aiSupport.evidenceRefs());
             matchDetails.put("rag_diagnostics", aiSupport.ragDiagnostics());
@@ -525,17 +525,15 @@ public class ReportServiceImpl implements ReportService {
         try {
             PythonReportsAiClient.ReportsSupportResult result = pythonReportsAiClient.generateSupport(payload);
             if ("EMPTY_RETRIEVAL".equalsIgnoreCase(result.status())) {
-                return fallbackSupport(resumeAnalysis, "EMPTY_RETRIEVAL");
+                return unavailableSupport("EMPTY_RETRIEVAL");
             }
-            String suggestions = result.aiSuggestions() == null || result.aiSuggestions().isBlank()
-                    ? fallbackSuggestion(resumeAnalysis)
-                    : result.aiSuggestions();
+            String suggestions = result.aiSuggestions() == null ? "" : result.aiSuggestions();
             List<Map<String, Object>> evidenceRefs = objectMapper.convertValue(result.evidenceRefs(), List.class);
             Map<String, Object> diagnostics = objectMapper.convertValue(result.ragDiagnostics(), Map.class);
             return new ReportAiSupport(suggestions, safeList(evidenceRefs), safeMap(diagnostics));
         } catch (Exception e) {
-            log.warn("Reports-RAG support fallback, reportId={}, reason={}", reportId, e.getMessage());
-            return fallbackSupport(resumeAnalysis, e.getClass().getSimpleName());
+            log.warn("Reports-RAG support unavailable, reportId={}, reason={}", reportId, e.getMessage());
+            return unavailableSupport(e.getClass().getSimpleName());
         }
     }
 
@@ -544,24 +542,17 @@ public class ReportServiceImpl implements ReportService {
         return results != null && !results.isEmpty() ? results.get(0) : null;
     }
 
-    private ReportAiSupport fallbackSupport(ResumeAnalysisResult resumeAnalysis, String reason) {
+    private ReportAiSupport unavailableSupport(String reason) {
         Map<String, Object> diagnostics = new LinkedHashMap<>();
-        diagnostics.put("status", "FALLBACK");
-        diagnostics.put("retrievalMode", "java_deterministic_fallback");
+        diagnostics.put("status", "EMPTY_RETRIEVAL".equals(reason) ? "EMPTY_RETRIEVAL" : "PYTHON_UNAVAILABLE");
+        diagnostics.put("retrievalMode", "python_unavailable_no_retrieval");
         diagnostics.put("embeddingMode", "none");
         diagnostics.put("expandedQueryCount", 0);
         diagnostics.put("candidateCount", 0);
         diagnostics.put("selectedEvidenceCount", 0);
         diagnostics.put("emptyRetrieval", "EMPTY_RETRIEVAL".equals(reason));
         diagnostics.put("fallbackReason", reason);
-        return new ReportAiSupport(fallbackSuggestion(resumeAnalysis), Collections.emptyList(), diagnostics);
-    }
-
-    private String fallbackSuggestion(ResumeAnalysisResult resumeAnalysis) {
-        if (resumeAnalysis != null && resumeAnalysis.getSuggestions() != null && !resumeAnalysis.getSuggestions().isBlank()) {
-            return resumeAnalysis.getSuggestions();
-        }
-        return "Keep improving core skills, add measurable project outcomes, and update the action plan against target job requirements.";
+        return new ReportAiSupport("", Collections.emptyList(), diagnostics);
     }
 
     private Map<String, Object> toMap(Object value) {

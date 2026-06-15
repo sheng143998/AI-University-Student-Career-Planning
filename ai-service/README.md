@@ -21,11 +21,15 @@ The same `app.main` entrypoint can be started on different ports. Java routes by
 - `POST /api/v1/reports/generate-support`
 - `POST /api/v1/market/insight`
 - `POST /api/v1/market/soft-skills`
+- `POST /internal/market/jobs/classify`
+- `POST /internal/market/jobs/index`
+- `POST /internal/market/jobs/search`
 - `POST /internal/goals/advice`
 - `POST /internal/dashboard/target-job/match`
 - `POST /api/v1/chat/complete`
 - `POST /api/v1/chat/daily-suggestions`
 - `POST /api/v1/resume/analyze` via `career_ai.resume_analysis_service` standalone handler.
+- `POST /internal/resume/ocr`
 - `POST /internal/rag/feedback`
 - `POST /internal/rag/preferences/validate`
 
