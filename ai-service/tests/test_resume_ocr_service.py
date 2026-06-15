@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import json
 import os
-import threading
 import unittest
-from http.client import HTTPConnection
-from http.server import ThreadingHTTPServer
 
-from app.main import AiServiceHandler
+from fastapi.testclient import TestClient
+
+from career_ai.resume_analysis_service import app as resume_app
 from career_ai.resume_ocr_service import extract_resume_ocr_text
 
 
@@ -33,24 +31,12 @@ class ResumeOcrServiceTest(unittest.TestCase):
 
     def test_http_resume_ocr_endpoint_is_mounted(self) -> None:
         os.environ["FUCHUANG_RESUME_OCR_MOCK_TEXT"] = "OCR text"
-        server = ThreadingHTTPServer(("127.0.0.1", 0), AiServiceHandler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            status, body = self.post(server.server_port, "/internal/resume/ocr", {"image_data_url": "data:image/png;base64,abc"})
-            self.assertEqual(200, status)
-            self.assertEqual(1, body["code"])
-            self.assertEqual("OCR text", body["data"]["text"])
-        finally:
-            server.shutdown()
-            server.server_close()
+        response = TestClient(resume_app).post("/internal/resume/ocr", json={"image_data_url": "data:image/png;base64,abc"})
+        body = response.json()
 
-    def post(self, port: int, path: str, payload: dict) -> tuple[int, object]:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        conn = HTTPConnection("127.0.0.1", port, timeout=5)
-        conn.request("POST", path, body=body, headers={"Content-Type": "application/json"})
-        response = conn.getresponse()
-        return response.status, json.loads(response.read().decode("utf-8"))
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(1, body["code"])
+        self.assertEqual("OCR text", body["data"]["text"])
 
 
 if __name__ == "__main__":

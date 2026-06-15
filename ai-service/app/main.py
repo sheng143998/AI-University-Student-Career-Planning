@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 import os
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from json import JSONDecodeError
 from typing import Any, Callable
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from career_ai.dashboard_rag_service import match_target_job
 from career_ai.feedback_service import accept_rag_feedback, validate_rag_preferences
@@ -31,69 +31,18 @@ CHAT_PIPELINE = ChatRagPipeline()
 
 
 class AiServiceRuntime:
-    service = REPORTS_SERVICE
     reports_service = REPORTS_SERVICE
     chat_pipeline = CHAT_PIPELINE
-
-
-class AiServiceHandler(BaseHTTPRequestHandler):
-    service = REPORTS_SERVICE
-    reports_service = REPORTS_SERVICE
-    chat_pipeline = CHAT_PIPELINE
-
-    def do_GET(self) -> None:
-        if self.path == "/health":
-            self._write_json({"status": "ok"})
-            return
-        self._write_json({"error": "NOT_FOUND", "message": "unknown path"}, status=404)
-
-    def do_POST(self) -> None:
-        dispatch = _handler_for_path(self.path)
-        if dispatch is None:
-            self._write_json({"error": "NOT_FOUND", "message": "unknown path"}, status=404)
-            return
-
-        handler, validation_payload = dispatch
-        try:
-            payload = self._read_json()
-            status, content = _execute_handler(handler, payload, validation_payload=validation_payload)
-            self._write_json(content, status=status)
-        except JSONDecodeError:
-            self._write_json({"error": "INVALID_JSON", "message": "request body must be a JSON object"}, status=400)
-        except ValueError as exc:
-            self._write_json({"error": "VALIDATION_ERROR", "message": str(exc)}, status=400)
-
-    def log_message(self, format: str, *args: Any) -> None:
-        return
-
-    def _read_json(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length", "0") or "0")
-        raw = self.rfile.read(length)
-        if not raw:
-            raise ValueError("request body must be a JSON object")
-        parsed = json.loads(raw.decode("utf-8"))
-        if not isinstance(parsed, dict):
-            raise ValueError("request body must be a JSON object")
-        return parsed
-
-    def _write_json(self, payload: dict[str, Any] | list[Any], status: int = 200) -> None:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-
-ReportsHandler = AiServiceHandler
 
 
 app = FastAPI(title="Career AI/RAG Service", version="1.0.0")
 
 
-@app.exception_handler(404)
-async def not_found_handler(_request: Request, _exc: Exception) -> JSONResponse:
-    return _json({"error": "NOT_FOUND", "message": "unknown path"}, status_code=404)
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(_request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    if exc.status_code == 404:
+        return _json({"error": "NOT_FOUND", "message": "unknown path"}, status_code=404)
+    return _json({"error": "HTTP_ERROR", "message": str(exc.detail)}, status_code=exc.status_code)
 
 
 @app.get("/health")
@@ -213,40 +162,16 @@ def _execute_handler(
         return 500, {"error": "INTERNAL_ERROR", "message": "AI/RAG request failed"}
 
 
-def _handler_for_path(
-    path: str,
-) -> tuple[Callable[[dict[str, Any]], dict[str, Any] | list[Any]], Callable[[Exception], dict[str, Any]] | None] | None:
-    routes: dict[str, Callable[[dict[str, Any]], dict[str, Any] | list[Any]]] = {
-        "/api/v1/reports/generate-support": _generate_report_support,
-        "/internal/goals/advice": generate_goal_advice,
-        "/api/v1/market/insight": generate_market_insight,
-        "/api/v1/market/soft-skills": generate_soft_skills,
-        "/internal/market/jobs/classify": classify_job,
-        "/internal/market/jobs/index": index_jobs,
-        "/internal/market/jobs/search": search_jobs,
-        "/internal/resume/ocr": extract_resume_ocr_text,
-        "/api/roadmap/recommendations/personalized": generate_roadmap_recommendations,
-        "/api/v1/chat/complete": _complete_chat,
-        "/api/v1/chat/daily-suggestions": _daily_chat_suggestions,
-        "/internal/rag/feedback": accept_rag_feedback,
-        "/internal/rag/preferences/validate": validate_rag_preferences,
-    }
-    if path == "/internal/dashboard/target-job/match":
-        return match_target_job, _dashboard_validation_payload
-    handler = routes.get(path)
-    return (handler, None) if handler else None
-
-
 def _generate_report_support(payload: dict[str, Any]) -> dict[str, Any]:
-    return ReportsHandler.service.generate_support(payload)
+    return AiServiceRuntime.reports_service.generate_support(payload)
 
 
 def _complete_chat(payload: dict[str, Any]) -> dict[str, Any]:
-    return AiServiceHandler.chat_pipeline.complete(ChatCompleteRequest.from_dict(payload)).to_dict()
+    return AiServiceRuntime.chat_pipeline.complete(ChatCompleteRequest.from_dict(payload)).to_dict()
 
 
 def _daily_chat_suggestions(payload: dict[str, Any]) -> dict[str, Any]:
-    return AiServiceHandler.chat_pipeline.daily_suggestions(DailySuggestionsRequest.from_dict(payload)).to_dict()
+    return AiServiceRuntime.chat_pipeline.daily_suggestions(DailySuggestionsRequest.from_dict(payload)).to_dict()
 
 
 def _dashboard_validation_payload(exc: Exception) -> dict[str, Any]:
@@ -265,12 +190,6 @@ async def _read_json_object(request: Request) -> dict[str, Any]:
 
 def _json(payload: dict[str, Any] | list[Any], status_code: int = 200) -> JSONResponse:
     return JSONResponse(content=payload, status_code=status_code)
-
-
-def create_server(host: str | None = None, port: int | None = None) -> ThreadingHTTPServer:
-    bind_host = host or os.getenv("AI_SERVICE_HOST", "127.0.0.1")
-    bind_port = port or int(os.getenv("AI_SERVICE_PORT", "8090"))
-    return ThreadingHTTPServer((bind_host, bind_port), AiServiceHandler)
 
 
 def main() -> None:

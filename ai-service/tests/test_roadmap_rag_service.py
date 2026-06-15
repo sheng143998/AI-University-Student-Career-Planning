@@ -1,7 +1,8 @@
 import unittest
-from unittest.mock import Mock
 
-from app.main import AiServiceHandler
+from fastapi.testclient import TestClient
+
+from app.main import app
 from career_ai.roadmap_rag_service import (
     build_summary_index,
     generate_multi_queries,
@@ -212,14 +213,10 @@ class RoadmapRagServiceTest(unittest.TestCase):
         self.assertEqual({"excludeSameCategory", "documentTypes"}, set(result["diagnostics"]["filters"]))
 
     def test_handler_exposes_roadmap_endpoint(self):
-        handler = object.__new__(AiServiceHandler)
-        handler.path = "/api/roadmap/recommendations/personalized"
-        handler._read_json = Mock(return_value=_payload())
-        handler._write_json = Mock()
+        response = TestClient(app).post("/api/roadmap/recommendations/personalized", json=_payload())
+        payload = response.json()
 
-        AiServiceHandler.do_POST(handler)
-
-        payload = handler._write_json.call_args.args[0]
+        self.assertEqual(200, response.status_code)
         self.assertIn("lateralPaths", payload)
         self.assertIn("diagnostics", payload)
 

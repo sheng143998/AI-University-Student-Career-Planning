@@ -61,8 +61,11 @@
 
 ## Python 服务接口
 
+Python Resume 服务当前为 FastAPI 应用，可直接用 uvicorn 或模块入口启动。
+
 | 路径 | 端口 | 用途 |
 | --- | --- | --- |
+| `GET /health` | `8091` | 健康检查 |
 | `POST /api/v1/resume/analyze` | `8091` | 简历结构化分析 |
 | `POST /internal/resume/ocr` | `8090` 或 `8091` | 图片型 PDF 页面 OCR |
 

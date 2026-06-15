@@ -10,14 +10,14 @@
 | `career_ai/` | 简历、报告、市场、目标、Dashboard、Roadmap、反馈等业务 AI 能力 |
 | `rag/` | 分块、摘要索引、检索、融合重排和 Chat RAG 流程 |
 | `schemas/` | Python 请求/响应模型 |
-| `tests/` | Python 单元测试与 HTTP 兼容测试 |
+| `tests/` | Python 单元测试与 FastAPI 路由测试 |
 
 ## 端口与入口
 
 | 服务 | 默认端口 | 启动入口 | 用途 |
 | --- | --- | --- | --- |
 | 聚合 AI/RAG 服务 | `8090` | `app.main:app` | 报告、目标、Dashboard、Roadmap、Market/JD、RAG 反馈 |
-| Resume 服务 | `8091` | `career_ai.resume_analysis_service` | 简历分析和 OCR |
+| Resume 服务 | `8091` | `career_ai.resume_analysis_service:app` | 简历分析和 OCR |
 | Chat 服务 | `8092` | `app.main:app` | AI 聊天与每日建议 |
 
 ## 聚合服务接口
@@ -40,7 +40,15 @@
 - `POST /internal/rag/feedback`
 - `POST /internal/rag/preferences/validate`
 
-`create_server()` 和 `AiServiceHandler` 仍保留为旧测试兼容层，新运行方式以 FastAPI 与 uvicorn 为准。
+## Resume 服务接口
+
+`career_ai/resume_analysis_service.py` 当前提供以下 FastAPI 路由：
+
+- `GET /health`
+- `POST /api/v1/resume/analyze`
+- `POST /internal/resume/ocr`
+
+聚合、Resume 和 Chat 的运行入口均为 FastAPI 应用，生产和本地开发推荐使用 uvicorn 启动。
 
 ## 安装
 
@@ -70,10 +78,10 @@ Resume 服务：
 
 ```powershell
 $env:PYTHONPATH='ai-service'
-python -m career_ai.resume_analysis_service --host 127.0.0.1 --port 8091
+python -m uvicorn career_ai.resume_analysis_service:app --host 127.0.0.1 --port 8091
 ```
 
-也可以运行 `python -m app.main`，它会读取 `AI_SERVICE_HOST` 和 `AI_SERVICE_PORT` 后启动 uvicorn。
+也可以运行 `python -m app.main` 或 `python -m career_ai.resume_analysis_service`，它们会读取对应参数后启动 uvicorn。
 
 ## 当前实现口径
 

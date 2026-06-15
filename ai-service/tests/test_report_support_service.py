@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import json
-import threading
-import urllib.error
-import urllib.request
+from fastapi.testclient import TestClient
 
-from app.main import ReportsHandler, create_server
+from app.main import AiServiceRuntime, app
 from career_ai.report_support_service import Chunk, ReportSupportService
 
 
@@ -110,68 +107,46 @@ def test_generate_support_requires_ids():
         raise AssertionError("expected ValueError")
 
 
-def _post_json(url: str, payload: object, content_type: str = "application/json") -> tuple[int, dict]:
-    data = payload if isinstance(payload, bytes) else json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(url, data=data, method="POST", headers={"Content-Type": content_type})
-    try:
-        with urllib.request.urlopen(req, timeout=5) as res:
-            return res.status, json.loads(res.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        return exc.code, json.loads(exc.read().decode("utf-8"))
-
-
-def _with_server(handler_service=None):
-    original = ReportsHandler.service
+def _with_client(handler_service=None) -> tuple[TestClient, object]:
+    original = AiServiceRuntime.reports_service
     if handler_service is not None:
-        ReportsHandler.service = handler_service
-    server = create_server("127.0.0.1", 0)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    url = f"http://127.0.0.1:{server.server_address[1]}/api/v1/reports/generate-support"
-    return server, thread, url, original
+        AiServiceRuntime.reports_service = handler_service
+    client = TestClient(app)
+    return client, original
 
 
 def test_http_contract_200():
-    server, thread, url, original = _with_server()
+    client, original = _with_client()
     try:
-        status, body = _post_json(url, sample_payload())
-        assert status == 200
+        response = client.post("/api/v1/reports/generate-support", json=sample_payload())
+        assert response.status_code == 200
+        body = response.json()
         assert body["status"] == "OK"
         assert body["evidenceRefs"]
     finally:
-        ReportsHandler.service = original
-        server.shutdown()
-        thread.join(timeout=5)
+        AiServiceRuntime.reports_service = original
 
 
 def test_http_contract_400_empty_body():
-    server, thread, url, original = _with_server()
+    client, original = _with_client()
     try:
-        req = urllib.request.Request(url, data=b"", method="POST", headers={"Content-Type": "application/json"})
-        try:
-            urllib.request.urlopen(req, timeout=5)
-        except urllib.error.HTTPError as exc:
-            body = json.loads(exc.read().decode("utf-8"))
-            assert exc.code == 400
-            assert body["error"] == "VALIDATION_ERROR"
-        else:
-            raise AssertionError("expected HTTPError")
+        response = client.post("/api/v1/reports/generate-support", content="")
+        body = response.json()
+        assert response.status_code == 400
+        assert body["error"] == "VALIDATION_ERROR"
     finally:
-        ReportsHandler.service = original
-        server.shutdown()
-        thread.join(timeout=5)
+        AiServiceRuntime.reports_service = original
 
 
 def test_http_contract_400_non_json():
-    server, thread, url, original = _with_server()
+    client, original = _with_client()
     try:
-        status, body = _post_json(url, b"{not-json", "application/json")
-        assert status == 400
+        response = client.post("/api/v1/reports/generate-support", content="{not-json")
+        body = response.json()
+        assert response.status_code == 400
         assert body["error"] == "INVALID_JSON"
     finally:
-        ReportsHandler.service = original
-        server.shutdown()
-        thread.join(timeout=5)
+        AiServiceRuntime.reports_service = original
 
 
 def test_http_contract_500_handler_exception():
@@ -179,27 +154,25 @@ def test_http_contract_500_handler_exception():
         def generate_support(self, payload):
             raise RuntimeError("boom")
 
-    server, thread, url, original = _with_server(BrokenService())
+    client, original = _with_client(BrokenService())
     try:
-        status, body = _post_json(url, sample_payload())
-        assert status == 500
+        response = client.post("/api/v1/reports/generate-support", json=sample_payload())
+        body = response.json()
+        assert response.status_code == 500
         assert body["error"] == "INTERNAL_ERROR"
     finally:
-        ReportsHandler.service = original
-        server.shutdown()
-        thread.join(timeout=5)
+        AiServiceRuntime.reports_service = original
 
 
 def test_http_contract_empty_retrieval_response():
     payload = sample_payload()
     payload["metadataFilters"] = {"userId": 999}
-    server, thread, url, original = _with_server()
+    client, original = _with_client()
     try:
-        status, body = _post_json(url, payload)
-        assert status == 200
+        response = client.post("/api/v1/reports/generate-support", json=payload)
+        body = response.json()
+        assert response.status_code == 200
         assert body["status"] == "EMPTY_RETRIEVAL"
         assert body["evidenceRefs"] == []
     finally:
-        ReportsHandler.service = original
-        server.shutdown()
-        thread.join(timeout=5)
+        AiServiceRuntime.reports_service = original

@@ -9,7 +9,7 @@
 | 前端 | `website` 构建后放入 `/opt/app/frontend/dist` | Nginx 监听 80/443 并转发 `/api/**` |
 | Java 后端 | 打包为 `/opt/app/backend/app.jar` | 默认监听 `127.0.0.1:8081` |
 | Python 聚合 AI/RAG | systemd 或手动 uvicorn | 默认监听 `127.0.0.1:8090` |
-| Python Resume 服务 | systemd 或手动 Python 模块 | 默认监听 `127.0.0.1:8091` |
+| Python Resume 服务 | systemd 或手动 uvicorn | 默认监听 `127.0.0.1:8091` |
 | Python Chat 服务 | systemd 或手动 uvicorn | 默认监听 `127.0.0.1:8092` |
 | 数据库 | PostgreSQL + pgvector | schema 为 `ai_career_plan` |
 | 缓存 | Redis | Java 后端使用 |
@@ -117,6 +117,12 @@ Python 聚合服务：
 curl http://127.0.0.1:8090/health
 ```
 
+Python Resume 服务：
+
+```bash
+curl http://127.0.0.1:8091/health
+```
+
 前端：
 
 ```bash
@@ -137,6 +143,7 @@ curl http://127.0.0.1/
 
 ```bash
 curl http://127.0.0.1:8090/health
+curl http://127.0.0.1:8091/health
 curl http://127.0.0.1:8081/api/market/hot-jobs
 curl http://127.0.0.1/
 ```

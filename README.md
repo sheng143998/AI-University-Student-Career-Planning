@@ -53,7 +53,7 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8090
 
 ```powershell
 $env:PYTHONPATH='ai-service'
-python -m career_ai.resume_analysis_service --host 127.0.0.1 --port 8091
+python -m uvicorn career_ai.resume_analysis_service:app --host 127.0.0.1 --port 8091
 ```
 
 启动 Python Chat 服务：

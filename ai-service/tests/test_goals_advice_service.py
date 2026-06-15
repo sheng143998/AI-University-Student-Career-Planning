@@ -1,8 +1,9 @@
 ﻿import json
-import threading
 import unittest
-from http.client import HTTPConnection
 
+from fastapi.testclient import TestClient
+
+from app.main import app
 from career_ai.goals_advice_service import (
     build_summary_index,
     expand_queries,
@@ -10,8 +11,6 @@ from career_ai.goals_advice_service import (
     rag_fusion,
     recursive_chunks,
 )
-from app.main import AiServiceHandler
-from http.server import ThreadingHTTPServer
 
 
 def sample_payload() -> dict:
@@ -128,24 +127,11 @@ class GoalsRagServiceTest(unittest.TestCase):
 class GoalsRagHttpHandlerTest(unittest.TestCase):
 
     def setUp(self):
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), AiServiceHandler)
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
-        self.port = self.server.server_address[1]
-
-    def tearDown(self):
-        self.server.shutdown()
-        self.server.server_close()
-        self.thread.join(timeout=2)
+        self.client = TestClient(app)
 
     def post(self, path: str, body: object) -> tuple[int, dict]:
-        conn = HTTPConnection("127.0.0.1", self.port, timeout=5)
-        payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
-        conn.request("POST", path, body=payload, headers={"Content-Type": "application/json"})
-        response = conn.getresponse()
-        raw = response.read().decode("utf-8")
-        conn.close()
-        return response.status, json.loads(raw)
+        response = self.client.post(path, content=json.dumps(body, ensure_ascii=False))
+        return response.status_code, response.json()
 
     def test_internal_goals_advice_route_returns_camel_case_contract(self):
         status, body = self.post("/internal/goals/advice", sample_payload())

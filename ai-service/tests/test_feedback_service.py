@@ -2,9 +2,10 @@ import json
 import os
 import tempfile
 import unittest
-from unittest.mock import Mock
 
-from app.main import AiServiceHandler
+from fastapi.testclient import TestClient
+
+from app.main import app
 from career_ai.feedback_queue import FeedbackEvalQueue
 from career_ai.feedback_service import accept_rag_feedback, set_default_eval_queue, validate_rag_preferences
 
@@ -127,21 +128,18 @@ class FeedbackServiceTest(unittest.TestCase):
         self.assertEqual(1, len(lines))
 
     def test_handler_exposes_feedback_endpoints(self):
-        handler = object.__new__(AiServiceHandler)
-        handler.path = "/internal/rag/feedback"
-        handler._read_json = Mock(
-            return_value={
+        response = TestClient(app).post(
+            "/internal/rag/feedback",
+            json={
                 "request_id": "rid",
                 "user_id": 1,
                 "target": {"type": "CHAT_MESSAGE", "id": "1"},
                 "feedback": {"rating": 0},
-            }
+            },
         )
-        handler._write_json = Mock()
+        payload = response.json()
 
-        AiServiceHandler.do_POST(handler)
-
-        payload = handler._write_json.call_args.args[0]
+        self.assertEqual(200, response.status_code)
         self.assertEqual(1, payload["code"])
 
 

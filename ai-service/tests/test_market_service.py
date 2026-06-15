@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import json
-import threading
 import unittest
-from http.client import HTTPConnection
-from http.server import ThreadingHTTPServer
 
-from app.main import AiServiceHandler
+from fastapi.testclient import TestClient
+
+from app.main import app
 from career_ai.market_service import (
     classify_job,
     generate_market_insight,
@@ -132,54 +131,45 @@ class MarketServiceTest(unittest.TestCase):
         self.assertEqual("rrf", result["data"]["retrieval"]["fusion_method"])
 
     def test_http_market_endpoints_are_mounted(self) -> None:
-        server = ThreadingHTTPServer(("127.0.0.1", 0), AiServiceHandler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            insight = self.post(server.server_port, "/api/v1/market/insight", sample_payload())
-            self.assertEqual(200, insight[0])
-            self.assertIn("marketSignals", insight[1])
+        client = TestClient(app)
+        insight = self.post(client, "/api/v1/market/insight", sample_payload())
+        self.assertEqual(200, insight[0])
+        self.assertIn("marketSignals", insight[1])
 
-            soft_skills = self.post(server.server_port, "/api/v1/market/soft-skills", sample_payload())
-            self.assertEqual(200, soft_skills[0])
-            self.assertEqual(5, len(soft_skills[1]))
+        soft_skills = self.post(client, "/api/v1/market/soft-skills", sample_payload())
+        self.assertEqual(200, soft_skills[0])
+        self.assertEqual(5, len(soft_skills[1]))
 
-            classification = self.post(
-                server.server_port,
-                "/internal/market/jobs/classify",
-                {"job_content": "Java Spring backend engineer 20-30K", "job": {"jobName": "Java Engineer"}},
-            )
-            self.assertEqual(200, classification[0])
-            self.assertEqual(1, classification[1]["code"])
+        classification = self.post(
+            client,
+            "/internal/market/jobs/classify",
+            {"job_content": "Java Spring backend engineer 20-30K", "job": {"jobName": "Java Engineer"}},
+        )
+        self.assertEqual(200, classification[0])
+        self.assertEqual(1, classification[1]["code"])
 
-            indexed = self.post(
-                server.server_port,
-                "/internal/market/jobs/index",
-                {"jobs": [{"job_id": 1, "content": "Python RAG engineer", "metadata": {"source": "test"}}]},
-            )
-            self.assertEqual(200, indexed[0])
-            self.assertEqual(1, indexed[1]["code"])
+        indexed = self.post(
+            client,
+            "/internal/market/jobs/index",
+            {"jobs": [{"job_id": 1, "content": "Python RAG engineer", "metadata": {"source": "test"}}]},
+        )
+        self.assertEqual(200, indexed[0])
+        self.assertEqual(1, indexed[1]["code"])
 
-            searched = self.post(
-                server.server_port,
-                "/internal/market/jobs/search",
-                {
-                    "query_text": "Python RAG",
-                    "jobs": [{"job_id": 1, "job_name": "AI Engineer", "required_skills": ["Python", "RAG"]}],
-                },
-            )
-            self.assertEqual(200, searched[0])
-            self.assertEqual([1], searched[1]["data"]["job_ids"])
-        finally:
-            server.shutdown()
-            server.server_close()
+        searched = self.post(
+            client,
+            "/internal/market/jobs/search",
+            {
+                "query_text": "Python RAG",
+                "jobs": [{"job_id": 1, "job_name": "AI Engineer", "required_skills": ["Python", "RAG"]}],
+            },
+        )
+        self.assertEqual(200, searched[0])
+        self.assertEqual([1], searched[1]["data"]["job_ids"])
 
-    def post(self, port: int, path: str, payload: dict) -> tuple[int, object]:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        conn = HTTPConnection("127.0.0.1", port, timeout=5)
-        conn.request("POST", path, body=body, headers={"Content-Type": "application/json"})
-        response = conn.getresponse()
-        return response.status, json.loads(response.read().decode("utf-8"))
+    def post(self, client: TestClient, path: str, payload: dict) -> tuple[int, object]:
+        response = client.post(path, content=json.dumps(payload, ensure_ascii=False))
+        return response.status_code, response.json()
 
 
 if __name__ == "__main__":

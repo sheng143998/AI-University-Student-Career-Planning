@@ -8,7 +8,7 @@
 | --- | --- | --- | --- |
 | Java 后端 | `127.0.0.1:8081` | `server` Spring Boot | 鉴权、业务编排、数据库、OSS、统一响应 |
 | Python 聚合 AI/RAG | `127.0.0.1:8090` | `ai-service/app/main.py` | 报告、目标、Dashboard、Roadmap、Market/JD、RAG 反馈 |
-| Python Resume | `127.0.0.1:8091` | `career_ai.resume_analysis_service` | 简历分析、简历 OCR |
+| Python Resume | `127.0.0.1:8091` | `career_ai.resume_analysis_service:app` | 简历分析、简历 OCR |
 | Python Chat | `127.0.0.1:8092` | `ai-service/app/main.py` | 聊天回复、每日建议 |
 
 ## Python 聚合服务路由
@@ -28,6 +28,12 @@
 - `POST /api/v1/chat/daily-suggestions`
 - `POST /internal/rag/feedback`
 - `POST /internal/rag/preferences/validate`
+
+## Python Resume 服务路由
+
+- `GET /health`
+- `POST /api/v1/resume/analyze`
+- `POST /internal/resume/ocr`
 
 ## Java 配置
 
@@ -78,8 +84,10 @@ Python Resume 服务：
 
 ```bash
 cd ai-service
-python -m career_ai.resume_analysis_service --host 127.0.0.1 --port 8091
+python -m uvicorn career_ai.resume_analysis_service:app --host 127.0.0.1 --port 8091
 ```
+
+也可以运行 `python -m career_ai.resume_analysis_service --host 127.0.0.1 --port 8091`，模块入口会转交 uvicorn 启动 FastAPI 应用。
 
 Python Chat 服务：
 

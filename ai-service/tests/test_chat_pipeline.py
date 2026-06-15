@@ -1,10 +1,11 @@
 from pathlib import Path
 import sys
-from unittest.mock import Mock
+
+from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.main import AiServiceHandler
+from app.main import app
 from rag.chunking import RecursiveChunker
 from rag.retrieval import HybridRetriever, expand_queries
 from rag.summary_index import build_summary_index
@@ -96,20 +97,10 @@ def test_chat_http_contract_returns_rag_fields():
         b'"retrievalOptions":{"metadataFilter":{"userId":1,"documentTypes":["resume"],'
         b'"resumeId":123,"visibilityScope":"private"}}}'
     )
-    handler = object.__new__(AiServiceHandler)
-    handler.headers = {"Content-Length": str(len(request_body))}
-    handler.rfile = Mock()
-    handler.rfile.read.return_value = request_body
-    handler.wfile = Mock()
-    handler.send_response = Mock()
-    handler.send_header = Mock()
-    handler.end_headers = Mock()
-    handler.path = "/api/v1/chat/complete"
+    response = TestClient(app).post("/api/v1/chat/complete", content=request_body)
 
-    handler.do_POST()
-
-    handler.send_response.assert_called_once_with(200)
-    response_body = handler.wfile.write.call_args.args[0].decode("utf-8")
+    assert response.status_code == 200
+    response_body = response.text
     assert '"content"' in response_body
     assert '"evidence"' in response_body
     assert '"diagnostics"' in response_body

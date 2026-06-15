@@ -1,21 +1,18 @@
 ﻿from __future__ import annotations
 
 import json
-import socket
-import threading
-import time
 import unittest
-from http.client import HTTPConnection
+
+from fastapi.testclient import TestClient
 
 from career_ai.resume_analysis_service import (
-    ResumeAiHandler,
     ResumeValidationError,
     analyze_resume,
+    app,
     build_summary_index,
     metadata_filter,
     recursive_chunk,
 )
-from http.server import ThreadingHTTPServer
 
 
 def sample_payload() -> dict:
@@ -98,44 +95,16 @@ class ResumeAiServiceTest(unittest.TestCase):
         self.assertNotIn("138 0000 0000", diagnostics_text)
         self.assertFalse(result["rag_diagnostics"]["sensitive_text_included"])
 
-    def test_http_handler_returns_200_and_400(self) -> None:
-        port = free_port()
-        server = ThreadingHTTPServer(("127.0.0.1", port), ResumeAiHandler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            status, body = post_json(port, "/api/v1/resume/analyze", sample_payload())
-            self.assertEqual(200, status)
-            self.assertEqual("completed", body["status"])
+    def test_fastapi_endpoint_returns_200_and_400(self) -> None:
+        client = TestClient(app)
 
-            status, body = post_json(port, "/api/v1/resume/analyze", {"user_id": 1})
-            self.assertEqual(400, status)
-            self.assertIn("message", body)
-        finally:
-            server.shutdown()
-            server.server_close()
-            thread.join(timeout=3)
-            self.assertFalse(thread.is_alive())
+        response = client.post("/api/v1/resume/analyze", json=sample_payload())
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("completed", response.json()["status"])
 
-
-def free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
-
-
-def post_json(port: int, path: str, payload: dict) -> tuple[int, dict]:
-    conn = HTTPConnection("127.0.0.1", port, timeout=5)
-    try:
-        body = json.dumps(payload).encode("utf-8")
-        conn.request("POST", path, body=body, headers={"Content-Type": "application/json"})
-        response = conn.getresponse()
-        raw = response.read().decode("utf-8")
-        parsed = json.loads(raw)
-        return response.status, parsed
-    finally:
-        conn.close()
-        time.sleep(0.05)
+        response = client.post("/api/v1/resume/analyze", json={"user_id": 1})
+        self.assertEqual(400, response.status_code)
+        self.assertIn("message", response.json())
 
 
 if __name__ == "__main__":

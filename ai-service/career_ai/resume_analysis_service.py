@@ -7,9 +7,13 @@ import math
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from career_ai.resume_ocr_service import extract_resume_ocr_text
 
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9_#+.-]+|[\u4e00-\u9fff]")
@@ -18,6 +22,9 @@ SECTION_RE = re.compile(r"^(education|experience|project|projects|skills|certifi
 
 class ResumeValidationError(ValueError):
     pass
+
+
+app = FastAPI(title="Career Resume AI Service", version="1.0.0")
 
 
 @dataclass(frozen=True)
@@ -541,49 +548,64 @@ def _required_int(payload: dict[str, Any], key: str) -> int:
     return parsed
 
 
-class ResumeAiHandler(BaseHTTPRequestHandler):
-    def do_POST(self) -> None:
-        if self.path != "/api/v1/resume/analyze":
-            self._write_json(HTTPStatus.NOT_FOUND, {"message": "not found"})
-            return
-        try:
-            payload = self._read_json()
-            result = analyze_resume(payload)
-            self._write_json(HTTPStatus.OK, result)
-        except ResumeValidationError as exc:
-            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(exc)})
-        except ValueError as exc:
-            self._write_json(HTTPStatus.BAD_REQUEST, {"message": str(exc)})
-        except Exception as exc:  # pragma: no cover - HTTP boundary guard
-            self._write_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"message": type(exc).__name__})
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(_request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    if exc.status_code == 404:
+        return _json({"message": "not found"}, status_code=404)
+    return _json({"message": str(exc.detail)}, status_code=exc.status_code)
 
-    def log_message(self, format: str, *args: Any) -> None:
-        return
 
-    def _read_json(self) -> dict[str, Any]:
-        content_length = int(self.headers.get("Content-Length") or 0)
-        raw_body = self.rfile.read(content_length).decode("utf-8") if content_length else "{}"
-        try:
-            payload = json.loads(raw_body)
-        except json.JSONDecodeError as exc:
-            raise ValueError("invalid json body") from exc
-        if not isinstance(payload, dict):
-            raise ValueError("json body must be an object")
-        return payload
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
 
-    def _write_json(self, status: HTTPStatus, payload: Any) -> None:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_response(status.value)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+
+@app.post("/api/v1/resume/analyze")
+async def resume_analyze(request: Request) -> JSONResponse:
+    try:
+        payload = await _read_json_object(request)
+        return _json(analyze_resume(payload))
+    except ResumeValidationError as exc:
+        return _json({"message": str(exc)}, status_code=400)
+    except ValueError as exc:
+        return _json({"message": str(exc)}, status_code=400)
+    except Exception as exc:  # pragma: no cover - HTTP boundary guard
+        return _json({"message": type(exc).__name__}, status_code=500)
+
+
+@app.post("/internal/resume/ocr")
+async def resume_ocr(request: Request) -> JSONResponse:
+    try:
+        payload = await _read_json_object(request)
+        return _json(extract_resume_ocr_text(payload))
+    except ValueError as exc:
+        return _json({"message": str(exc)}, status_code=400)
+    except Exception as exc:  # pragma: no cover - HTTP boundary guard
+        return _json({"message": type(exc).__name__}, status_code=500)
+
+
+async def _read_json_object(request: Request) -> dict[str, Any]:
+    raw_body = await request.body()
+    if not raw_body:
+        return {}
+    try:
+        payload = json.loads(raw_body.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError("invalid json body") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("json body must be an object")
+    return payload
+
+
+def _json(payload: Any, status_code: int = 200) -> JSONResponse:
+    return JSONResponse(content=payload, status_code=status_code)
 
 
 def run(host: str, port: int) -> None:
-    server = ThreadingHTTPServer((host, port), ResumeAiHandler)
-    print(f"Resume AI service listening on http://{host}:{port}", flush=True)
-    server.serve_forever()
+    import uvicorn
+
+    print(f"Resume AI FastAPI service listening on http://{host}:{port}", flush=True)
+    uvicorn.run("career_ai.resume_analysis_service:app", host=host, port=port, log_level="info")
 
 
 if __name__ == "__main__":

@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
-import threading
 import unittest
-from http.client import HTTPConnection
-from http.server import ThreadingHTTPServer
 
-from app.main import AiServiceHandler
+from fastapi.testclient import TestClient
+
+from app.main import app
 from career_ai.dashboard_rag_service import build_summary_index, match_target_job, recursive_chunk
 
 
@@ -199,77 +197,32 @@ class DashboardRagServiceTest(unittest.TestCase):
             match_target_job(payload)
 
     def test_http_endpoint_is_mounted(self) -> None:
-        server = ThreadingHTTPServer(("127.0.0.1", 0), AiServiceHandler)
-        port = server.server_port
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            body = json.dumps(sample_payload(), ensure_ascii=False).encode("utf-8")
-            conn = HTTPConnection("127.0.0.1", port, timeout=5)
-            conn.request(
-                "POST",
-                "/internal/dashboard/target-job/match",
-                body=body,
-                headers={"Content-Type": "application/json; charset=utf-8"},
-            )
-            response = conn.getresponse()
-            payload = json.loads(response.read().decode("utf-8"))
-            self.assertEqual(200, response.status)
-            self.assertEqual(1, payload["code"])
-            self.assertEqual(101, payload["data"]["matched_job"]["job_id"])
-        finally:
-            server.shutdown()
-            server.server_close()
+        response = TestClient(app).post("/internal/dashboard/target-job/match", json=sample_payload())
+        payload = response.json()
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(1, payload["code"])
+        self.assertEqual(101, payload["data"]["matched_job"]["job_id"])
 
     def test_http_endpoint_validation_error_uses_result_contract(self) -> None:
-        server = ThreadingHTTPServer(("127.0.0.1", 0), AiServiceHandler)
-        port = server.server_port
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            payload = sample_payload()
-            payload["job_candidates"] = []
-            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            conn = HTTPConnection("127.0.0.1", port, timeout=5)
-            conn.request(
-                "POST",
-                "/internal/dashboard/target-job/match",
-                body=body,
-                headers={"Content-Type": "application/json; charset=utf-8"},
-            )
-            response = conn.getresponse()
-            payload = json.loads(response.read().decode("utf-8"))
+        payload = sample_payload()
+        payload["job_candidates"] = []
 
-            self.assertEqual(400, response.status)
-            self.assertEqual(0, payload["code"])
-            self.assertEqual("VALIDATION_ERROR", payload["msg"])
-            self.assertIn("job_candidates", payload["data"]["error"])
-        finally:
-            server.shutdown()
-            server.server_close()
+        response = TestClient(app).post("/internal/dashboard/target-job/match", json=payload)
+        body = response.json()
+
+        self.assertEqual(400, response.status_code)
+        self.assertEqual(0, body["code"])
+        self.assertEqual("VALIDATION_ERROR", body["msg"])
+        self.assertIn("job_candidates", body["data"]["error"])
 
     def test_non_dashboard_validation_error_keeps_legacy_shape(self) -> None:
-        server = ThreadingHTTPServer(("127.0.0.1", 0), AiServiceHandler)
-        port = server.server_port
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            conn = HTTPConnection("127.0.0.1", port, timeout=5)
-            conn.request(
-                "POST",
-                "/api/v1/market/insight",
-                body=b"{invalid-json",
-                headers={"Content-Type": "application/json; charset=utf-8"},
-            )
-            response = conn.getresponse()
-            payload = json.loads(response.read().decode("utf-8"))
+        response = TestClient(app).post("/api/v1/market/insight", content="{invalid-json")
+        payload = response.json()
 
-            self.assertEqual(400, response.status)
-            self.assertEqual("INVALID_JSON", payload["error"])
-            self.assertNotIn("code", payload)
-        finally:
-            server.shutdown()
-            server.server_close()
+        self.assertEqual(400, response.status_code)
+        self.assertEqual("INVALID_JSON", payload["error"])
+        self.assertNotIn("code", payload)
 
     def test_query_variants_do_not_include_raw_resume_content(self) -> None:
         payload = sample_payload()
