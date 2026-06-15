@@ -123,7 +123,7 @@ FUCHUANG_AI_PYTHON_RESUME_OCR_TIMEOUT_SECONDS > fuchuang.ai.python.resume-ocr-ti
 
 ```bash
 cd ai-service
-AI_SERVICE_PORT=8090 python -m app.main
+AI_SERVICE_PORT=8090 python -m uvicorn app.main:app --host 127.0.0.1 --port 8090
 ```
 
 ## 4. 已知命名债务（暂不改动，列入后续收敛）
@@ -139,13 +139,13 @@ AI_SERVICE_PORT=8090 python -m app.main
 cd server && mvn spring-boot:run
 
 # Python 聚合服务 (8090)
-cd ai-service && AI_SERVICE_PORT=8090 python -m app.main
+cd ai-service && AI_SERVICE_PORT=8090 python -m uvicorn app.main:app --host 127.0.0.1 --port 8090
 
 # Python Resume 服务 (8091)
 cd ai-service && python -m career_ai.resume_analysis_service --host 127.0.0.1 --port 8091
 
 # Python Chat 服务 (8092)
-cd ai-service && AI_SERVICE_PORT=8092 python -m app.main
+cd ai-service && AI_SERVICE_PORT=8092 python -m uvicorn app.main:app --host 127.0.0.1 --port 8092
 ```
 
 前置依赖：PostgreSQL + pgvector（`ai_career_plan`）、Redis、`OPENAI_API_KEY`（Dashscope）、Aliyun OSS 凭证。详见根目录 `AGENTS.md` 与 `ai-service/README.md`。

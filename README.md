@@ -76,9 +76,13 @@ flowchart TD
 启动 Python 聚合 AI/RAG 服务：
 
 ```powershell
+python -m pip install -r ai-service/requirements.txt
+```
+
+```powershell
 $env:PYTHONPATH='ai-service'
 $env:AI_SERVICE_PORT='8090'
-python -m app.main
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8090
 ```
 
 启动 Resume-AI 独立服务：
@@ -93,7 +97,7 @@ python -m career_ai.resume_analysis_service --host 127.0.0.1 --port 8091
 ```powershell
 $env:PYTHONPATH='ai-service'
 $env:AI_SERVICE_PORT='8092'
-python -m app.main
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8092
 ```
 
 启动 Java 后端：

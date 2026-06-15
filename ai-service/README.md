@@ -1,6 +1,6 @@
 # AI Service
 
-Python AI/RAG boundary service for the career planning project.
+FastAPI AI/RAG boundary service for the career planning project.
 
 This directory (`ai-service`) is the unified Python service layout for newly integrated AI/RAG modules. The Java backend remains the only browser-facing entrypoint and calls this service over local HTTP.
 
@@ -35,12 +35,18 @@ The same `app.main` entrypoint can be started on different ports. Java routes by
 
 Current implementation status: deterministic fallback RAG with recursive chunking, summary indexing, metadata filtering, Multi-Query expansion, BM25 plus hash embedding retrieval, RRF/RAG-Fusion, deterministic reranking, and sanitized diagnostics. It does not yet claim production pgvector/Dashscope/cross-encoder quality.
 
+## Install
+
+```powershell
+python -m pip install -r ai-service/requirements.txt
+```
+
 ## Run
 
 ```powershell
 $env:PYTHONPATH='ai-service'
 $env:AI_SERVICE_PORT='8090'
-python -m app.main
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8090
 ```
 
 For Chat:
@@ -48,8 +54,10 @@ For Chat:
 ```powershell
 $env:PYTHONPATH='ai-service'
 $env:AI_SERVICE_PORT='8092'
-python -m app.main
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8092
 ```
+
+`python -m app.main` is also supported and starts uvicorn with `AI_SERVICE_HOST` / `AI_SERVICE_PORT`.
 
 For Resume-AI standalone handler:
 
