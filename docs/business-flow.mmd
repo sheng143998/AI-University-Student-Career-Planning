@@ -1,32 +1,32 @@
 flowchart TD
-    A[用户注册/登录] --> B[Vue 前端]
+    A[用户注册或登录] --> B[Vue 前端]
     B --> C[Java Spring Boot API]
     C --> D{业务动作}
 
     D -->|上传简历| E[Java 校验文件、上传 OSS、抽取文本]
-    E -->|扫描件 PDF| F[Java 渲染页面图片]
+    E -->|图片型 PDF| F[Java 渲染 PDF 页面图片]
     F -->|HTTP| G[Python Resume OCR]
     E -->|文本简历| H[Python Resume Analyze]
     G --> H
-    H --> I[Java 保存解析结果、能力画像、简历文本索引]
+    H --> I[Java 保存简历分析、能力画像和文本索引]
 
-    D -->|查看 Dashboard| J[Java 读取用户画像/简历/目标岗位]
+    D -->|查看 Dashboard| J[Java 聚合用户画像、简历和岗位数据]
     J -->|HTTP| K[Python Dashboard RAG 匹配目标岗位]
-    K --> L[Java 生成职业数据和展示 VO]
+    K --> L[Java 生成职业数据和首页 VO]
 
-    D -->|生成路线图| M[Java 聚合当前岗位、技能、岗位库]
-    M -->|HTTP| N[Python Roadmap RAG 推荐横向/转岗路径]
+    D -->|生成职业路线| M[Java 读取当前岗位、技能和岗位库]
+    M -->|HTTP| N[Python Roadmap RAG 推荐晋升和换岗路径]
     N --> O[Java 保存路线图和诊断信息]
 
-    D -->|市场/JD/报告/目标/聊天| P[Java 组装业务上下文]
+    D -->|市场、报告、目标、聊天| P[Java 组装业务上下文]
     P -->|HTTP| Q[Python AI/RAG 服务]
-    Q --> R[返回建议、证据、诊断]
+    Q --> R[返回建议、证据和诊断]
 
-    I --> S[(PostgreSQL/pgvector 表结构)]
+    I --> S[(PostgreSQL / pgvector schema)]
     L --> S
     O --> S
     R --> S
     S --> T[Java Result/VO]
     T --> B
-    B --> U[用户查看简历分析、职业路径、报告、聊天建议]
-    U -->|RAG 反馈/偏好| C
+    B --> U[用户查看简历分析、职业路径、报告和聊天建议]
+    U -->|RAG 反馈和偏好| C

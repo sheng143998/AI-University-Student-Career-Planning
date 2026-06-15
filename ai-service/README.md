@@ -1,47 +1,56 @@
-# AI Service
+# Python AI 服务说明
 
-FastAPI AI/RAG boundary service for the career planning project.
+`ai-service` 是本项目统一的 Python AI/RAG 服务目录。Java 后端通过本机 HTTP 调用这里的服务，前端不得直连 Python 端口。
 
-This directory (`ai-service`) is the unified Python service layout for newly integrated AI/RAG modules. The Java backend remains the only browser-facing entrypoint and calls this service over local HTTP.
+## 目录结构
 
-## Ports
+| 路径 | 说明 |
+| --- | --- |
+| `app/` | FastAPI 聚合入口，主要文件为 `app/main.py` |
+| `career_ai/` | 简历、报告、市场、目标、Dashboard、Roadmap、反馈等业务 AI 能力 |
+| `rag/` | 分块、摘要索引、检索、融合重排和 Chat RAG 流程 |
+| `schemas/` | Python 请求/响应模型 |
+| `tests/` | Python 单元测试与 HTTP 兼容测试 |
 
-- Aggregate AI/RAG service: `127.0.0.1:8090`
-- Resume-AI service: `127.0.0.1:8091`
-- Chat-AI service: `127.0.0.1:8092`
+## 端口与入口
 
-The same `app.main` entrypoint can be started on different ports. Java routes by base URL:
+| 服务 | 默认端口 | 启动入口 | 用途 |
+| --- | --- | --- | --- |
+| 聚合 AI/RAG 服务 | `8090` | `app.main:app` | 报告、目标、Dashboard、Roadmap、Market/JD、RAG 反馈 |
+| Resume 服务 | `8091` | `career_ai.resume_analysis_service` | 简历分析和 OCR |
+| Chat 服务 | `8092` | `app.main:app` | AI 聊天与每日建议 |
 
-- `fuchuang.ai.python.base-url` / `FUCHUANG_AI_PYTHON_BASE_URL` for aggregate endpoints.
-- `fuchuang.ai.python.resume-base-url` / `FUCHUANG_AI_PYTHON_RESUME_BASE_URL` for Resume-AI.
-- `fuchuang.ai.python.chat-base-url` / `FUCHUANG_AI_PYTHON_CHAT_BASE_URL` for Chat-AI.
+## 聚合服务接口
 
-## Endpoints
+`app/main.py` 当前提供以下 FastAPI 路由：
 
+- `GET /health`
 - `POST /api/v1/reports/generate-support`
+- `POST /internal/goals/advice`
+- `POST /internal/dashboard/target-job/match`
 - `POST /api/v1/market/insight`
 - `POST /api/v1/market/soft-skills`
 - `POST /internal/market/jobs/classify`
 - `POST /internal/market/jobs/index`
 - `POST /internal/market/jobs/search`
-- `POST /internal/goals/advice`
-- `POST /internal/dashboard/target-job/match`
+- `POST /internal/resume/ocr`
+- `POST /api/roadmap/recommendations/personalized`
 - `POST /api/v1/chat/complete`
 - `POST /api/v1/chat/daily-suggestions`
-- `POST /api/v1/resume/analyze` via `career_ai.resume_analysis_service` standalone handler.
-- `POST /internal/resume/ocr`
 - `POST /internal/rag/feedback`
 - `POST /internal/rag/preferences/validate`
 
-Current implementation status: deterministic fallback RAG with recursive chunking, summary indexing, metadata filtering, Multi-Query expansion, BM25 plus hash embedding retrieval, RRF/RAG-Fusion, deterministic reranking, and sanitized diagnostics. It does not yet claim production pgvector/Dashscope/cross-encoder quality.
+`create_server()` 和 `AiServiceHandler` 仍保留为旧测试兼容层，新运行方式以 FastAPI 与 uvicorn 为准。
 
-## Install
+## 安装
 
 ```powershell
 python -m pip install -r ai-service/requirements.txt
 ```
 
-## Run
+## 启动
+
+聚合服务：
 
 ```powershell
 $env:PYTHONPATH='ai-service'
@@ -49,7 +58,7 @@ $env:AI_SERVICE_PORT='8090'
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8090
 ```
 
-For Chat:
+Chat 服务：
 
 ```powershell
 $env:PYTHONPATH='ai-service'
@@ -57,16 +66,20 @@ $env:AI_SERVICE_PORT='8092'
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8092
 ```
 
-`python -m app.main` is also supported and starts uvicorn with `AI_SERVICE_HOST` / `AI_SERVICE_PORT`.
-
-For Resume-AI standalone handler:
+Resume 服务：
 
 ```powershell
 $env:PYTHONPATH='ai-service'
 python -m career_ai.resume_analysis_service --host 127.0.0.1 --port 8091
 ```
 
-## Test
+也可以运行 `python -m app.main`，它会读取 `AI_SERVICE_HOST` 和 `AI_SERVICE_PORT` 后启动 uvicorn。
+
+## 当前实现口径
+
+当前 RAG 能力是可测试的确定性降级实现：递归分块、摘要索引、元数据过滤、多查询扩展、BM25、哈希向量风格召回、RRF/RAG-Fusion、确定性重排和脱敏诊断。该实现用于本项目当前本地闭环，不等同于已经接入真实 pgvector、Dashscope 生成模型、交叉编码器或离线质量评估。
+
+## 测试
 
 ```powershell
 $env:PYTHONPATH='ai-service'
